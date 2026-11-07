@@ -13,7 +13,7 @@ arm/                          팔 PC: arm_control, arm_vision
 sim/                          시험: fake_robots, fleet_gz_sim
 bringup/iponic_bringup/       장치별 launch
 tools/, scripts/              시험 도구, 계약 검사
-docs/                         빌드·실행·규칙, 구현 약속, 설계
+docs/                         빌드·실행 규칙, 관제가 주고받는 것
 ```
 
 ## 연결
@@ -107,5 +107,3 @@ QoS
 | EVENT | reliable | volatile | 50 |
 
 영상은 ROS로 보내지 않습니다. 집기용 사진은 HTTP 스냅샷 한 장, 화면용은 MJPEG over HTTP입니다.
-
-각 액션 결과(성공·실패·취소)의 뜻은 `docs/구현_약속.md`에 있습니다.

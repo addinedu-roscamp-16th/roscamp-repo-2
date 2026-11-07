@@ -6,4 +6,4 @@
 - 발행: `state` (`RobotState`, 10 Hz)
 - 구독: `/fleet/heartbeat`. 끊기면 멈춘다.
 
-레인 그래프는 모른다. `pc/*`를 import하지 않는다. 지킬 약속은 `docs/구현_약속.md`.
+레인 그래프는 모른다. `pc/*`를 import하지 않는다.
