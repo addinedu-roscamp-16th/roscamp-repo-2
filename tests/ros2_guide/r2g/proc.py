@@ -34,8 +34,8 @@ def start_child(cmd: list[str], env: Mapping[str, str]) -> subprocess.Popen:
     )
 
 
-def run_child(cmd: list[str], timeout: float, env: Mapping[str, str]) -> ChildResult:
-    p = start_child(cmd, env)
+def finish_child(p: subprocess.Popen, timeout: float) -> ChildResult:
+    """Wait for a started child; SIGINT then kill on timeout; always reaped."""
     try:
         out, _ = p.communicate(timeout=timeout)
         return ChildResult(p.returncode, out or "", False)
@@ -47,6 +47,10 @@ def run_child(cmd: list[str], timeout: float, env: Mapping[str, str]) -> ChildRe
             p.kill()
             out, _ = p.communicate()
         return ChildResult(p.returncode, out or "", True)
+
+
+def run_child(cmd: list[str], timeout: float, env: Mapping[str, str]) -> ChildResult:
+    return finish_child(start_child(cmd, env), timeout)
 
 
 def wait_ready(p: subprocess.Popen, timeout: float) -> bool:

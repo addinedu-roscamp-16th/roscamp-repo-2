@@ -26,6 +26,7 @@ def main(argv=None) -> int:
     out_path = Path(args.out)
     out = out_path.open("w", encoding="utf-8")
     bad = 0
+    sub_created_ns = None
 
     rclpy.init()
     node = rclpy.create_node("r2g_l01_sub")
@@ -43,6 +44,7 @@ def main(argv=None) -> int:
 
     profile = qos.load_profiles()[args.profile]
     node.create_subscription(String, args.topic, on_msg, qos.to_qos(profile))
+    sub_created_ns = time.time_ns()
     print("READY", flush=True)
     try:
         if args.duration is None:
@@ -56,7 +58,7 @@ def main(argv=None) -> int:
     finally:
         out.close()
         summary = out_path.with_name(out_path.name + ".summary.json")
-        summary.write_text(json.dumps({"bad": bad}), encoding="utf-8")
+        summary.write_text(json.dumps({"bad": bad, "sub_created_ns": sub_created_ns}), encoding="utf-8")
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

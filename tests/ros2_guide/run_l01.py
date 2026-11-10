@@ -3,11 +3,11 @@
 import argparse
 import json
 import os
-import signal
-import subprocess
+import statistics
 import sys
 import tempfile
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -37,6 +37,7 @@ RATE_HZ = 10
 STREAM_SECONDS = 3
 WAIT_TIMEOUT_S = 5.0
 LATE_SUB_DELAY_S = 1.0
+MIN_LATE_OFFSET_MS = 500.0
 LATE_PUB_LINGER_S = 4.0
 LATE_SUB_DURATION_S = 3.0
 LATE_SUB_TIMEOUT_S = 15.0
@@ -68,38 +69,80 @@ def _parse_pub_line(stdout: str) -> dict | None:
     return None
 
 
-def late_trial_excluded(
+def late_offset_ms(sub_created_ns: int | None, publish_ns: int | None) -> float | None:
+    if sub_created_ns is None or publish_ns is None:
+        return None
+    return round((sub_created_ns - publish_ns) / 1e6, 1)
+
+
+def late_trial_exclusion(
+    pub_ready: bool,
     pub_timed_out: bool,
     pub_rc: int | None,
-    pub_info_present: bool,
+    publish_ns: int | None,
     sub_timed_out: bool,
     sub_rc: int | None,
-    sub_summary_present: bool,
-) -> bool:
-    """True when a late-subscriber trial cannot be scored (not counted as loss)."""
-    pub_ok = not pub_timed_out and pub_rc == 0 and pub_info_present
-    sub_ok = not sub_timed_out and sub_rc == 0 and sub_summary_present
-    return not (pub_ok and sub_ok)
+    sub_created_ns: int | None,
+    offset_ms: float | None,
+) -> str | None:
+    """Reason a late-subscriber trial cannot be scored (None = countable)."""
+    if not pub_ready:
+        return "발행 노드가 publish 후 READY를 내지 않음"
+    if pub_timed_out:
+        return "발행 노드 타임아웃"
+    if pub_rc != 0:
+        return f"발행 노드 비정상 종료(rc={pub_rc})"
+    if publish_ns is None:
+        return "발행 노드 결과 파일 없음"
+    if sub_timed_out:
+        return "구독 노드 타임아웃"
+    if sub_rc != 0:
+        return f"구독 노드 비정상 종료(rc={sub_rc})"
+    if sub_created_ns is None:
+        return "구독 노드 summary 없음"
+    if offset_ms is None or offset_ms < MIN_LATE_OFFSET_MS:
+        return f"구독 생성 오프셋 {offset_ms}ms < {MIN_LATE_OFFSET_MS:g}ms (늦은 구독 아님)"
+    return None
+
+
+def offset_stats(offsets: list[float]) -> dict:
+    if not offsets:
+        return {"count": 0, "min": None, "median": None, "max": None}
+    return {
+        "count": len(offsets),
+        "min": min(offsets),
+        "median": statistics.median(offsets),
+        "max": max(offsets),
+    }
+
+
+def counted_tally(trials: int, received: Iterable[int], excluded: Iterable[int]) -> dict:
+    """Tally over counted trials only (excluded ones leave the denominator)."""
+    ex = set(excluded)
+    counted = [t for t in range(trials) if t not in ex]
+    got = {t for t in received if t in counted}
+    lost_trials = [t for t in counted if t not in got]
+    n = len(counted)
+    return {
+        "sent": n,
+        "received": len(got),
+        "lost": len(lost_trials),
+        "loss_rate": round(len(lost_trials) / n, 4) if n else 0.0,
+        "lost_trials": lost_trials,
+    }
+
+
+def l01_verdict(variant: str, t: dict, excluded_count: int) -> str:
+    if t["sent"] == 0:
+        return "판정 불가"
+    if variant in judge.RULE_VARIANTS_L01 and excluded_count > 0:
+        return "판정 불가"
+    return judge.judge_l01(variant, t, t["sent"])
 
 
 def service_call_ok(timed_out: bool, rc: int | None, info: dict | None) -> bool:
     """A service trial counts as received only for a clean client reporting ok == true."""
     return not timed_out and rc == 0 and info is not None and info.get("ok") is True
-
-
-def _finish_child(p, timeout: float) -> proc.ChildResult:
-    """Wait for an already-started child; SIGINT then kill on timeout; always reaped."""
-    try:
-        out, _ = p.communicate(timeout=timeout)
-        return proc.ChildResult(p.returncode, out or "", False)
-    except subprocess.TimeoutExpired:
-        p.send_signal(signal.SIGINT)
-        try:
-            out, _ = p.communicate(timeout=2.0)
-        except subprocess.TimeoutExpired:
-            p.kill()
-            out, _ = p.communicate()
-        return proc.ChildResult(p.returncode, out or "", True)
 
 
 def _read_rx(path: Path) -> dict[int, list[tuple[int, int]]]:
@@ -131,19 +174,37 @@ def run_variant(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, 
     return _run_persistent_sub(variant, trials, env, tmp)
 
 
+def _read_summary(path: Path) -> dict | None:
+    try:
+        d = json.loads(path.with_name(path.name + ".summary.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
+def _read_json(path: Path) -> dict | None:
+    try:
+        d = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return d if isinstance(d, dict) else None
+
+
 def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, dict, list]:
     cfg = VARIANTS[variant]
     topic = topic_for(variant)
+    tag = variant.lower().replace("-", "_")
     received: list[int] = []
-    excluded: list[int] = []
-    sub_failed: list[int] = []
-    notes: list[str] = []
+    reasons: dict[int, str] = {}
+    offsets: dict[str, float | None] = {}
     for trial in range(trials):
-        out_path = tmp / f"l01_e_{variant.lower().replace('-', '_')}_{trial}.jsonl"
+        out_path = tmp / f"l01_e_{tag}_{trial}.jsonl"
+        res_path = tmp / f"l01_e_{tag}_{trial}.pub.json"
         pub_cmd = [
             sys.executable, str(NODES / "l01_pub.py"), "--topic", topic,
             "--profile", cfg["profile"], "--trial", str(trial), "--mode", "once",
-            "--linger", str(LATE_PUB_LINGER_S),
+            "--linger", str(LATE_PUB_LINGER_S), "--ready-after-publish",
+            "--result-out", str(res_path),
         ]  # fmt: skip
         sub_cmd = [
             sys.executable, str(NODES / "l01_sub.py"), "--topic", topic,
@@ -151,38 +212,46 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
             "--duration", str(LATE_SUB_DURATION_S),
         ]  # fmt: skip
         pub = None
+        pub_ready = False
         pub_res = proc.ChildResult(None, "", True)
         sub_res = proc.ChildResult(None, "", True)
         try:
             pub = proc.start_child(pub_cmd, env)
-            time.sleep(LATE_SUB_DELAY_S)
-            sub_res = proc.run_child(sub_cmd, LATE_SUB_TIMEOUT_S, env)
-            pub_res = _finish_child(pub, LATE_PUB_TIMEOUT_S)
+            pub_ready = proc.wait_ready(pub, READY_TIMEOUT_S)
+            if pub_ready:
+                time.sleep(LATE_SUB_DELAY_S)
+                sub_res = proc.run_child(sub_cmd, LATE_SUB_TIMEOUT_S, env)
+                pub_res = proc.finish_child(pub, LATE_PUB_TIMEOUT_S)
         finally:
             if pub is not None:
                 proc.stop_child(pub)
-        info = _parse_pub_line(pub_res.stdout)
-        summary_ok = _read_bad(out_path) is not None
-        if late_trial_excluded(
-            pub_res.timed_out, pub_res.rc, info is not None,
-            sub_res.timed_out, sub_res.rc, summary_ok,
-        ):  # fmt: skip
-            excluded.append(trial)
-            if not (not sub_res.timed_out and sub_res.rc == 0 and summary_ok):
-                sub_failed.append(trial)
+        publish_ns = (_read_json(res_path) or {}).get("publish_ns")
+        sub_created_ns = (_read_summary(out_path) or {}).get("sub_created_ns")
+        offset = late_offset_ms(sub_created_ns, publish_ns)
+        offsets[str(trial)] = offset
+        why = late_trial_exclusion(
+            pub_ready, pub_res.timed_out, pub_res.rc, publish_ns,
+            sub_res.timed_out, sub_res.rc, sub_created_ns, offset,
+        )  # fmt: skip
+        if why is not None:
+            reasons[trial] = why
         elif trial in _read_rx(out_path):
             received.append(trial)
         time.sleep(TRIAL_GAP_S)
-    t = judge.tally(trials, received)
+    t = counted_tally(trials, received, reasons)
     obs = dict(t)
+    obs["trials"] = trials
+    obs["counted"] = t["sent"]
     obs["sub_ready"] = True
-    obs["sub_alive"] = not sub_failed
-    obs["sub_summary_present"] = not sub_failed
+    obs["sub_alive"] = True
+    obs["sub_summary_present"] = True
+    obs["proc_label"] = "구독 노드"
     obs["sub_exit_code"] = None
     obs["bad_messages"] = None
-    obs["excluded_trials"] = sorted(excluded)
-    obs["lost_trials_counted"] = [x for x in t["lost_trials"] if x not in excluded]
-    obs["late_sub_failed_trials"] = sorted(sub_failed)
+    obs["excluded_trials"] = sorted(reasons)
+    obs["excluded_reasons"] = {str(k): v for k, v in sorted(reasons.items())}
+    obs["offset_ms"] = offsets
+    obs["offset_stats_ms"] = offset_stats([o for o in offsets.values() if o is not None])
     cond = {
         "trials": trials,
         "profile": cfg["profile"],
@@ -191,12 +260,11 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
         "topic": topic,
         "trial_gap_s": TRIAL_GAP_S,
         "late_sub_delay_s": LATE_SUB_DELAY_S,
+        "min_offset_ms": MIN_LATE_OFFSET_MS,
         "pub_linger_s": LATE_PUB_LINGER_S,
         "sub_duration_s": LATE_SUB_DURATION_S,
     }
-    if excluded:
-        notes.append(f"제외된 시도(발행/구독 프로세스 실패): {sorted(excluded)}")
-    return obs, cond, notes
+    return obs, cond, []
 
 
 def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list]:
@@ -206,7 +274,7 @@ def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list
     alive = True
     server_rc = None
     received: list[int] = []
-    excluded: list[int] = []
+    reasons: dict[int, str] = {}
     wait_ms: dict[str, float | None] = {}
     try:
         server = proc.start_child(
@@ -225,8 +293,12 @@ def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list
                     wait_ms[str(trial)] = info.get("wait_ms")
                 if service_call_ok(r.timed_out, r.rc, info):
                     received.append(trial)
-                elif r.timed_out or r.rc != 0 or info is None:
-                    excluded.append(trial)
+                elif r.timed_out:
+                    reasons[trial] = "클라이언트 타임아웃"
+                elif r.rc != 0:
+                    reasons[trial] = f"클라이언트 비정상 종료(rc={r.rc})"
+                elif info is None:
+                    reasons[trial] = "클라이언트 결과 줄 없음"
                 if server.poll() is not None:
                     alive = False
                 time.sleep(TRIAL_GAP_S)
@@ -237,15 +309,18 @@ def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list
             server_rc = server.poll()
             proc.stop_child(server)
     alive = alive and ready
-    t = judge.tally(trials, received)
+    t = counted_tally(trials, received, reasons)
     obs = dict(t)
+    obs["trials"] = trials
+    obs["counted"] = t["sent"]
     obs["sub_ready"] = ready
     obs["sub_alive"] = alive
     obs["sub_summary_present"] = True
+    obs["proc_label"] = "서비스 서버"
     obs["sub_exit_code"] = server_rc
     obs["bad_messages"] = None
-    obs["excluded_trials"] = sorted(excluded)
-    obs["lost_trials_counted"] = [x for x in t["lost_trials"] if x not in excluded]
+    obs["excluded_trials"] = sorted(reasons)
+    obs["excluded_reasons"] = {str(k): v for k, v in sorted(reasons.items())}
     obs["wait_ms"] = wait_ms
     cond = {
         "trials": trials,
@@ -269,6 +344,7 @@ def _run_persistent_sub(
     pubs: dict[int, dict] = {}
     timed_out: list[int] = []
     failed: list[int] = []
+    reasons: dict[int, str] = {}
     sub_ready = False
     sub_alive = True
     sub_rc = None
@@ -291,8 +367,13 @@ def _run_persistent_sub(
                 info = _parse_pub_line(r.stdout)
                 if r.timed_out:
                     timed_out.append(trial)
-                elif info is None or r.rc != 0:
+                    reasons[trial] = "발행 노드 타임아웃"
+                elif r.rc != 0:
                     failed.append(trial)
+                    reasons[trial] = f"발행 노드 비정상 종료(rc={r.rc})"
+                elif info is None:
+                    failed.append(trial)
+                    reasons[trial] = "발행 노드 결과 줄 없음"
                 if info is not None:
                     pubs[trial] = info
                 if sub.poll() is not None:
@@ -308,17 +389,19 @@ def _run_persistent_sub(
     rx = _read_rx(out_path)
     bad = _read_bad(out_path)
     sub_alive = sub_alive and sub_ready
-    excluded = set(timed_out) | set(failed)
-    received = [t for t in rx if t not in excluded]
-    t = judge.tally(trials, received)
+    excluded = set(reasons)
+    t = counted_tally(trials, list(rx), excluded)
     obs = dict(t)
+    obs["trials"] = trials
+    obs["counted"] = t["sent"]
+    obs["proc_label"] = "구독 노드"
     obs["sub_ready"] = sub_ready
     obs["bad_messages"] = bad
     obs["sub_alive"] = sub_alive
     obs["sub_exit_code"] = sub_rc
     obs["sub_summary_present"] = bad is not None
     obs["excluded_trials"] = sorted(excluded)
-    obs["lost_trials_counted"] = [x for x in t["lost_trials"] if x not in excluded]
+    obs["excluded_reasons"] = {str(k): v for k, v in sorted(reasons.items())}
     obs["pub_timed_out_trials"] = timed_out
     obs["pub_failed_trials"] = failed
     if mode == "wait_match":
@@ -377,21 +460,33 @@ def main(argv: list[str] | None = None) -> int:
                 continue
             obs, cond, notes = run_variant(v, args.trials, env, Path(td))
             result = "판정 불가"
+            label = obs["proc_label"]
             if obs["sub_ready"]:
                 result = sub_verdict(
                     obs["sub_alive"],
                     obs["sub_summary_present"],
-                    judge.judge_l01(v, obs, args.trials),
+                    l01_verdict(v, obs, len(obs["excluded_trials"])),
                 )
-            if obs["sub_ready"] and result == "판정 불가":
-                if not obs["sub_alive"]:
-                    notes.append(f"구독 노드가 시험 중 종료됨(rc={obs['sub_exit_code']})")
-                if not obs["sub_summary_present"]:
-                    notes.append("구독 노드 summary 파일 없음")
-            if result != "판정 불가" and v == "A" and obs["lost_trials_counted"]:
+            if obs["excluded_trials"]:
+                why = "; ".join(f"{k}: {r}" for k, r in obs["excluded_reasons"].items())
+                notes.append(
+                    f"제외 {len(obs['excluded_trials'])}건/{args.trials}건, "
+                    f"집계 {obs['counted']}건 ({why})"
+                )
+                if v in judge.RULE_VARIANTS_L01:
+                    notes.append("판정 규칙 변형에서 제외된 시도가 있어 판정 불가")
+            if obs["sub_ready"] and not obs["sub_alive"]:
+                notes.append(f"{label}가 시험 중 종료됨(rc={obs['sub_exit_code']})")
+            if obs["sub_ready"] and not obs["sub_summary_present"]:
+                notes.append(f"{label} summary 파일 없음")
+            if result != "판정 불가" and v == "A" and obs["lost_trials"]:
                 notes.append("재현됨")
             results.write_result(run_dir, test_id, result, obs, cond, notes, env=env)
-            print(f"{test_id}: {result} lost={obs['lost']}/{obs['sent']}", flush=True)
+            print(
+                f"{test_id}: {result} lost={obs['lost']}/{obs['sent']} "
+                f"excluded={len(obs['excluded_trials'])}",
+                flush=True,
+            )
     return 0
 
 

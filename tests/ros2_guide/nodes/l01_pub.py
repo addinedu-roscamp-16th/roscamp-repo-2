@@ -31,6 +31,8 @@ def main(argv=None) -> int:
     ap.add_argument("--wait-timeout", type=float, default=5.0)
     ap.add_argument("--rate", type=float, default=10.0)
     ap.add_argument("--stream-seconds", type=float, default=3.0)
+    ap.add_argument("--ready-after-publish", action="store_true")
+    ap.add_argument("--result-out", default=None)
     args = ap.parse_args(argv)
 
     rclpy.init()
@@ -39,14 +41,19 @@ def main(argv=None) -> int:
     wait_ms = None
     sent = 0
     pub_start_ns = None
+    publish_ns = None
     try:
         profile = qos.load_profiles()[args.profile]
         pub_start_ns = time.time_ns()
         pub = node.create_publisher(String, args.topic, qos.to_qos(profile))
 
         def send(seq: int) -> None:
-            nonlocal sent
+            nonlocal sent, publish_ns
             pub.publish(String(data=payload.encode(args.trial, seq, time.time_ns())))
+            if publish_ns is None:
+                publish_ns = time.time_ns()
+                if args.ready_after_publish:
+                    print("READY", flush=True)  # nothing else goes to stdout after this
             sent += 1
 
         if args.mode == "wait_match":
@@ -76,19 +83,19 @@ def main(argv=None) -> int:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-    print(
-        json.dumps(
-            {
-                "trial": args.trial,
-                "mode": args.mode,
-                "pub_start_ns": pub_start_ns,
-                "matched": matched,
-                "wait_ms": wait_ms,
-                "sent": sent,
-            }
-        ),
-        flush=True,
-    )
+    result = {
+        "trial": args.trial,
+        "mode": args.mode,
+        "pub_start_ns": pub_start_ns,
+        "publish_ns": publish_ns,
+        "matched": matched,
+        "wait_ms": wait_ms,
+        "sent": sent,
+    }
+    if args.result_out:
+        Path(args.result_out).write_text(json.dumps(result), encoding="utf-8")
+    else:
+        print(json.dumps(result), flush=True)
     return 0
 
 

@@ -44,3 +44,14 @@ def test_wait_ready_multiple_lines_in_one_write():
         assert wait_ready(p, 5.0)
     finally:
         stop_child(p, grace=1.0)
+
+
+def test_finish_child_timeout_and_ok():
+    from r2g.proc import finish_child, start_child
+
+    p = start_child([sys.executable, "-c", "print('x')"], os.environ)
+    r = finish_child(p, 5.0)
+    assert (r.rc, r.timed_out, r.stdout.strip()) == (0, False, "x")
+    p = start_child([sys.executable, "-c", "import time; time.sleep(30)"], os.environ)
+    r = finish_child(p, 0.5)
+    assert r.timed_out is True and r.rc is not None
