@@ -9,6 +9,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import rclpy  # noqa: E402
+from rclpy.executors import ExternalShutdownException  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 
 from r2g import payload, qos  # noqa: E402
@@ -69,7 +70,7 @@ def main(argv=None) -> int:
                 send(seq)
                 _spin_for(node, max(0.0, t0 + (seq + 1) * period - time.monotonic()))
         _spin_for(node, args.linger)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

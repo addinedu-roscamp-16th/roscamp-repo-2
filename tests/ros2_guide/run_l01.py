@@ -40,6 +40,11 @@ def topic_for(variant: str) -> str:
     return "/r2g/l01/" + variant.lower().replace("-", "_")
 
 
+def sub_verdict(alive_through_settle: bool, summary_present: bool, judged: str) -> str:
+    """Return `judged` only if the subscriber stayed up and wrote its summary."""
+    return judged if alive_through_settle and summary_present else "판정 불가"
+
+
 def _parse_pub_line(stdout: str) -> dict | None:
     for line in reversed(stdout.splitlines()):
         line = line.strip()
@@ -85,6 +90,8 @@ def run_variant(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, 
     timed_out: list[int] = []
     failed: list[int] = []
     sub_ready = False
+    sub_alive = True
+    sub_rc = None
     try:
         sub = proc.start_child(
             [sys.executable, str(NODES / "l01_sub.py"), "--topic", topic,
@@ -108,19 +115,30 @@ def run_variant(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, 
                     failed.append(trial)
                 if info is not None:
                     pubs[trial] = info
+                if sub.poll() is not None:
+                    sub_alive = False
                 time.sleep(TRIAL_GAP_S)
             time.sleep(SETTLE_S)
+            if sub.poll() is not None:
+                sub_alive = False
     finally:
         if sub is not None:
+            sub_rc = sub.poll()
             proc.stop_child(sub)
     rx = _read_rx(out_path)
     bad = _read_bad(out_path)
+    sub_alive = sub_alive and sub_ready
     excluded = set(timed_out) | set(failed)
     received = [t for t in rx if t not in excluded]
     t = judge.tally(trials, received)
     obs = dict(t)
     obs["sub_ready"] = sub_ready
     obs["bad_messages"] = bad
+    obs["sub_alive"] = sub_alive
+    obs["sub_exit_code"] = sub_rc
+    obs["sub_summary_present"] = bad is not None
+    obs["excluded_trials"] = sorted(excluded)
+    obs["lost_trials_counted"] = [x for x in t["lost_trials"] if x not in excluded]
     obs["pub_timed_out_trials"] = timed_out
     obs["pub_failed_trials"] = failed
     if mode == "wait_match":
@@ -178,11 +196,19 @@ def main(argv: list[str] | None = None) -> int:
                 )  # fmt: skip
                 continue
             obs, cond, notes = run_variant(v, args.trials, env, Path(td))
-            if not obs["sub_ready"]:
-                result = "판정 불가"
-            else:
-                result = judge.judge_l01(v, obs, args.trials)
-            if v == "A" and obs["lost"] >= 1:
+            result = "판정 불가"
+            if obs["sub_ready"]:
+                result = sub_verdict(
+                    obs["sub_alive"],
+                    obs["sub_summary_present"],
+                    judge.judge_l01(v, obs, args.trials),
+                )
+            if obs["sub_ready"] and result == "판정 불가":
+                if not obs["sub_alive"]:
+                    notes.append(f"구독 노드가 시험 중 종료됨(rc={obs['sub_exit_code']})")
+                if not obs["sub_summary_present"]:
+                    notes.append("구독 노드 summary 파일 없음")
+            if result != "판정 불가" and v == "A" and obs["lost_trials_counted"]:
                 notes.append("재현됨")
             results.write_result(run_dir, test_id, result, obs, cond, notes, env=env)
             print(f"{test_id}: {result} lost={obs['lost']}/{obs['sent']}", flush=True)
