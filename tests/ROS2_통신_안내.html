@@ -1,0 +1,1073 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROS 2 통신 안내</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap">
+<style>
+:root {
+  --bg:#f3f5f7; --paper:#ffffff; --ink:#18232e; --muted:#566372; --hair:#ced6de;
+  --accent:#0a6a70; --note-bg:#eef6f6; --th:#eaf0f5; --code:#f0f3f6; --pre:#f6f8fa;
+  --bad:#b3261e; --bad-bg:#fcecea; --good:#1e7a46; --good-bg:#e8f5ec; --warn:#9a5200; --warn-bg:#fbf1e2;
+  --sans:"IBM Plex Sans KR","Noto Sans CJK KR","Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif;
+  --mono:"IBM Plex Mono","Noto Sans Mono CJK KR",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg:#0f151b; --paper:#161e26; --ink:#e3eaf1; --muted:#9dabb9; --hair:#34424f;
+  --accent:#5cc8cc; --note-bg:#123637; --th:#1e2933; --code:#1e2933; --pre:#1a232c;
+  --bad:#f08a80; --bad-bg:#3a1f1d; --good:#6fd39a; --good-bg:#16321f; --warn:#e8b061; --warn-bg:#33291a; color-scheme:dark;
+} }
+:root[data-theme="dark"] {
+  --bg:#0f151b; --paper:#161e26; --ink:#e3eaf1; --muted:#9dabb9; --hair:#34424f;
+  --accent:#5cc8cc; --note-bg:#123637; --th:#1e2933; --code:#1e2933; --pre:#1a232c;
+  --bad:#f08a80; --bad-bg:#3a1f1d; --good:#6fd39a; --good-bg:#16321f; --warn:#e8b061; --warn-bg:#33291a; color-scheme:dark;
+}
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--sans); font-size:15px; line-height:1.8; }
+main { max-width:920px; margin:24px auto; padding:40px 48px; background:var(--paper); border:1px solid var(--hair); border-radius:6px; }
+h1 { font-size:26px; line-height:1.35; margin:0 0 6px; }
+.sub { color:var(--muted); font-size:13px; margin:0 0 24px; }
+h2 { font-size:20px; margin:52px 0 14px; padding-bottom:6px; border-bottom:2px solid var(--accent); }
+h3 { font-size:17px; margin:0 0 12px; }
+h4 { font-size:14.5px; margin:16px 0 6px; }
+p { margin:0 0 10px; }
+ul, ol { margin:0 0 12px; padding-left:22px; }
+li { margin:2px 0; }
+a { color:var(--accent); text-decoration:none; }
+a:hover { text-decoration:underline; }
+code { font-family:var(--mono); font-size:0.88em; background:var(--code); padding:1px 5px; border-radius:3px; }
+pre { font-family:var(--mono); font-size:13px; line-height:1.6; background:var(--pre); border:1px solid var(--hair); border-radius:5px; padding:12px 14px; margin:8px 0 10px; overflow-x:auto; }
+pre code { background:none; padding:0; font-size:inherit; }
+strong { font-weight:600; }
+.callout { background:var(--note-bg); border-left:4px solid var(--accent); padding:12px 16px; margin:0 0 18px; border-radius:0 4px 4px 0; }
+.callout p:last-child, .callout ul:last-child { margin-bottom:0; }
+.item { border:1px solid var(--hair); border-radius:8px; padding:22px 24px; margin:0 0 28px; scroll-margin-top:12px; }
+.no { display:inline-block; min-width:26px; height:26px; line-height:26px; text-align:center; border-radius:50%; background:var(--accent); color:var(--paper); font-size:13px; font-weight:700; margin-right:8px; vertical-align:2px; }
+.case { background:var(--warn-bg); border-left:4px solid var(--warn); padding:10px 14px; border-radius:0 4px 4px 0; margin:0 0 14px; }
+.case ul { margin:0; }
+.bad, .good { border-radius:6px; padding:12px 14px; margin:0 0 12px; }
+.bad { background:var(--bad-bg); border:1px solid var(--bad); }
+.good { background:var(--good-bg); border:1px solid var(--good); }
+.bad h4 { color:var(--bad); margin-top:0; }
+.good h4 { color:var(--good); margin-top:0; }
+.bad pre, .good pre { background:var(--paper); }
+.bad ul, .good ul { margin-bottom:0; }
+.rule { font-weight:600; border-top:1px dashed var(--hair); padding-top:10px; margin-top:4px; }
+.rule::before { content:"📌 기억할 규칙 · "; color:var(--accent); }
+.more { font-size:13.5px; color:var(--muted); margin:6px 0 0; }
+.tbl { overflow-x:auto; margin:0 0 18px; }
+table { border-collapse:collapse; width:100%; font-size:14px; line-height:1.6; }
+th, td { border:1px solid var(--hair); padding:7px 10px; text-align:left; vertical-align:top; }
+th { background:var(--th); font-weight:600; white-space:nowrap; }
+.ok { color:var(--good); font-weight:600; }
+.ng { color:var(--bad); font-weight:600; }
+.check { list-style:none; padding-left:0; }
+.check li { padding-left:28px; position:relative; margin:6px 0; }
+.check li::before { content:"☐"; position:absolute; left:2px; top:-1px; font-size:17px; color:var(--accent); }
+.toc { columns:2; column-gap:32px; font-size:14px; }
+dl { margin:0; }
+dt { font-weight:600; margin-top:10px; }
+dd { margin:0 0 0 0; color:var(--ink); }
+.fig { margin:10px 0 18px; border:1px solid var(--hair); border-radius:6px; padding:14px; overflow-x:auto; }
+.fig svg { display:block; width:100%; min-width:640px; height:auto; }
+.fig figcaption { font-size:13px; color:var(--muted); margin-top:8px; }
+.fig text { font-family:var(--sans); fill:var(--ink); font-size:13px; }
+.fig .sm { font-size:11.5px; fill:var(--muted); }
+.fig .b { font-weight:600; }
+.fig .box { fill:var(--th); stroke:var(--ink); stroke-width:1.3; }
+.fig .q { fill:var(--paper); stroke:var(--ink); stroke-width:1; }
+.fig .q-full { fill:var(--bad-bg); stroke:var(--bad); stroke-width:1; }
+.fig .q-ok { fill:var(--good-bg); stroke:var(--good); stroke-width:1; }
+.fig .fast { fill:var(--good-bg); stroke:var(--good); stroke-width:1.6; }
+.fig .slow { fill:var(--bad-bg); stroke:var(--bad); stroke-width:1.6; }
+.fig .ln { stroke:var(--ink); stroke-width:1.4; fill:none; }
+.fig .ln-bad { stroke:var(--bad); stroke-width:1.4; fill:none; stroke-dasharray:5 4; }
+.fig .ah { fill:var(--ink); }
+.fig .t-bad { fill:var(--bad); font-weight:600; }
+.fig .t-good { fill:var(--good); font-weight:600; }
+@media (max-width:720px) {
+  main { margin:0; padding:24px 16px; border:none; border-radius:0; }
+  h1 { font-size:22px; }
+  .item { padding:16px; }
+  .toc { columns:1; }
+}
+</style>
+</head>
+<body>
+<main>
+
+<h1>ROS 2 통신 안내: 잘못된 예와 바른 예</h1>
+<p class="sub">팀 공유용 · 대상: ROS 2를 처음 쓰는 개발자 · ROS 2 Humble / Jazzy, rclpy 기준 · 2026-11-06</p>
+
+<div class="callout">
+<p><strong>이 문서를 읽는 법</strong></p>
+<ul>
+<li>항목마다 <strong>사례 → 잘못된 예 → 바른 예 → 기억할 규칙</strong> 순서입니다.</li>
+<li>예제는 핵심 패턴을 보여 주는 코드 조각입니다. 실행하려면 프로젝트의 메시지 타입과 노드 설정을 연결해야 합니다.</li>
+<li>"왜 그런가요?"는 문서 뒤쪽 <a href="#tech">기술 상세</a>에 모았습니다.</li>
+<li>모르는 용어는 <a href="#glossary">용어집</a>을 보세요.</li>
+</ul>
+</div>
+
+<h3>목차</h3>
+<ol class="toc">
+<li><a href="#i1">중요 알림은 사라지면 안 됩니다</a></li>
+<li><a href="#i2">위치와 작업 상태는 나눠 보냅니다</a></li>
+<li><a href="#i3">서비스 QoS는 바꾸지 않습니다</a></li>
+<li><a href="#i4">콜백 안에서 call()을 쓰지 않습니다</a></li>
+<li><a href="#i5">callback group을 나눕니다</a></li>
+<li><a href="#i6">QoS가 안 맞으면 연결이 안 됩니다</a></li>
+<li><a href="#i7">알림·명령 메시지는 작게</a></li>
+<li><a href="#i8">작업 지시는 액션으로 보냅니다</a></li>
+<li><a href="#i9">느린 구독자 하나가 전체를 늦춥니다</a></li>
+<li><a href="#i10">Wi-Fi에서는 보내는 양을 줄입니다</a></li>
+<li><a href="#checklist">체크리스트</a></li>
+<li><a href="#tech">기술 상세</a></li>
+<li><a href="#glossary">용어집</a></li>
+<li><a href="#refs">참고 자료</a></li>
+</ol>
+
+<h2>1부. 사례로 배우기</h2>
+
+<!-- ===== 1 ===== -->
+<section class="item" id="i1">
+<h3><span class="no">1</span>중요 알림은 사라지면 안 됩니다</h3>
+<div class="case"><ul>
+<li>로봇이 "배터리 부족" 알림을 보냈습니다.</li>
+<li>그런데 관리자 페이지에는 나오지 않았습니다.</li>
+<li>그 순간 받는 쪽 노드가 재시작 중이었습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>self.pub = self.create_publisher(Alert, '/alerts', 10)
+self.pub.publish(msg)   # 보내고 끝</code></pre>
+<ul>
+<li>숫자 <code>10</code>만 주면 기본 QoS가 쓰입니다.</li>
+<li>기본 QoS는 VOLATILE입니다. 지난 메시지를 남기지 않습니다.</li>
+<li>받는 쪽이 꺼져 있던 동안의 알림은 그대로 사라집니다.</li>
+<li>받았는지 확인하는 방법도 없습니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy, HistoryPolicy
+
+ALERT_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=100,
+    reliability=ReliabilityPolicy.RELIABLE,
+    durability=DurabilityPolicy.TRANSIENT_LOCAL,
+)
+
+# ----- 보내는 쪽 -----
+# 아래 세 콜백은 같은 callback group에 둡니다 (unacked를 함께 쓰므로)
+self.pub = self.create_publisher(Alert, '/alerts', ALERT_QOS)
+self.unacked = {}                      # ACK를 못 받은 알림 (메모리)
+
+def send_alert(self, msg):
+    self.unacked[msg.alert_id] = msg
+    self.pub.publish(msg)
+
+def on_ack(self, ack):                 # /alerts/ack 구독 콜백
+    self.unacked.pop(ack.alert_id, None)
+
+def on_retry_timer(self):              # 몇 초마다 다시 보냄
+    for msg in list(self.unacked.values()):
+        self.pub.publish(msg)
+
+# ----- 받는 쪽 (같은 ALERT_QOS) -----
+self.sub = self.create_subscription(Alert, '/alerts', self.on_alert, ALERT_QOS)
+
+def on_alert(self, msg):
+    self.store.save_if_new(msg.alert_id, msg)        # 이미 있으면 저장하지 않음
+    self.ack_pub.publish(AlertAck(alert_id=msg.alert_id))   # 저장 후 ACK</code></pre>
+<ul>
+<li>RELIABLE: 네트워크에서 빠진 메시지를 다시 보냅니다.</li>
+<li>TRANSIENT_LOCAL: 늦게 접속한 쪽에도 지난 알림을 보내줍니다. 단, 보내는 노드가 살아 있는 동안만입니다.</li>
+<li>ACK: 받는 쪽이 "받았다"고 답할 때까지 보내는 쪽이 보관합니다.</li>
+<li>받는 쪽은 저장(DB 등)이 끝난 뒤에 ACK를 보냅니다.</li>
+<li>같은 알림이 두 번 올 수 있습니다. 받는 쪽은 <code>alert_id</code>로 중복을 거릅니다.</li>
+<li><code>alert_id</code>는 보내는 노드가 재시작해도 겹치지 않게 만듭니다. 예: 부팅(세션) ID + 순번, 또는 UUID. 순번만 쓰면 재시작 후 0부터 다시 세어, 새 알림이 중복으로 버려집니다.</li>
+<li>중복이어도 ACK는 다시 보냅니다. 앞서 보낸 ACK가 사라졌을 수 있기 때문입니다.</li>
+</ul></div>
+
+<div class="callout">
+<p><strong>이 예제가 막는 것과 못 막는 것</strong></p>
+<ul>
+<li>막는 것: 받는 노드의 재시작, 잠깐의 네트워크 끊김</li>
+<li>못 막는 것: <strong>보내는 노드의 재시작</strong>. <code>unacked</code>가 메모리에만 있어서 함께 사라집니다.</li>
+<li>보내는 노드의 재시작까지 막으려면, 발행하기 전에 알림을 파일이나 DB에 저장합니다.</li>
+<li>순서는 이렇습니다: <strong>보내는 쪽 저장 → 발행 → 받는 쪽 저장 → ACK → 보내는 쪽 삭제</strong></li>
+<li>재시작한 노드는 저장해 둔 알림을 다시 보냅니다.</li>
+</ul>
+</div>
+<p class="rule">중요 알림 = RELIABLE + TRANSIENT_LOCAL + ACK + 중복 확인 (+ 보내는 쪽 재시작 대비는 발행 전 저장)</p>
+<p class="more">왜? RELIABLE만으로 부족한 이유 → <a href="#t-reliable">기술 상세 A</a></p>
+</section>
+
+<!-- ===== 2 ===== -->
+<section class="item" id="i2">
+<h3><span class="no">2</span>위치와 작업 상태는 나눠 보냅니다</h3>
+<div class="case"><ul>
+<li>관리자 화면의 로봇 위치가 몇 초씩 늦게 움직입니다.</li>
+<li>Wi-Fi가 잠깐 느려진 뒤로 계속 늦습니다.</li>
+<li>이미 지난 위치를 차례대로 그리고 있었습니다.</li>
+<li>위치와 작업 진행이 한 메시지에 섞여 있어서, QoS를 어느 한쪽에 맞출 수밖에 없었습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>qos = QoSProfile(
+    history=HistoryPolicy.KEEP_ALL,
+    reliability=ReliabilityPolicy.RELIABLE,
+)
+self.create_publisher(RobotState, '/robot1/state', qos)   # 위치 + 작업 진행, 10 Hz 발행</code></pre>
+<ul>
+<li>지난 상태를 모두 쌓아 두고 하나도 빼지 않고 보냅니다.</li>
+<li>한 번 밀리면 계속 옛날 값을 보냅니다.</li>
+<li>느린 구독자 하나 때문에 보내는 쪽까지 막힐 수 있습니다. (<a href="#i9">항목 9</a> 참고)</li>
+<li>반대로 이 메시지를 BEST_EFFORT로 바꾸면, 위치는 괜찮지만 "작업 완료" 같은 진행 정보가 빠질 수 있습니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>from rclpy.duration import Duration
+from rclpy.qos import LivelinessPolicy
+
+# 위치: 다음 값이 곧 대신함 → 최신값 1개, 빠지면 넘어감
+POSE_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+    reliability=ReliabilityPolicy.BEST_EFFORT,
+    deadline=Duration(seconds=0.3),            # 10 Hz 발행 주기(0.1초)의 3배
+)
+
+# 작업 진행 상태: 관제가 "명령이 도착했다·끝났다"를 확인하는 근거 → 빠지면 안 됨
+TASK_STATE_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,                                   # 최신 상태만 의미 있음
+    reliability=ReliabilityPolicy.RELIABLE,
+    deadline=Duration(seconds=3.0),            # 1초 주기 발행의 3배
+    liveliness=LivelinessPolicy.AUTOMATIC,
+    liveliness_lease_duration=Duration(seconds=3.0),
+)
+
+# 보내는 쪽
+self.create_publisher(RobotPose, '/robot1/pose', POSE_QOS)               # 10 Hz
+self.create_publisher(TaskState, '/robot1/task_state', TASK_STATE_QOS)   # 변화가 생길 때 + 1초마다
+
+# 받는 쪽: 같은 QoS로 받고, deadline을 넘기면 알림
+from rclpy.event_handler import SubscriptionEventCallbacks   # Jazzy
+# from rclpy.qos_event import SubscriptionEventCallbacks     # Humble
+
+def on_deadline_missed(self, event):
+    self.get_logger().warn(f'작업 상태 수신 끊김 (누적 {event.total_count}회)')
+    # 예: 화면에 이 로봇을 "응답 없음"으로 표시
+
+self.create_subscription(
+    TaskState, '/robot1/task_state', self.on_task_state, TASK_STATE_QOS,
+    event_callbacks=SubscriptionEventCallbacks(deadline=self.on_deadline_missed))</code></pre>
+<ul>
+<li>위치는 최신값만 의미가 있습니다. 빠진 값은 다음 값이 곧 대신하므로 BEST_EFFORT로 보냅니다.</li>
+<li>작업 진행 상태(받은 주문 ID와 업데이트 번호, 진행률, 완료·취소)는 관제가 "명령이 도착했다, 끝났다"를 확인하는 근거입니다. 빠지면 관제가 잘못 판단하므로 RELIABLE로 보냅니다.</li>
+<li>작업 상태도 최신값만 의미가 있으므로 depth는 1입니다. 변화가 생길 때와 일정 주기로 전체 상태를 다시 보내므로, 하나를 놓쳐도 다음 메시지가 다시 알려 줍니다.</li>
+<li><code>deadline</code>과 <code>liveliness</code> lease는 값을 직접 정합니다. 기본값은 사실상 무한대라서, 정하지 않으면 끊김을 감지하지 못합니다. (<a href="#t-qos">기술 상세 C</a>)</li>
+<li>감시는 받는 쪽에서 합니다. 3초 안에 다음 작업 상태가 오지 않으면 <code>on_deadline_missed</code>가 불립니다. <code>liveliness</code> 이벤트도 같은 방식으로 받을 수 있습니다.</li>
+<li>받는 쪽 deadline은 보내는 쪽과 같거나 더 길어야 연결됩니다.</li>
+<li>받는 쪽도 보내는 쪽과 같은 QoS로 맞춥니다. (<a href="#i6">항목 6</a> 참고)</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예 · 반대 방향(관제 → 로봇)도 감시</h4>
+<pre><code>from std_msgs.msg import Empty
+
+HEARTBEAT_QOS = QoSProfile(
+    history=HistoryPolicy.KEEP_LAST,
+    depth=1,
+    reliability=ReliabilityPolicy.RELIABLE,
+    deadline=Duration(seconds=1.5),            # 0.5초 주기 하트비트의 3배
+)
+
+# ----- 관제 쪽 -----
+self.hb_pub = self.create_publisher(Empty, '/fleet/heartbeat', HEARTBEAT_QOS)
+self.create_timer(0.5, lambda: self.hb_pub.publish(Empty()))
+
+# ----- 로봇 쪽 -----
+def on_heartbeat_missed(self, event):
+    self.get_logger().warn('관제 신호 끊김 → 현재 작업 일시정지')
+    self.pause_current_task()                  # 작업 일시정지 (비상 정지 아님)
+
+self.create_subscription(
+    Empty, '/fleet/heartbeat', self.on_heartbeat, HEARTBEAT_QOS,
+    event_callbacks=SubscriptionEventCallbacks(deadline=self.on_heartbeat_missed))</code></pre>
+<ul>
+<li>로봇 → 관제 방향만 감시하면, 관제가 멈췄을 때 로봇은 그 사실을 모르고 계속 움직입니다.</li>
+<li>관제가 하트비트를 보내고, 로봇이 deadline으로 감시합니다. 신호가 끊기면 로봇이 스스로 작업을 멈춥니다.</li>
+<li>주기와 기준 시간은 관제와 로봇 제어 쪽이 함께 정합니다. 무선 품질과 로봇 속도에 맞춥니다.</li>
+<li>이 정지는 작업 일시정지입니다. 비상 정지를 대신하지 않습니다. (<a href="#i10">항목 10</a>)</li>
+</ul></div>
+<p class="rule">위치 = BEST_EFFORT + depth 1 · 작업 상태 = RELIABLE + depth 1 + deadline · 끊김은 양방향으로 감시</p>
+</section>
+
+<!-- ===== 3 ===== -->
+<section class="item" id="i3">
+<h3><span class="no">3</span>서비스 QoS는 바꾸지 않습니다</h3>
+<div class="case"><ul>
+<li>서버 노드를 재시작했습니다.</li>
+<li>그런데 재시작 전에 들어온 "로봇 정지" 요청이 다시 실행되었습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>self.create_service(StopRobot, '/stop_robot', self.on_stop,
+                    qos_profile=ALERT_QOS)   # TRANSIENT_LOCAL</code></pre>
+<ul>
+<li>서비스에 TRANSIENT_LOCAL을 쓰면 오래된 요청이 남습니다.</li>
+<li>재시작한 서버가 그 요청을 다시 받아 실행할 수 있습니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>self.create_service(StopRobot, '/stop_robot', self.on_stop)   # 기본 QoS 그대로</code></pre>
+<ul>
+<li>서비스는 기본 QoS(VOLATILE)를 그대로 씁니다.</li>
+<li>서비스는 빠르게 끝나는 조회나 설정에만 씁니다.</li>
+<li>오래 걸리는 작업은 액션으로 만듭니다. (<a href="#i8">항목 8</a>)</li>
+</ul></div>
+<p class="rule">서비스 = 기본 QoS(VOLATILE) 그대로</p>
+</section>
+
+<!-- ===== 4 ===== -->
+<section class="item" id="i4">
+<h3><span class="no">4</span>콜백 안에서 call()을 쓰지 않습니다</h3>
+<div class="case"><ul>
+<li>타이머 콜백에서 서비스를 호출했습니다.</li>
+<li>노드가 그대로 멈췄습니다. 에러 메시지도 없습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>def on_timer(self):
+    resp = self.cli.call(req)    # 응답이 올 때까지 기다림
+    self.get_logger().info(str(resp))</code></pre>
+<ul>
+<li><code>call()</code>은 응답이 올 때까지 기다립니다.</li>
+<li>그런데 응답을 처리할 스레드가 지금 이 콜백에 묶여 있습니다.</li>
+<li>서로 기다리다 영원히 멈춥니다(deadlock).</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>def on_timer(self):
+    future = self.cli.call_async(req)            # 기다리지 않음
+    future.add_done_callback(self.on_response)
+
+def on_response(self, future):
+    resp = future.result()
+    self.get_logger().info(str(resp))</code></pre>
+<ul>
+<li><code>call_async()</code>는 바로 돌아옵니다.</li>
+<li>응답이 오면 <code>on_response</code>가 호출됩니다.</li>
+<li>DB 저장이나 HTTP 호출도 콜백 안에서 오래 붙잡지 않습니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예 · 응답이 안 올 때</h4>
+<pre><code>TIMEOUT = Duration(seconds=2.0)
+
+def send_pause(self):
+    req = PauseTask.Request(order_id=self.order_id)   # 같은 요청은 항상 같은 ID
+    self.pause_future = self.cli.call_async(req)
+    self.pause_sent_at = self.get_clock().now()
+    self.pause_future.add_done_callback(self.on_pause_response)
+
+def on_check_timer(self):                        # 0.5초마다 도는 타이머
+    f = self.pause_future
+    if f is None or f.done():
+        return
+    if self.get_clock().now() - self.pause_sent_at &gt; TIMEOUT:
+        self.cli.remove_pending_request(f)       # 기다리던 응답은 버림
+        self.pause_future = None
+        self.query_status(self.order_id)         # 다시 보내기 전에 같은 ID로 상태부터 확인
+        # 아직 진행 중이면 같은 order_id로 send_pause()를 다시 호출</code></pre>
+<ul>
+<li>응답이 끝내 안 올 수 있습니다(무선 끊김, 서버 재시작). 기다리는 시간을 정해 둡니다.</li>
+<li>시간이 지나도 바로 다시 보내지 않습니다. 요청이 이미 처리되었을 수 있으므로, 같은 ID로 상태를 먼저 조회합니다.</li>
+<li>다시 보낼 때도 같은 ID를 씁니다. 서버는 같은 ID를 한 번만 처리합니다. (<a href="#i8">항목 8</a>)</li>
+<li>일시정지가 실제로 되었는지는 응답이 아니라 로봇 작업 상태(<a href="#i2">항목 2</a>)로 확인합니다.</li>
+</ul></div>
+<p class="rule">콜백 안에서는 기다리지 않는다 → call_async() + 타임아웃 + 같은 ID로 상태 확인 후 재시도</p>
+</section>
+
+<!-- ===== 5 ===== -->
+<section class="item" id="i5">
+<h3><span class="no">5</span>callback group을 나눕니다</h3>
+<div class="case"><ul>
+<li>로봇 6대의 위치가 한꺼번에 몰려들었습니다.</li>
+<li>그 사이 들어온 알림이 1초 넘게 늦게 처리되었습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>self.create_subscription(RobotPose, '/robot1/pose', self.on_pose, POSE_QOS)
+self.create_subscription(Alert, '/alerts', self.on_alert, ALERT_QOS)
+rclpy.spin(node)    # 스레드 1개, 그룹 1개</code></pre>
+<ul>
+<li>모든 콜백이 한 줄로 서서 차례를 기다립니다.</li>
+<li>위치 콜백이 많으면 알림 콜백이 뒤로 밀립니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from rclpy.executors import MultiThreadedExecutor
+
+self.pose_group = MutuallyExclusiveCallbackGroup()
+self.alert_group = MutuallyExclusiveCallbackGroup()
+
+self.create_subscription(RobotPose, '/robot1/pose', self.on_pose, POSE_QOS,
+                         callback_group=self.pose_group)
+self.create_subscription(Alert, '/alerts', self.on_alert, ALERT_QOS,
+                         callback_group=self.alert_group)
+
+executor = MultiThreadedExecutor()
+executor.add_node(node)
+executor.spin()</code></pre>
+<ul>
+<li>그룹이 다르면 다른 스레드에서 동시에 실행됩니다.</li>
+<li>일꾼 스레드에 여유가 있으면, 알림 콜백이 위치 콜백과 동시에 실행될 수 있습니다. 위치 콜백이 끝나기를 기다리지 않아도 됩니다.</li>
+<li>스레드가 모두 바쁘면 알림도 기다립니다. 콜백을 짧게 유지하는 것이 함께 필요합니다. (<a href="#i9">항목 9</a>)</li>
+<li>그룹을 나누려면 <code>MultiThreadedExecutor</code>를 써야 합니다.</li>
+</ul></div>
+<p class="rule">중요한 콜백은 자기 그룹 + MultiThreadedExecutor</p>
+</section>
+
+<!-- ===== 6 ===== -->
+<section class="item" id="i6">
+<h3><span class="no">6</span>QoS가 안 맞으면 연결이 안 됩니다</h3>
+<div class="case"><ul>
+<li>토픽 이름도 타입도 맞습니다.</li>
+<li>그런데 구독 콜백이 한 번도 불리지 않습니다.</li>
+<li>에러도 나지 않습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code># 보내는 쪽: BEST_EFFORT (위치)
+self.create_publisher(RobotPose, '/robot1/pose', POSE_QOS)
+# 받는 쪽: 숫자만 줌 → 기본값 RELIABLE
+self.create_subscription(RobotPose, '/robot1/pose', self.on_pose, 10)</code></pre>
+<ul>
+<li>받는 쪽이 보내는 쪽보다 더 엄격한 QoS를 요구합니다.</li>
+<li>이 경우 ROS 2는 둘을 연결하지 않습니다.</li>
+<li>경고 로그만 한 줄 나오고 조용히 넘어갑니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code># QoS를 공용 모듈 한 곳에 정의하고 양쪽에서 import
+from my_pkg.qos import POSE_QOS
+self.create_subscription(RobotPose, '/robot1/pose', self.on_pose, POSE_QOS)</code></pre>
+<pre><code># 연결 상태와 양쪽 QoS 확인
+ros2 topic info -v /robot1/pose</code></pre>
+<ul>
+<li>QoS는 한 파일에 모아 두고 함께 씁니다.</li>
+<li>연결이 안 되면 먼저 <code>ros2 topic info -v</code>로 QoS를 비교합니다.</li>
+<li>어떤 조합이 안 되는지는 <a href="#t-compat">기술 상세 B</a> 표를 보세요.</li>
+</ul></div>
+<p class="rule">QoS는 공용 파일 하나에 정의하고 양쪽이 import</p>
+</section>
+
+<!-- ===== 7 ===== -->
+<section class="item" id="i7">
+<h3><span class="no">7</span>알림·명령 메시지는 작게 (목표 64 KB 이하)</h3>
+<div class="case"><ul>
+<li>알림에 카메라 사진을 함께 넣어 보냈습니다.</li>
+<li>Wi-Fi에서 알림이 자주 늦거나 빠졌습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>msg = Alert()
+msg.image = cv_bridge.cv2_to_imgmsg(frame)   # 수백 KB
+self.alert_pub.publish(msg)</code></pre>
+<ul>
+<li>큰 메시지는 네트워크에서 여러 조각으로 나뉘어 전송됩니다.</li>
+<li>조각 하나만 빠져도 메시지 전체가 늦거나 사라질 수 있습니다.</li>
+<li>어느 크기부터 나뉘는지는 미들웨어와 전송 설정에 따라 다릅니다.</li>
+<li>한 연구(Raspberry Pi 4, ROS 2 Foxy)에서는 500 KB 메시지의 약 30%가 사라졌습니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>msg = Alert()
+msg.image_url = f'http://192.168.0.10:8080/alerts/{alert_id}.jpg'   # 받는 PC가 열 수 있는 주소
+self.alert_pub.publish(msg)</code></pre>
+<ul>
+<li>알림·명령 메시지는 작게 유지합니다. 처음에는 64 KB 이하를 목표로 잡습니다.</li>
+<li>64 KB는 시작 기준입니다. 실제 한계는 쓰는 미들웨어로 시험해 확인합니다.</li>
+<li>로봇 컴퓨터(Raspberry Pi 등)가 감당할 메시지 크기와 빈도의 한도를 로봇별 파라미터로 정해 둡니다. 보내는 쪽은 그 한도를 넘지 않습니다.</li>
+<li>큰 데이터는 파일 서버나 별도 영상 경로(RTSP 등)로 보냅니다.</li>
+<li>메시지에는 <strong>받는 PC가 열 수 있는</strong> URL이나 저장소 ID만 담습니다.</li>
+<li>보내는 PC의 로컬 경로(<code>/data/...</code>)나 <code>localhost</code> 주소는 다른 PC에서 열 수 없습니다. (<a href="#t-localhost">G-8</a>)</li>
+</ul></div>
+<p class="rule">알림·명령 메시지에 이미지·대용량 데이터를 넣지 않는다. 대신 받는 쪽이 열 수 있는 주소를 넣는다</p>
+</section>
+
+<!-- ===== 8 ===== -->
+<section class="item" id="i8">
+<h3><span class="no">8</span>작업 지시는 액션으로 보냅니다</h3>
+<div class="case"><ul>
+<li>로봇에 "A 선반으로 이동" 명령을 토픽으로 보냈습니다.</li>
+<li>로봇이 받았는지, 어디까지 갔는지 알 수 없었습니다.</li>
+<li>다시 보냈더니 로봇이 같은 일을 두 번 했습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>self.cmd_pub = self.create_publisher(MoveCmd, '/robot1/move_cmd', 10)
+self.cmd_pub.publish(cmd)   # 받았는지 모름</code></pre>
+<ul>
+<li>토픽은 "보내고 끝"입니다.</li>
+<li>수락, 진행률, 완료 여부를 알 수 없습니다.</li>
+<li>다시 보내면 중복 실행될 수 있습니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>from rclpy.action import ActionClient
+
+self.client = ActionClient(self, MoveTo, '/robot1/move_to')
+
+goal = MoveTo.Goal()
+goal.order_id = order_id                     # 중복 확인용 ID
+goal.update_id = update_id                   # 같은 주문을 고쳐 보낼 때마다 1씩 증가
+future = self.client.send_goal_async(goal, feedback_callback=self.on_feedback)
+future.add_done_callback(self.on_goal_response)
+
+def on_goal_response(self, future):
+    handle = future.result()
+    if not handle.accepted:
+        self.query_status(order_id)          # 이미 있는 주문인지 상태 조회 (아래 서버 예제)
+        return
+    handle.get_result_async().add_done_callback(self.on_result)
+
+def on_result(self, future):
+    resp = future.result()                   # resp.status, resp.result
+    if resp.status == GoalStatus.STATUS_SUCCEEDED:     # from action_msgs.msg import GoalStatus
+        self.save_result(resp.result)        # 받는 즉시 저장 (서버는 일정 시간 후 결과를 버림)
+    elif resp.status == GoalStatus.STATUS_ABORTED:
+        self.mark_failed()                   # 실행 중 실패
+    elif resp.status == GoalStatus.STATUS_CANCELED:
+        self.mark_canceled()                 # 취소됨</code></pre>
+<ul>
+<li>액션은 수락 → 진행(feedback) → 결과(result)를 모두 알려줍니다.</li>
+<li>결과의 <code>status</code>로 성공·실패·취소를 구분합니다. <code>result</code>만 보면 실패한 작업도 성공으로 착각할 수 있습니다.</li>
+<li>goal에 <code>order_id</code>와 <code>update_id</code>(업데이트 번호)를 넣습니다. 하지만 이것만으로는 중복이 막히지 않습니다. 아래처럼 <strong>서버가</strong> 확인해야 합니다.</li>
+<li>결과는 받는 즉시 저장합니다.</li>
+<li>취소·정지도 "보냈으니 멈췄다"로 보지 않습니다. 결과 <code>status</code>(CANCELED)나 로봇 작업 상태(<a href="#i2">항목 2</a>)로 확인합니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예 · 서버 쪽 중복 확인</h4>
+<pre><code>from rclpy.action import GoalResponse
+
+def goal_callback(self, goal_request):            # ActionServer(..., goal_callback=...)
+    last = self.store.last_update_id(goal_request.order_id)   # 처음 받는 주문이면 None
+    if last is not None and goal_request.update_id &lt;= last:
+        return GoalResponse.REJECT                # 재전송(같은 번호)이나 늦게 온 옛 지시(작은 번호)
+    self.store.record(goal_request.order_id, goal_request.update_id)   # 받은 번호 기록
+    return GoalResponse.ACCEPT
+
+def on_get_status(self, req, resp):               # 상태 조회 서비스 (예: get_order_status)
+    resp.state = self.store.state_of(req.order_id)   # 진행 중 / 완료+결과 / 없음
+    return resp</code></pre>
+<ul>
+<li>서버가 받은 ID를 기억해야 중복 실행을 막을 수 있습니다.</li>
+<li>이미 받은 ID면 새로 실행하지 않습니다.</li>
+<li>업데이트 번호가 같으면 재전송, 더 작으면 늦게 도착한 옛 지시입니다. 둘 다 실행하지 않고, 더 큰 번호만 새 지시로 받아들입니다.</li>
+<li>대신 클라이언트가 같은 ID로 지금 상태나 결과를 물어볼 수 있게 합니다.</li>
+<li>그래야 수락 응답을 잃은 클라이언트도 기존 작업이 어떻게 되었는지 알 수 있습니다.</li>
+<li>액션에는 "ID로 상태 조회" 기능이 기본으로 없습니다. 짧은 조회 서비스를 따로 둡니다.</li>
+<li>서버가 재시작한 뒤에도 중복을 막으려면, 받은 ID와 결과를 파일이나 DB에 저장합니다.</li>
+<li>짧은 등록·조회는 서비스, 오래 걸리는 실행은 액션으로 나눕니다.</li>
+</ul></div>
+<p class="rule">오래 걸리는 작업 = 액션 + ID·업데이트 번호 + 서버 쪽 중복·순서 확인 + 결과 status 확인</p>
+</section>
+
+<!-- ===== 9 ===== -->
+<section class="item" id="i9">
+<h3><span class="no">9</span>느린 구독자 하나가 전체를 늦춥니다</h3>
+<p><strong>느린 구독자</strong>란 메시지가 들어오는 속도보다 처리하는 속도가 느린 구독자입니다.
+예를 들어 메시지는 1초에 10개 오는데, 1초에 2개만 처리하는 경우입니다.</p>
+<div class="case"><ul>
+<li>분석 노드 하나를 추가했습니다.</li>
+<li>그 뒤로 다른 노드들의 수신도 들쭉날쭉해졌습니다.</li>
+<li>분석 노드의 콜백이 한 번에 0.5초씩 걸리고 있었습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code>self.create_subscription(LaserScan, '/scan', self.on_scan, 10)   # 10 Hz 수신
+
+def on_scan(self, msg):
+    result = self.heavy_analysis(msg)   # 0.5초 걸림
+    self.save_to_db(result)             # DB 저장도 콜백 안에서</code></pre>
+<ul>
+<li>1초에 10개가 오는데 2개만 처리합니다.</li>
+<li>받는 큐가 금방 가득 차고, 오래된 메시지부터 버려집니다.</li>
+<li>RELIABLE이면 보내는 쪽이 재전송과 확인 응답을 계속 처리해야 합니다.</li>
+<li>그 부담이 같은 토픽의 다른 구독자와 네트워크 전체로 번집니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code>SCAN_QOS = QoSProfile(depth=1, reliability=ReliabilityPolicy.BEST_EFFORT)
+self.latest_scan = None
+self.rx_group = MutuallyExclusiveCallbackGroup()     # 받기 전용
+self.work_group = MutuallyExclusiveCallbackGroup()   # 처리 전용 (항목 5)
+
+self.create_subscription(LaserScan, '/scan', self.on_scan, SCAN_QOS,
+                         callback_group=self.rx_group)
+self.create_timer(0.5, self.on_process, callback_group=self.work_group)  # 2 Hz
+self.scan_lock = threading.Lock()      # import threading
+
+def on_scan(self, msg):
+    with self.scan_lock:
+        self.latest_scan = msg          # 최신값만 저장하고 바로 끝
+
+def on_process(self):                   # 자기 속도로 처리
+    with self.scan_lock:                # 읽기와 비우기를 한 번에
+        scan, self.latest_scan = self.latest_scan, None
+    if scan is None:
+        return
+    result = self.heavy_analysis(scan)  # 무거운 일은 락 밖에서</code></pre>
+<ul>
+<li>콜백은 받기만 하고 바로 끝냅니다.</li>
+<li>두 콜백은 그룹이 달라서 동시에 실행될 수 있습니다.</li>
+<li>같은 변수(<code>latest_scan</code>)를 함께 쓰므로 <code>Lock</code>으로 보호합니다. 보호하지 않으면 방금 들어온 스캔이 지워질 수 있습니다.</li>
+<li>무거운 분석은 락을 푼 뒤에 합니다. 그래야 받는 콜백이 기다리지 않습니다.</li>
+<li>무거운 처리는 타이머로 자기 속도에 맞춰 합니다.</li>
+<li>모든 메시지가 필요 없다면 BEST_EFFORT, depth 1로 받습니다.</li>
+<li>보내는 쪽에 부담을 주지 않습니다.</li>
+</ul></div>
+<p class="rule">콜백은 짧게. 못 따라가는 구독자는 최신값만 받는다</p>
+<p class="more">원인, QoS별 영향, 확인 방법 → <a href="#t-slow">기술 상세 F</a></p>
+</section>
+
+<!-- ===== 10 ===== -->
+<section class="item" id="i10">
+<h3><span class="no">10</span>Wi-Fi에서는 보내는 양을 줄입니다</h3>
+<div class="case"><ul>
+<li>카메라 노드를 켜자 모든 로봇의 통신이 느려졌습니다.</li>
+<li><code>ros2 topic list</code>에 다른 팀 로봇의 토픽이 보였습니다.</li>
+<li>공유기를 재시작한 뒤 일부 노드가 서로를 찾지 못했습니다.</li>
+</ul></div>
+
+<div class="bad"><h4>❌ 잘못된 예</h4>
+<pre><code># 모든 PC가 기본 설정 그대로 (ROS_DOMAIN_ID = 0)
+ros2 run camera_pkg camera_node   # 640x480 원본 이미지, 30 Hz를 Wi-Fi로 발행</code></pre>
+<ul>
+<li>640×480 원본 이미지 한 장은 약 0.9 MB입니다.</li>
+<li>30 Hz면 초당 약 27 MB, 약 220 Mbps입니다.</li>
+<li>Wi-Fi 하나를 모든 로봇이 나눠 쓰므로, 이것만으로 대역이 부족해집니다.</li>
+<li>도메인 ID가 기본값(0)이면 같은 공유기의 다른 팀과 서로 섞입니다.</li>
+</ul></div>
+
+<div class="good"><h4>✅ 바른 예</h4>
+<pre><code># 1) 시스템마다 다른 도메인 ID (모든 PC에서 같은 값)
+export ROS_DOMAIN_ID=17
+
+# 2) 다른 PC와 통신할 필요가 전혀 없는 실행에만 (그 터미널에서만)
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # Jazzy
+# export ROS_LOCALHOST_ONLY=1                    # Humble</code></pre>
+<ul>
+<li>localhost 제한은 <code>~/.bashrc</code>에 넣지 않습니다. 그 PC의 모든 노드가 다른 PC에서 안 보이게 됩니다. (<a href="#t-localhost">기술 상세 G-8</a>)</li>
+<li>이미지는 로봇에서 처리하고, 결과(인식 결과, 좌표)만 보냅니다.</li>
+<li>영상이 꼭 필요하면 압축 영상이나 RTSP처럼 별도 경로로 보냅니다.</li>
+<li>위치·작업 상태 토픽은 <a href="#i2">항목 2</a>, 중요 알림은 <a href="#i1">항목 1</a>의 QoS를 씁니다.</li>
+<li>서버 PC처럼 움직이지 않는 장비는 유선으로 연결합니다.</li>
+</ul></div>
+
+<div class="callout">
+<p><strong>통신 규칙은 비상 정지를 대신하지 않습니다</strong></p>
+<ul>
+<li>이 문서의 규칙은 메시지가 늦거나 사라질 때를 대비한 것입니다. 안전을 보장하지 않습니다.</li>
+<li>비상 정지는 통신과 관제에 기대지 않는 별도 경로로 보장합니다.</li>
+<li>통신이 끊기거나 허가 응답이 오지 않을 때, 로봇의 기본 동작은 "진행하지 않음"으로 정합니다.</li>
+</ul>
+</div>
+<p class="rule">Wi-Fi로는 결과만 보낸다. 도메인 ID는 시스템마다 다르게</p>
+<p class="more">네트워크 구성, 탐색(discovery) 문제, 점검 명령 → <a href="#t-wifi">기술 상세 G</a></p>
+</section>
+
+<!-- ===== checklist ===== -->
+<h2 id="checklist">2부. 체크리스트</h2>
+<p>토픽·서비스·액션을 새로 만들 때 확인하세요.</p>
+
+<h4>토픽을 만들 때</h4>
+<ul class="check">
+<li>이 메시지가 사라지면 문제가 되나요? → 그렇다면 <a href="#i1">항목 1</a></li>
+<li>최신값만 의미가 있나요? → 그렇다면 <a href="#i2">항목 2</a></li>
+<li>QoS를 공용 파일에 정의했나요?</li>
+<li>보내는 쪽과 받는 쪽이 같은 QoS를 쓰나요?</li>
+<li>알림·명령 메시지가 64 KB 목표 이하인가요? 다른 PC로 보내는 주소는 받는 PC가 열 수 있나요?</li>
+<li>BEST_EFFORT는 다음 값이 곧 대신하는 토픽(위치 등)에만 쓰나요? 작업 진행 상태는 RELIABLE인가요?</li>
+<li><code>deadline</code>·<code>liveliness</code> lease 값을 직접 정했나요? (기본값은 사실상 무한대)</li>
+<li>순번(seq)이나 알림 ID에 부팅(세션) ID를 함께 넣었나요?</li>
+</ul>
+
+<h4>서비스·액션을 만들 때</h4>
+<ul class="check">
+<li>금방 끝나는 일인가요? → 서비스. 오래 걸리면 → 액션</li>
+<li>서비스 QoS를 기본값 그대로 두었나요?</li>
+<li>액션 goal에 중복 확인용 ID와 업데이트 번호가 있나요? 서버가 그 값을 기억해 중복과 늦게 온 옛 지시를 막나요?</li>
+<li>짧은 서비스 호출에 타임아웃이 있나요? 응답이 없으면 같은 ID로 상태를 조회한 뒤 다시 보내나요?</li>
+<li>정지·취소·완료를 "보냈다"가 아니라 로봇 작업 상태로 확인하나요?</li>
+<li>같은 ID로 상태를 조회할 방법이 있나요?</li>
+<li>액션 결과의 <code>status</code>로 성공·실패·취소를 구분하나요?</li>
+<li>액션 결과를 받는 즉시 저장하나요?</li>
+</ul>
+
+<h4>노드를 만들 때</h4>
+<ul class="check">
+<li>콜백 안에 <code>call()</code>이나 오래 걸리는 작업이 없나요?</li>
+<li>중요한 콜백을 별도 callback group에 넣었나요?</li>
+<li><code>MultiThreadedExecutor</code>를 쓰나요?</li>
+<li>다른 그룹의 콜백이 같은 변수를 쓰면 <code>Lock</code>으로 보호했나요?</li>
+<li>중요 알림을 보내는 노드가 재시작해도 알림이 남나요? (발행 전 저장)</li>
+</ul>
+
+<h4>Wi-Fi로 통신할 때</h4>
+<ul class="check">
+<li>모든 PC에 같은 <code>ROS_DOMAIN_ID</code>를 넣었나요? 다른 시스템과는 다른 번호인가요?</li>
+<li>Wi-Fi로 원본 이미지나 포인트클라우드를 보내고 있지 않나요?</li>
+<li>"메시지 크기 × 초당 개수 × 로봇 수"를 계산해 보았나요?</li>
+<li>자주 오는 위치 토픽을 BEST_EFFORT로 보내나요? (작업 진행 상태는 RELIABLE)</li>
+<li>관제 → 로봇 방향도 하트비트로 감시하나요? 신호가 끊기면 로봇이 스스로 작업을 멈추나요?</li>
+<li>콜백이 오래 걸리는 느린 구독자가 없나요? (노드 안에서 콜백 처리 시간을 재서 확인)</li>
+<li>localhost 제한을 <code>~/.bashrc</code>에 넣지 않았나요? 다른 PC로 보내는 주소에 <code>localhost</code>·<code>127.0.0.1</code>을 쓰지 않았나요?</li>
+<li>같은 PC 안의 HTTP·WebSocket 호출은 <code>localhost</code> 대신 <code>127.0.0.1</code>을 쓰나요?</li>
+</ul>
+
+<h4>연결이 안 될 때</h4>
+<ul class="check">
+<li><code>ros2 topic info -v &lt;토픽&gt;</code>로 양쪽 QoS를 비교했나요?</li>
+<li>같은 <code>ROS_DOMAIN_ID</code>를 쓰나요?</li>
+</ul>
+
+<!-- ===== tech ===== -->
+<h2 id="tech">3부. 기술 상세</h2>
+<p>여기부터는 "왜 그런가요?"에 대한 설명입니다.
+처음에는 건너뛰어도 됩니다.</p>
+
+<h3 id="t-reliable" style="margin-top:24px">A. RELIABLE만으로 부족한 이유</h3>
+<p>RELIABLE은 "연결된 상대에게는 빠진 메시지를 다시 보낸다"는 뜻입니다.
+아래 경우는 막지 못합니다.</p>
+<ul>
+<li><strong>큐가 넘칠 때:</strong> KEEP_LAST는 depth를 넘으면 가장 오래된 메시지를 버립니다.</li>
+<li><strong>받는 쪽이 꺼져 있을 때:</strong> VOLATILE은 지난 메시지를 남기지 않습니다.</li>
+<li><strong>보내는 쪽이 재시작할 때:</strong> TRANSIENT_LOCAL도 보내는 쪽 메모리에만 보관합니다. 재시작하면 사라집니다.</li>
+<li><strong>QoS가 안 맞을 때:</strong> 연결 자체가 안 됩니다.</li>
+<li><strong>콜백이 막혔을 때:</strong> 받는 쪽 큐가 넘쳐 버려집니다.</li>
+</ul>
+<p>그래서 꼭 필요한 메시지는 애플리케이션에서 ACK와 재전송을 합니다.
+VDA 5050(AGV 통신 표준)도 같은 방식입니다.
+전송은 가장 가벼운 MQTT QoS 0으로 하고, 신뢰성은 ID와 중복 확인으로 지킵니다.
+단, MQTT는 TCP 위에서 동작하므로 QoS 0도 연결이 살아 있는 동안은 재전송됩니다.
+ROS 2의 BEST_EFFORT(보통 UDP, 재전송 없음)와 같지 않으니, "VDA가 QoS 0이니 BEST_EFFORT"로 옮기지 않습니다.
+자세한 내용은 프로젝트 문서 「VDA 5050(v3.0) 선례로 보는 다중 토픽 처리」를 보세요.</p>
+<p>RELIABLE의 비용은 대체로 작습니다.
+한 연구(i7 데스크톱·Raspberry Pi 4, ROS 2 Foxy)에서는 RELIABLE의 p95 지연이 BEST_EFFORT보다 최대 15% 늘었습니다
+(<a href="https://arxiv.org/html/2101.02074v3">Kronauer et al. 2021</a>).
+이 값은 그 실험 조건의 측정값입니다. 환경이 다르면 값도 달라집니다.</p>
+
+<h3 id="t-compat" style="margin-top:28px">B. QoS 호환 표</h3>
+<p>받는 쪽(구독자)이 보내는 쪽보다 엄격하면 연결되지 않습니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>정책</th><th>보내는 쪽</th><th>받는 쪽</th><th>결과</th></tr></thead>
+<tbody>
+<tr><td rowspan="4">Reliability</td><td>BEST_EFFORT</td><td>BEST_EFFORT</td><td class="ok">연결됨</td></tr>
+<tr><td>BEST_EFFORT</td><td>RELIABLE</td><td class="ng">연결 안 됨</td></tr>
+<tr><td>RELIABLE</td><td>BEST_EFFORT</td><td class="ok">연결됨 (BEST_EFFORT로 동작)</td></tr>
+<tr><td>RELIABLE</td><td>RELIABLE</td><td class="ok">연결됨</td></tr>
+<tr><td rowspan="4">Durability</td><td>VOLATILE</td><td>VOLATILE</td><td class="ok">연결됨</td></tr>
+<tr><td>VOLATILE</td><td>TRANSIENT_LOCAL</td><td class="ng">연결 안 됨</td></tr>
+<tr><td>TRANSIENT_LOCAL</td><td>VOLATILE</td><td class="ok">연결됨 (지난 메시지는 못 받음)</td></tr>
+<tr><td>TRANSIENT_LOCAL</td><td>TRANSIENT_LOCAL</td><td class="ok">연결됨 (지난 메시지도 받음)</td></tr>
+</tbody></table></div>
+
+<h3 id="t-qos" style="margin-top:28px">C. QoS 정책 한눈에 보기</h3>
+<div class="tbl"><table>
+<thead><tr><th>정책</th><th>선택지</th><th>뜻</th></tr></thead>
+<tbody>
+<tr><td>History</td><td>KEEP_LAST(n) / KEEP_ALL</td><td>최근 n개만 보관 / 모두 보관(자원 한도까지)</td></tr>
+<tr><td>Reliability</td><td>RELIABLE / BEST_EFFORT</td><td>빠지면 다시 보냄 / 빠지면 그냥 넘어감</td></tr>
+<tr><td>Durability</td><td>VOLATILE / TRANSIENT_LOCAL</td><td>지난 메시지 안 남김 / 늦게 온 구독자에게 지난 메시지 보냄</td></tr>
+<tr><td>Deadline</td><td>시간</td><td>이 시간 안에 다음 메시지가 와야 함. 안 오면 이벤트 발생. 기본값은 사실상 무한대(감시 안 함)</td></tr>
+<tr><td>Lifespan</td><td>시간</td><td>이 시간이 지난 메시지는 버림</td></tr>
+<tr><td>Liveliness</td><td>AUTOMATIC 등 + lease 시간</td><td>상대 노드가 살아 있는지 확인. lease 기본값도 사실상 무한대</td></tr>
+</tbody></table></div>
+<p>기본 QoS는 KEEP_LAST 10, RELIABLE, VOLATILE입니다.
+<code>create_publisher(..., 10)</code>처럼 숫자만 주면 이 기본값이 쓰입니다.</p>
+<p>deadline과 liveliness lease는 값을 직접 정해야 끊김을 감지합니다. 예: 발행 주기의 3배.
+감지 결과는 받는 쪽 노드에만 알려지므로, 관제가 끊김을 판단하면 그 결과를 다시 토픽으로 알립니다.</p>
+
+<h3 style="margin-top:28px">D. Executor와 callback group</h3>
+<ul>
+<li>executor는 콜백을 실행하는 일꾼입니다.</li>
+<li><code>rclpy.spin()</code>은 일꾼이 1명입니다. 콜백이 한 번에 하나씩 실행됩니다.</li>
+<li><code>MultiThreadedExecutor</code>는 일꾼이 여럿입니다.</li>
+<li>노드의 기본 callback group은 MutuallyExclusive입니다. 그룹 안에서는 한 번에 하나만 실행됩니다.</li>
+<li>그래서 일꾼이 여럿이어도 그룹을 나누지 않으면 동시에 실행되지 않습니다.</li>
+<li>ReentrantCallbackGroup은 같은 콜백도 동시에 실행될 수 있습니다. 공유 데이터를 다룰 때는 조심해야 합니다.</li>
+<li>executor는 콜백을 우선순위가 아니라 대략 도착 순서대로 처리합니다. 중요한 콜백을 따로 빼는 이유입니다.</li>
+</ul>
+
+<h3 style="margin-top:28px">E. 메시지 크기</h3>
+<ul>
+<li>DDS는 보통 UDP로 전송합니다.</li>
+<li>UDP 한 번에 보낼 수 있는 크기는 최대 약 64 KB입니다.</li>
+<li>큰 메시지는 여러 조각으로 나뉘어 전송됩니다(단편화).</li>
+<li>어느 크기부터 나누는지는 DDS 구현과 설정에 따라 다릅니다. 64 KB보다 훨씬 작은 단위로 나누는 구현도 있습니다.</li>
+<li>조각이 많을수록 하나라도 빠질 가능성이 커집니다. 빠진 조각을 다시 받는 동안 메시지 전체가 늦어집니다.</li>
+<li>Wi-Fi처럼 손실이 있는 구간에서는 큰 메시지일수록 불리합니다.</li>
+<li>한 연구(Raspberry Pi 4, ROS 2 Foxy)에서는 64 KB를 넘자 지연이 크게 늘었고, 500 KB 메시지는 약 30%가 사라졌습니다
+(<a href="https://arxiv.org/html/2101.02074v3">Kronauer et al. 2021</a>).</li>
+<li>이 문서의 "64 KB"는 알림·명령 메시지의 <strong>초기 크기 목표</strong>입니다. 실제 한계는 쓰는 미들웨어로 시험해 정합니다.</li>
+</ul>
+
+<h3 id="t-slow" style="margin-top:28px">F. 느린 구독자 자세히</h3>
+
+<figure class="fig">
+<svg viewBox="0 0 720 280" role="img" aria-label="빠른 구독자와 느린 구독자 비교">
+<defs><marker id="ahs" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" class="ah"/></marker></defs>
+<rect class="box" x="20" y="100" width="150" height="60" rx="6"/>
+<text class="b" x="95" y="126" text-anchor="middle">보내는 쪽</text><text class="sm" x="95" y="145" text-anchor="middle">1초에 10개 발행</text>
+<path class="ln" d="M170,118 L362,72" marker-end="url(#ahs)"/>
+<path class="ln" d="M170,142 L362,188" marker-end="url(#ahs)"/>
+<text class="t-good sm" x="425" y="44" text-anchor="middle">받는 큐: 여유 있음</text>
+<rect class="q-ok" x="370" y="55" width="22" height="30"/><rect class="q" x="392" y="55" width="22" height="30"/><rect class="q" x="414" y="55" width="22" height="30"/><rect class="q" x="436" y="55" width="22" height="30"/><rect class="q" x="458" y="55" width="22" height="30"/>
+<path class="ln" d="M480,70 L497,70" marker-end="url(#ahs)"/>
+<rect class="fast" x="500" y="45" width="190" height="50" rx="6"/>
+<text class="b" x="595" y="66" text-anchor="middle">빠른 구독자</text><text class="sm" x="595" y="84" text-anchor="middle">1초에 10개 처리</text>
+<rect class="q-full" x="370" y="175" width="22" height="30"/><rect class="q-full" x="392" y="175" width="22" height="30"/><rect class="q-full" x="414" y="175" width="22" height="30"/><rect class="q-full" x="436" y="175" width="22" height="30"/><rect class="q-full" x="458" y="175" width="22" height="30"/>
+<text class="t-bad sm" x="425" y="225" text-anchor="middle">받는 큐: 가득 참 → 오래된 것부터 버림</text>
+<path class="ln" d="M480,190 L497,190" marker-end="url(#ahs)"/>
+<rect class="slow" x="500" y="165" width="190" height="50" rx="6"/>
+<text class="b" x="595" y="186" text-anchor="middle">느린 구독자</text><text class="sm" x="595" y="204" text-anchor="middle">1초에 2개 처리</text>
+<path class="ln-bad" d="M595,215 V242 H95 V163" marker-end="url(#ahs)"/>
+<text class="t-bad sm" x="345" y="264" text-anchor="middle">RELIABLE이면: 재전송·확인 응답 부담이 보내는 쪽에 쌓임</text>
+</svg>
+<figcaption>같은 토픽을 받는 두 구독자. 느린 구독자의 문제가 보내는 쪽으로 거슬러 올라갑니다.</figcaption>
+</figure>
+
+<h4>왜 느려지나요?</h4>
+<ul>
+<li>콜백 안에서 무거운 계산, DB 저장, HTTP 호출을 합니다.</li>
+<li>스레드가 1개라서 다른 콜백이 끝나기를 기다립니다.</li>
+<li>Wi-Fi 신호가 약해서 메시지가 늦게 도착합니다.</li>
+<li>Raspberry Pi처럼 성능이 낮은 PC에서 받습니다.</li>
+<li>웹 브리지 너머의 브라우저가 느립니다. 브리지 입장에서는 브라우저도 구독자입니다.</li>
+</ul>
+
+<h4>QoS에 따라 무슨 일이 생기나요?</h4>
+<div class="tbl"><table>
+<thead><tr><th>QoS</th><th>느린 구독자에게</th><th>다른 구독자·보내는 쪽에게</th></tr></thead>
+<tbody>
+<tr><td>BEST_EFFORT</td><td>못 받은 메시지는 그냥 놓칩니다.</td><td>영향이 거의 없습니다.</td></tr>
+<tr><td>RELIABLE + KEEP_LAST</td><td>큐가 넘치면 오래된 메시지를 잃습니다.</td><td>보내는 쪽이 재전송을 위해 메시지를 보관하고 다시 보냅니다. 재전송이 네트워크 대역을 씁니다. Wi-Fi에서는 다른 통신까지 느려집니다.</td></tr>
+<tr><td>RELIABLE + KEEP_ALL</td><td>메시지는 잃지 않지만 계속 밀립니다.</td><td>보관 공간이 차면 <code>publish()</code>가 멈추고 기다릴 수 있습니다. 그러면 다른 구독자도 함께 늦어집니다.</td></tr>
+</tbody></table></div>
+<p>정확한 동작은 DDS 구현과 설정에 따라 조금씩 다릅니다.
+하지만 "RELIABLE일수록 느린 구독자의 영향이 보내는 쪽으로 번진다"는 점은 같습니다.</p>
+
+<h4>실제 측정 사례</h4>
+<ul>
+<li>2026년 연구에서 RELIABLE 토픽의 느린 구독자 하나가 보내는 쪽을 멈추게 했습니다.
+중요한 구독자를 따로 분리하자 그 구독자의 지연(p95)이 최대 15초에서 1.55 ms로 줄었습니다
+(<a href="https://arxiv.org/abs/2608.15380">Adaptive Bridge, 2026</a>, 초록 기준).</li>
+<li>웹 브리지 rosbridge에서도 부하가 걸리자 한 클라이언트가 메시지의 95.8~99.8%를 받지 못했습니다
+(<a href="https://github.com/RobotWebTools/rosbridge_suite/issues/1243">rosbridge Issue #1243</a>).</li>
+</ul>
+
+<h4>어떻게 막나요?</h4>
+<ul>
+<li>콜백은 받기만 하고 바로 끝냅니다. 무거운 일은 타이머나 별도 스레드로 넘깁니다. (<a href="#i9">항목 9</a>)</li>
+<li>중요한 콜백은 별도 callback group에 넣습니다. (<a href="#i5">항목 5</a>)</li>
+<li>모든 메시지가 필요 없는 구독자는 BEST_EFFORT, depth 1로 받습니다.</li>
+<li>느린 쪽이 있다면 낮은 주기로 다시 발행하는 중계 토픽을 따로 만듭니다. (예: 10 Hz 원본 → 1 Hz 요약 토픽)</li>
+<li>중요한 토픽과 대량 토픽은 이름을 나눠 서로 영향을 주지 않게 합니다.</li>
+<li>웹 브리지는 클라이언트마다 큐 크기를 정합니다. 큐가 넘치는 클라이언트는 연결을 끊고 다시 붙게 합니다.</li>
+</ul>
+
+<h4>두 가지 문제를 구분하세요</h4>
+<div class="tbl"><table>
+<thead><tr><th>구분</th><th>무슨 일인가</th><th>누가 손해를 보나</th><th>해결</th></tr></thead>
+<tbody>
+<tr><td>받는 쪽 처리 적체</td><td>받는 노드의 콜백이 느려 그 노드의 큐가 넘칩니다.</td><td>주로 그 노드 자신</td><td>콜백 짧게, 최신값만 받기, callback group 분리</td></tr>
+<tr><td>DDS 재전송·보내는 쪽 대기</td><td>RELIABLE에서 확인 응답이 늦은 구독자 때문에 보내는 쪽이 계속 재전송하거나 기다립니다.</td><td>같은 토픽의 다른 구독자, 보내는 쪽, 네트워크 전체</td><td>BEST_EFFORT 사용, 중요·대량 토픽 분리, 느린 쪽용 중계 토픽</td></tr>
+</tbody></table></div>
+<p>두 문제는 함께 생기기도 하지만, 원인과 해결이 다릅니다.
+어느 쪽인지 먼저 구분한 뒤 대처합니다.</p>
+
+<h4>어떻게 확인하나요?</h4>
+<ul>
+<li><code>ros2 topic hz</code>는 CLI가 따로 만든 구독자의 수신 주기입니다.</li>
+<li>그래서 "토픽이 실제로 얼마나 자주 오는지"를 볼 때 씁니다.</li>
+<li>"내 노드가 따라가고 있는지"는 알려 주지 않습니다.</li>
+<li>내 노드의 병목은 그 노드 안에서 잽니다. 콜백 처리 시간과 받은 개수, 놓친 개수입니다.</li>
+</ul>
+<pre><code># 토픽 자체의 발행 주기 확인 (CLI 구독자 기준)
+ros2 topic hz /scan
+
+# 메시지에 header.stamp가 있으면 도착 지연도 볼 수 있습니다 (CLI 구독자 기준)
+ros2 topic delay /scan</code></pre>
+<pre><code># 내 노드 안에서 콜백 처리 시간 재기
+import time
+
+def on_scan(self, msg):
+    t0 = time.monotonic()
+    ...                                   # 실제 처리
+    dt = time.monotonic() - t0
+    if dt &gt; 0.1:                          # 발행 주기(0.1초)보다 오래 걸리면 경고
+        self.get_logger().warn(f'콜백 {dt * 1000:.0f} ms')</code></pre>
+<ul>
+<li>메시지에 순번(seq)을 넣으면, 받는 쪽에서 빠진 개수를 셀 수 있습니다.</li>
+<li>보내는 노드가 재시작하면 seq가 0으로 돌아갑니다. seq와 함께 부팅(세션) ID를 넣어, 받는 쪽이 재시작과 누락을 구분하게 합니다.</li>
+<li>콜백 시간이 발행 주기보다 길면 그 노드는 느린 구독자입니다.</li>
+</ul>
+
+<h3 id="t-wifi" style="margin-top:28px">G. Wi-Fi 환경 운영</h3>
+<p>Wi-Fi는 유선보다 느리고, 손실이 있고, 여러 장비가 나눠 씁니다.
+로봇은 움직이므로 신호 세기도 계속 바뀝니다.
+아래 내용을 기본으로 지켜 주세요.</p>
+
+<h4>1. 네트워크 구성</h4>
+<ul>
+<li>로봇 전용 공유기를 씁니다. 다른 용도의 장비와 섞지 않습니다.</li>
+<li>가능하면 5 GHz 대역을 씁니다. 2.4 GHz는 간섭이 많습니다.</li>
+<li>서버 PC처럼 움직이지 않는 장비는 유선으로 연결합니다.</li>
+<li>로봇이 다니는 구역 끝에서 신호 세기를 미리 확인합니다.</li>
+</ul>
+
+<h4>2. 보내는 양 계산하기</h4>
+<ul>
+<li>Wi-Fi의 실제 처리량은 공유기에 표시된 속도보다 훨씬 낮습니다.</li>
+<li>그 처리량을 연결된 모든 장비가 나눠 씁니다.</li>
+<li>보내기 전에 "메시지 크기 × 초당 개수 × 로봇 수"를 계산해 봅니다.</li>
+<li>예: 원본 이미지 640×480, 30 Hz는 로봇 1대만으로 약 220 Mbps입니다.</li>
+<li>실제 양은 <code>ros2 topic bw &lt;토픽&gt;</code>으로 확인합니다.</li>
+</ul>
+
+<h4>3. 도메인 ID로 시스템 분리</h4>
+<ul>
+<li>같은 도메인 ID를 쓰는 노드끼리만 서로를 찾습니다.</li>
+<li>기본값은 0입니다. 기본값을 쓰면 같은 공유기의 다른 시스템과 섞입니다.</li>
+<li>시스템마다 다른 번호를 정하고, 그 시스템의 모든 PC에 같은 값을 넣습니다.</li>
+<li>0~101 사이 번호를 권장합니다. (<a href="https://docs.ros.org/en/jazzy/Concepts/Intermediate/About-Domain-ID.html">Domain ID 문서</a>)</li>
+<li><code>~/.bashrc</code>에 넣어 두면 빠뜨리지 않습니다.</li>
+</ul>
+
+<h4>4. 탐색(discovery) 문제</h4>
+<ul>
+<li>DDS는 기본적으로 multicast로 다른 노드를 찾습니다.</li>
+<li>Wi-Fi 공유기는 multicast를 느리게 보내거나 막는 경우가 있습니다.</li>
+<li>그러면 노드가 안 보이거나, 늦게 보이거나, 가끔 끊깁니다.</li>
+<li>먼저 multicast가 되는지 확인합니다. 두 PC에서 아래를 실행합니다.</li>
+</ul>
+<pre><code># PC A
+ros2 multicast receive
+# PC B
+ros2 multicast send</code></pre>
+<p>multicast가 잘 안 되면 아래 방법을 검토합니다.</p>
+<ul>
+<li><strong>찾는 범위 줄이기:</strong> 다른 PC와 통신하지 않는 노드는 localhost로 제한합니다. (<a href="#i10">항목 10</a>)</li>
+<li><strong>상대 고정하기 (Jazzy):</strong> <code>ROS_STATIC_PEERS</code>에 통신할 PC의 IP를 적습니다.
+(<a href="https://docs.ros.org/en/jazzy/Tutorials/Advanced/Improved-Dynamic-Discovery.html">Improved Dynamic Discovery 문서</a>)</li>
+<li><strong>Discovery Server (Fast DDS):</strong> 탐색을 서버 한 곳에서 처리합니다. multicast가 필요 없습니다.
+(<a href="https://docs.ros.org/en/jazzy/Tutorials/Advanced/Discovery-Server/Discovery-Server.html">Discovery Server 문서</a>)</li>
+</ul>
+<pre><code># 서버 PC에서 Discovery Server 실행
+fastdds discovery -i 0
+
+# 각 PC의 노드 실행 전
+export ROS_DISCOVERY_SERVER=192.168.0.10:11811</code></pre>
+<p>Discovery Server를 쓰면 <code>ros2 topic list</code> 같은 CLI 명령에 추가 설정이 필요합니다.
+공식 문서의 "ROS 2 CLI" 부분을 참고하세요.
+어느 방법을 쓸지는 팀에서 하나로 정해 모든 PC에 똑같이 적용해야 합니다.</p>
+
+<h4>5. QoS 운영</h4>
+<ul>
+<li>위치처럼 다음 값이 곧 대신하는 데이터만 BEST_EFFORT로 보냅니다. Wi-Fi에서 재전송이 쌓이지 않습니다.</li>
+<li>작업 진행 상태는 RELIABLE + depth 1로 보냅니다. 관제가 명령의 도착과 완료를 확인하는 근거이기 때문입니다. (<a href="#i2">항목 2</a>)</li>
+<li>중요 알림은 RELIABLE + ACK로 보냅니다. Wi-Fi가 끊겼다 돌아와도 다시 보냅니다.</li>
+<li>depth는 "Wi-Fi가 끊길 수 있는 시간 동안 쌓일 메시지 수"보다 크게 잡습니다.</li>
+<li><code>deadline</code>, <code>liveliness</code>로 "로봇과 연결이 끊겼다"를 빨리 알아챕니다. lease 값은 반드시 정합니다.</li>
+<li>관제 → 로봇 방향도 하트비트로 감시합니다. (<a href="#i2">항목 2</a>)</li>
+</ul>
+
+<h4>6. 큰 메시지와 미들웨어</h4>
+<ul>
+<li>Wi-Fi에서는 64 KB를 넘는 메시지의 지연과 손실이 크게 늘어납니다.</li>
+<li>한 연구에서는 Wi-Fi에서 1 KB 메시지 평균 지연이 CycloneDDS 51.40 ms, Zenoh(broker 방식) 12.58 ms였습니다
+(<a href="https://ar5iv.labs.arxiv.org/html/2309.07496">Zhang et al. 2023</a>).</li>
+<li>Wi-Fi 구간이 계속 문제라면 Zenoh(rmw_zenoh, zenoh-bridge-ros2dds)를 검토해 볼 수 있습니다.</li>
+<li>다만 미들웨어를 바꾸는 것은 팀 전체에 영향이 큽니다. 먼저 보내는 양과 QoS를 정리한 뒤에 검토합니다.</li>
+</ul>
+
+<h4>7. 점검 명령 모음</h4>
+<pre><code>ros2 doctor --report          # ROS 2 환경·네트워크 설정 요약
+ros2 topic hz &lt;토픽&gt;           # 받는 쪽의 실제 수신 주기
+ros2 topic bw &lt;토픽&gt;           # 토픽이 쓰는 대역폭
+ros2 topic info -v &lt;토픽&gt;      # 연결된 노드와 양쪽 QoS
+iw dev wlan0 link             # Wi-Fi 신호 세기, 연결 속도 (Linux)
+ping &lt;상대 IP&gt;                 # 지연과 손실</code></pre>
+<p>지연을 PC끼리 비교하려면 시계가 맞아야 합니다.
+모든 PC에 chrony 같은 시간 동기화를 켜 둡니다.</p>
+
+<h4 id="t-localhost">8. localhost·127.0.0.1 사용 시 주의</h4>
+<p>localhost 제한은 Wi-Fi 부담을 줄여 주지만, 잘못 쓰면 "토픽이 안 보인다" 문제의 가장 흔한 원인이 됩니다.
+웹 브리지처럼 HTTP·WebSocket을 함께 쓰는 프로그램에서는 <code>localhost</code>라는 이름 자체가 지연을 일으키기도 합니다.</p>
+<div class="tbl"><table>
+<thead><tr><th>상황</th><th>무슨 일이 생기나</th><th>이렇게 합니다</th></tr></thead>
+<tbody>
+<tr><td>localhost 제한을 <code>~/.bashrc</code>에 넣음</td><td>그 PC의 모든 노드가 다른 PC에서 안 보입니다.</td><td>다른 PC와 통신이 전혀 없는 실행에만, 그 터미널이나 launch 파일에서만 설정합니다.</td></tr>
+<tr><td>같은 PC에서 설정이 섞임</td><td>설정이 다른 노드끼리 못 찾을 수 있습니다. <code>ros2 topic list</code>도 비어 보일 수 있습니다.</td><td>함께 통신하는 노드와 CLI는 같은 설정을 씁니다. 설정을 바꾼 뒤에는 <code>ros2 daemon stop</code>으로 CLI 데몬을 다시 시작합니다.</td></tr>
+<tr><td>Humble + CycloneDDS에서 <code>ROS_LOCALHOST_ONLY=1</code></td><td>환경에 따라 loopback(<code>lo</code>)에 multicast가 꺼져 있어 탐색이 실패합니다.</td><td><code>ip link show lo</code>에 MULTICAST가 있는지 확인합니다. 없으면 <code>sudo ip link set lo multicast on</code> (재부팅하면 다시 꺼짐)</td></tr>
+<tr><td>Jazzy에서 <code>ROS_LOCALHOST_ONLY</code> 사용</td><td>동작은 하지만 지원 중단 예정 경고가 나옵니다.</td><td><code>ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST</code>로 바꿉니다.</td></tr>
+<tr><td>Docker 컨테이너 안에서 <code>localhost</code></td><td>컨테이너 안의 localhost는 컨테이너 자신입니다. 호스트의 노드나 서버가 아닙니다. 공유 메모리 전송도 기본 설정으로는 막힙니다.</td><td>ROS 2 노드는 컨테이너에 넣지 않거나, 넣는다면 host 네트워크·IPC 설정을 팀 표준으로 정합니다.</td></tr>
+<tr><td>같은 PC의 HTTP·WebSocket 서버(예: 브리지 REST)를 <code>localhost</code>로 호출</td><td>연결이 눈에 띄게 느려질 수 있습니다. 팀에서도 <code>127.0.0.1</code>로 바꾸자 빨라진 사례가 있었습니다. <code>localhost</code>는 IPv6 주소(<code>::1</code>)로 먼저 풀릴 수 있습니다. 서버가 IPv4(<code>127.0.0.1</code>)에서만 받고 있으면, 클라이언트가 <code>::1</code> 연결에 실패한 뒤 IPv4로 다시 시도하느라 시간이 걸립니다. 이름을 주소로 바꾸는 단계(DNS·hosts 조회)가 느린 환경에서도 지연이 생깁니다.</td><td>같은 PC 안의 호출은 <code>http://127.0.0.1:포트</code>처럼 IP로 씁니다. 또는 서버가 IPv4와 IPv6를 모두 받도록 설정합니다. 주소는 설정 파일 한 곳에 두고 함께 씁니다.</td></tr>
+<tr><td>다른 PC에 보내는 주소에 <code>localhost</code>·<code>127.0.0.1</code></td><td>받는 PC가 자기 자신을 가리키게 됩니다. 이미지 URL, <code>ROS_STATIC_PEERS</code>, <code>ROS_DISCOVERY_SERVER</code> 모두 해당합니다.</td><td>다른 PC가 접근할 수 있는 실제 IP나 호스트 이름을 씁니다. (<a href="#i7">항목 7</a>)</td></tr>
+</tbody></table></div>
+<p>여러 PC에 노드가 나뉘어 있는 시스템이라면, 대부분의 노드는 네트워크로 통신해야 합니다.
+localhost 제한은 "한 PC 안에서만 주고받는 것이 확실한 실행"에만 씁니다.
+확실하지 않으면 쓰지 않는 편이 안전합니다.</p>
+
+<!-- ===== glossary ===== -->
+<h2 id="glossary">4부. 용어집</h2>
+<dl>
+<dt>QoS (Quality of Service)</dt><dd>메시지를 어떻게 보낼지 정하는 설정 묶음입니다.</dd>
+<dt>History / depth</dt><dd>보관할 메시지 개수입니다. KEEP_LAST 10이면 최근 10개만 보관합니다.</dd>
+<dt>RELIABLE / BEST_EFFORT</dt><dd>빠진 메시지를 다시 보낼지 여부입니다.</dd>
+<dt>VOLATILE / TRANSIENT_LOCAL</dt><dd>늦게 접속한 구독자에게 지난 메시지를 줄지 여부입니다.</dd>
+<dt>ACK</dt><dd>"받았다"는 확인 응답입니다.</dd>
+<dt>하트비트 (heartbeat)</dt><dd>"살아 있다"를 알리려고 일정한 주기로 보내는 작은 신호입니다.</dd>
+<dt>업데이트 번호</dt><dd>같은 주문을 고쳐 보낼 때마다 1씩 늘리는 번호입니다. 늦게 도착한 옛 지시를 거르는 데 씁니다.</dd>
+<dt>부팅(세션) ID</dt><dd>노드가 시작될 때마다 새로 정하는 값입니다. 재시작 전후의 순번을 구분하는 데 씁니다.</dd>
+<dt>중복 확인 (멱등성)</dt><dd>같은 요청이 여러 번 와도 한 번만 처리되게 하는 것입니다.</dd>
+<dt>콜백 (callback)</dt><dd>메시지가 오거나 타이머가 울릴 때 실행되는 함수입니다.</dd>
+<dt>executor</dt><dd>콜백을 실행하는 일꾼입니다.</dd>
+<dt>callback group</dt><dd>콜백을 묶는 그룹입니다. 그룹마다 동시 실행 규칙이 다릅니다.</dd>
+<dt>deadlock</dt><dd>서로 상대를 기다리다 둘 다 멈추는 상태입니다.</dd>
+<dt>액션 (action)</dt><dd>오래 걸리는 작업용 통신입니다. 수락·진행·결과를 모두 알려줍니다.</dd>
+<dt>goal / feedback / result</dt><dd>액션의 요청 / 진행 상황 / 최종 결과입니다.</dd>
+<dt>느린 구독자 (slow subscriber)</dt><dd>메시지가 들어오는 속도보다 처리하는 속도가 느린 구독자입니다.</dd>
+<dt>탐색 (discovery)</dt><dd>노드들이 네트워크에서 서로를 찾는 과정입니다.</dd>
+<dt>multicast</dt><dd>한 번 보내서 여러 장비가 함께 받는 전송 방식입니다. DDS가 탐색에 씁니다.</dd>
+<dt>ROS_DOMAIN_ID</dt><dd>ROS 2 통신 그룹 번호입니다. 같은 번호끼리만 서로를 찾습니다.</dd>
+<dt>대역폭 (bandwidth)</dt><dd>1초에 보낼 수 있는 데이터 양입니다. 보통 Mbps로 나타냅니다.</dd>
+</dl>
+
+<!-- ===== refs ===== -->
+<h2 id="refs">5부. 참고 자료</h2>
+<ul>
+<li>ROS 2 QoS 문서 — <a href="https://github.com/ros2/ros2_documentation/blob/rolling/source/ROS-Framework/interfaces/topics/About-Quality-of-Service-Settings.rst">About Quality of Service Settings</a></li>
+<li>ROS 2 callback group 문서 — <a href="https://docs.ros.org/en/rolling/How-To-Guides/Using-callback-groups.html">Using callback groups</a></li>
+<li>ROS 2 액션 설계 — <a href="https://design.ros2.org/articles/actions.html">design.ros2.org: Actions</a></li>
+<li>RELIABLE 지연, 64 KB 단편화, 500 KB 손실 측정 — <a href="https://arxiv.org/html/2101.02074v3">Kronauer et al. 2021</a></li>
+<li>executor 처리 순서 분석 — <a href="https://drops.dagstuhl.de/entities/document/10.4230/LIPIcs.ECRTS.2019.6">Casini et al., ECRTS 2019</a></li>
+<li>느린 구독자가 보내는 쪽을 멈추는 사례 — <a href="https://arxiv.org/abs/2608.15380">Adaptive Bridge, 2026</a>, <a href="https://github.com/RobotWebTools/rosbridge_suite/issues/1243">rosbridge Issue #1243</a></li>
+<li>Wi-Fi·4G에서 DDS·Zenoh·MQTT 지연 비교 — <a href="https://ar5iv.labs.arxiv.org/html/2309.07496">Zhang et al. 2023</a></li>
+<li>도메인 ID — <a href="https://docs.ros.org/en/jazzy/Concepts/Intermediate/About-Domain-ID.html">About Domain ID</a></li>
+<li>탐색 범위·고정 상대 — <a href="https://docs.ros.org/en/jazzy/Tutorials/Advanced/Improved-Dynamic-Discovery.html">Improved Dynamic Discovery</a></li>
+<li>Discovery Server — <a href="https://docs.ros.org/en/jazzy/Tutorials/Advanced/Discovery-Server/Discovery-Server.html">Using Fast DDS Discovery Server</a></li>
+<li>VDA 5050 표준 —<a href="https://github.com/VDA5050/VDA5050/blob/main/VDA5050_EN.md">VDA5050 v3.0</a></li>
+<li>무선 환경의 다중 토픽 처리 선례 — 프로젝트 문서 「VDA 5050(v3.0) 선례로 보는 다중 토픽 처리」</li>
+<li>더 깊은 내용 — 프로젝트 문서 「ROS2 REST 브리지 대량 메시지 처리」</li>
+</ul>
+
+</main>
+</body>
+</html>
