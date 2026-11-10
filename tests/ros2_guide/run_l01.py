@@ -3,6 +3,8 @@
 import argparse
 import json
 import os
+import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -25,7 +27,7 @@ VARIANTS: dict[str, dict] = {
     "F": {"profile": "EVENT", "mode": "stream", "late_sub": False},
     "S": {"profile": None, "mode": "service", "late_sub": False},
 }
-IMPLEMENTED = ("A", "B", "C", "D", "F")
+IMPLEMENTED = ("A", "B", "C", "D", "E-VOL", "E-TL", "F", "S")
 
 PUB_TIMEOUT = {"once": 15.0, "wait_match": 15.0, "stream": 15.0}
 TRIAL_GAP_S = 0.5
@@ -34,6 +36,13 @@ READY_TIMEOUT_S = 15.0
 RATE_HZ = 10
 STREAM_SECONDS = 3
 WAIT_TIMEOUT_S = 5.0
+LATE_SUB_DELAY_S = 1.0
+LATE_PUB_LINGER_S = 4.0
+LATE_SUB_DURATION_S = 3.0
+LATE_SUB_TIMEOUT_S = 15.0
+LATE_PUB_TIMEOUT_S = 15.0
+CLIENT_TIMEOUT_S = 5.0
+CLIENT_PROC_TIMEOUT_S = 15.0
 
 
 def topic_for(variant: str) -> str:
@@ -59,6 +68,40 @@ def _parse_pub_line(stdout: str) -> dict | None:
     return None
 
 
+def late_trial_excluded(
+    pub_timed_out: bool,
+    pub_rc: int | None,
+    pub_info_present: bool,
+    sub_timed_out: bool,
+    sub_rc: int | None,
+    sub_summary_present: bool,
+) -> bool:
+    """True when a late-subscriber trial cannot be scored (not counted as loss)."""
+    pub_ok = not pub_timed_out and pub_rc == 0 and pub_info_present
+    sub_ok = not sub_timed_out and sub_rc == 0 and sub_summary_present
+    return not (pub_ok and sub_ok)
+
+
+def service_call_ok(timed_out: bool, rc: int | None, info: dict | None) -> bool:
+    """A service trial counts as received only for a clean client reporting ok == true."""
+    return not timed_out and rc == 0 and info is not None and info.get("ok") is True
+
+
+def _finish_child(p, timeout: float) -> proc.ChildResult:
+    """Wait for an already-started child; SIGINT then kill on timeout; always reaped."""
+    try:
+        out, _ = p.communicate(timeout=timeout)
+        return proc.ChildResult(p.returncode, out or "", False)
+    except subprocess.TimeoutExpired:
+        p.send_signal(signal.SIGINT)
+        try:
+            out, _ = p.communicate(timeout=2.0)
+        except subprocess.TimeoutExpired:
+            p.kill()
+            out, _ = p.communicate()
+        return proc.ChildResult(p.returncode, out or "", True)
+
+
 def _read_rx(path: Path) -> dict[int, list[tuple[int, int]]]:
     rx: dict[int, list[tuple[int, int]]] = {}
     if not path.exists():
@@ -81,6 +124,143 @@ def _read_bad(path: Path) -> int | None:
 
 
 def run_variant(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, dict, list]:
+    if VARIANTS[variant]["mode"] == "service":
+        return _run_service(variant, trials, env)
+    if VARIANTS[variant]["late_sub"]:
+        return _run_late_sub(variant, trials, env, tmp)
+    return _run_persistent_sub(variant, trials, env, tmp)
+
+
+def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, dict, list]:
+    cfg = VARIANTS[variant]
+    topic = topic_for(variant)
+    received: list[int] = []
+    excluded: list[int] = []
+    sub_failed: list[int] = []
+    notes: list[str] = []
+    for trial in range(trials):
+        out_path = tmp / f"l01_e_{variant.lower().replace('-', '_')}_{trial}.jsonl"
+        pub_cmd = [
+            sys.executable, str(NODES / "l01_pub.py"), "--topic", topic,
+            "--profile", cfg["profile"], "--trial", str(trial), "--mode", "once",
+            "--linger", str(LATE_PUB_LINGER_S),
+        ]  # fmt: skip
+        sub_cmd = [
+            sys.executable, str(NODES / "l01_sub.py"), "--topic", topic,
+            "--profile", cfg["profile"], "--out", str(out_path),
+            "--duration", str(LATE_SUB_DURATION_S),
+        ]  # fmt: skip
+        pub = None
+        pub_res = proc.ChildResult(None, "", True)
+        sub_res = proc.ChildResult(None, "", True)
+        try:
+            pub = proc.start_child(pub_cmd, env)
+            time.sleep(LATE_SUB_DELAY_S)
+            sub_res = proc.run_child(sub_cmd, LATE_SUB_TIMEOUT_S, env)
+            pub_res = _finish_child(pub, LATE_PUB_TIMEOUT_S)
+        finally:
+            if pub is not None:
+                proc.stop_child(pub)
+        info = _parse_pub_line(pub_res.stdout)
+        summary_ok = _read_bad(out_path) is not None
+        if late_trial_excluded(
+            pub_res.timed_out, pub_res.rc, info is not None,
+            sub_res.timed_out, sub_res.rc, summary_ok,
+        ):  # fmt: skip
+            excluded.append(trial)
+            if not (not sub_res.timed_out and sub_res.rc == 0 and summary_ok):
+                sub_failed.append(trial)
+        elif trial in _read_rx(out_path):
+            received.append(trial)
+        time.sleep(TRIAL_GAP_S)
+    t = judge.tally(trials, received)
+    obs = dict(t)
+    obs["sub_ready"] = True
+    obs["sub_alive"] = not sub_failed
+    obs["sub_summary_present"] = not sub_failed
+    obs["sub_exit_code"] = None
+    obs["bad_messages"] = None
+    obs["excluded_trials"] = sorted(excluded)
+    obs["lost_trials_counted"] = [x for x in t["lost_trials"] if x not in excluded]
+    obs["late_sub_failed_trials"] = sorted(sub_failed)
+    cond = {
+        "trials": trials,
+        "profile": cfg["profile"],
+        "qos": qos.load_profiles()[cfg["profile"]],
+        "mode": cfg["mode"],
+        "topic": topic,
+        "trial_gap_s": TRIAL_GAP_S,
+        "late_sub_delay_s": LATE_SUB_DELAY_S,
+        "pub_linger_s": LATE_PUB_LINGER_S,
+        "sub_duration_s": LATE_SUB_DURATION_S,
+    }
+    if excluded:
+        notes.append(f"제외된 시도(발행/구독 프로세스 실패): {sorted(excluded)}")
+    return obs, cond, notes
+
+
+def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list]:
+    service = topic_for(variant)
+    server = None
+    ready = False
+    alive = True
+    server_rc = None
+    received: list[int] = []
+    excluded: list[int] = []
+    wait_ms: dict[str, float | None] = {}
+    try:
+        server = proc.start_child(
+            [sys.executable, str(NODES / "l01_srv.py"), "server", "--service", service], env
+        )
+        ready = proc.wait_ready(server, READY_TIMEOUT_S)
+        if ready:
+            for trial in range(trials):
+                cmd = [
+                    sys.executable, str(NODES / "l01_srv.py"), "client", "--service", service,
+                    "--trial", str(trial), "--timeout", str(CLIENT_TIMEOUT_S),
+                ]  # fmt: skip
+                r = proc.run_child(cmd, CLIENT_PROC_TIMEOUT_S, env)
+                info = _parse_pub_line(r.stdout)
+                if info is not None:
+                    wait_ms[str(trial)] = info.get("wait_ms")
+                if service_call_ok(r.timed_out, r.rc, info):
+                    received.append(trial)
+                elif r.timed_out or r.rc != 0 or info is None:
+                    excluded.append(trial)
+                if server.poll() is not None:
+                    alive = False
+                time.sleep(TRIAL_GAP_S)
+            if server.poll() is not None:
+                alive = False
+    finally:
+        if server is not None:
+            server_rc = server.poll()
+            proc.stop_child(server)
+    alive = alive and ready
+    t = judge.tally(trials, received)
+    obs = dict(t)
+    obs["sub_ready"] = ready
+    obs["sub_alive"] = alive
+    obs["sub_summary_present"] = True
+    obs["sub_exit_code"] = server_rc
+    obs["bad_messages"] = None
+    obs["excluded_trials"] = sorted(excluded)
+    obs["lost_trials_counted"] = [x for x in t["lost_trials"] if x not in excluded]
+    obs["wait_ms"] = wait_ms
+    cond = {
+        "trials": trials,
+        "mode": "service",
+        "service": service,
+        "service_type": "std_srvs/srv/Trigger",
+        "trial_gap_s": TRIAL_GAP_S,
+        "client_timeout_s": CLIENT_TIMEOUT_S,
+    }
+    return obs, cond, [] if ready else ["서버가 READY를 내지 않음"]
+
+
+def _run_persistent_sub(
+    variant: str, trials: int, env: dict, tmp: Path
+) -> tuple[dict, dict, list]:
     cfg = VARIANTS[variant]
     topic = topic_for(variant)
     mode = cfg["mode"]
