@@ -51,6 +51,7 @@ PATH_TO = {"PENDING": [], "SENT": ["SENT"], "ACCEPTED": ["SENT", "ACCEPTED"],
            "DONE": ["SENT", "ACCEPTED", "DONE"], "REJECTED": ["SENT", "REJECTED"]}
 
 
+@pytest.mark.plan_id("UT-01")
 def test_outbox_full_transition_matrix():
     ob = _outbox()
     bad = []
@@ -70,6 +71,7 @@ def test_outbox_full_transition_matrix():
     assert bad == []
 
 
+@pytest.mark.plan_id("UT-01")
 def test_single_transition_site():
     hits = [p.relative_to(PKG).as_posix() for p in PKG.rglob("*.py")
             if "UPDATE outbox SET state" in p.read_text(encoding="utf-8")]

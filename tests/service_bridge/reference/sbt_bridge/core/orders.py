@@ -4,9 +4,12 @@
   outbox(PENDING)를 한 트랜잭션으로 저장 → 201
 - 같은 키 + 같은 본문: 처음 응답을 그대로 돌려줌 (주문을 새로 만들지 않음)
 - 같은 키 + 다른 본문: IdempotencyConflict → 웹 계층이 409
+- 저장(커밋) 실패: 롤백한 뒤 예외를 그대로 올림 → 웹 계층이 5xx. 미커밋 행을 남기지 않으므로
+  같은 키로 재시도하면 처음부터 다시 접수합니다.
 본문은 키 순서·공백을 정규화해 비교하므로 {"a":1,"b":2}와 {"b":2, "a":1}은 같은 본문입니다.
 """
 import json
+import sqlite3
 import uuid
 
 
@@ -38,11 +41,16 @@ class OrderDesk:
                 return row[1], json.loads(row[2])
             order_id = str(uuid.uuid4())
             body = {"order_id": order_id, "state": "PENDING"}
-            self.db.execute(
-                "INSERT INTO orders(idem_key, order_id, payload_norm, status_code, body_json) "
-                "VALUES (?, ?, ?, ?, ?)",
-                (idempotency_key, order_id, norm, 201, json.dumps(body)))
-            self.db.execute("INSERT INTO outbox(order_id, state, payload) VALUES (?, 'PENDING', ?)",
-                            (order_id, norm))
-            self.db.commit()
+            try:
+                self.db.execute(
+                    "INSERT INTO orders(idem_key, order_id, payload_norm, status_code, body_json) "
+                    "VALUES (?, ?, ?, ?, ?)",
+                    (idempotency_key, order_id, norm, 201, json.dumps(body)))
+                self.db.execute(
+                    "INSERT INTO outbox(order_id, state, payload) VALUES (?, 'PENDING', ?)",
+                    (order_id, norm))
+                self.db.commit()
+            except sqlite3.Error:
+                self.db.rollback()
+                raise
             return 201, body
