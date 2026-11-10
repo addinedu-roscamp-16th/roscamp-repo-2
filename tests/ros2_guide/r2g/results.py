@@ -4,16 +4,18 @@ import os
 import socket
 import subprocess
 import time
+from collections.abc import Mapping
 from pathlib import Path
 
 RESULTS = ("통과", "실패", "미실행", "판정 불가", "측정")
 
 
-def env_info() -> dict:
+def env_info(env: Mapping[str, str] | None = None) -> dict:
+    env = os.environ if env is None else env
     return {
-        "ROS_DISTRO": os.environ.get("ROS_DISTRO", ""),
-        "RMW_IMPLEMENTATION": os.environ.get("RMW_IMPLEMENTATION") or "기본",
-        "ROS_DOMAIN_ID": os.environ.get("ROS_DOMAIN_ID", ""),
+        "ROS_DISTRO": env.get("ROS_DISTRO", ""),
+        "RMW_IMPLEMENTATION": env.get("RMW_IMPLEMENTATION") or "기본",
+        "ROS_DOMAIN_ID": env.get("ROS_DOMAIN_ID", ""),
         "host": socket.gethostname(),
     }
 
@@ -32,6 +34,7 @@ def write_result(
     observations: dict,
     conditions: dict,
     notes: list[str] | None = None,
+    env: Mapping[str, str] | None = None,
 ) -> Path:
     if result not in RESULTS:
         raise ValueError(f"unknown result {result!r}; expected one of {RESULTS}")
@@ -41,7 +44,7 @@ def write_result(
         "result": result,
         "run_id": Path(run_dir).name,
         "written_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "env": env_info(),
+        "env": env_info(env),
         "conditions": conditions,
         "observations": observations,
         "notes": notes or [],

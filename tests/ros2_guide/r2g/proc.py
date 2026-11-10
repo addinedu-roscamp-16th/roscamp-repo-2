@@ -1,4 +1,5 @@
 """Subprocess helpers for running ROS node scripts as children."""
+import os
 import select
 import signal
 import subprocess
@@ -49,18 +50,25 @@ def run_child(cmd: list[str], timeout: float, env: Mapping[str, str]) -> ChildRe
 
 
 def wait_ready(p: subprocess.Popen, timeout: float) -> bool:
+    if p.stdout is None:
+        return False
+    fd = p.stdout.fileno()
     deadline = time.monotonic() + timeout
+    buf = b""
     while True:
         remaining = deadline - time.monotonic()
-        if remaining <= 0 or p.stdout is None:
+        if remaining <= 0:
             return False
-        ready, _, _ = select.select([p.stdout], [], [], remaining)
+        ready, _, _ = select.select([fd], [], [], remaining)
         if not ready:
             return False
-        line = p.stdout.readline()
-        if not line:
+        chunk = os.read(fd, 4096)
+        if not chunk:
             return False
-        if line.strip() == "READY":
+        buf += chunk
+        lines = buf.split(b"\n")
+        buf = lines.pop()
+        if any(line.strip() == b"READY" for line in lines):
             return True
 
 

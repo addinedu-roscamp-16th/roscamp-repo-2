@@ -2,6 +2,7 @@ import json
 
 import pytest
 
+from r2g.proc import child_env
 from r2g.results import env_info, new_run_dir, save_doctor, write_result
 
 
@@ -39,3 +40,13 @@ def test_save_doctor_without_ros2(tmp_path, monkeypatch):
     monkeypatch.setenv("PATH", str(tmp_path))
     p = save_doctor(tmp_path)
     assert p.name == "doctor.txt" and p.read_text(encoding="utf-8")
+
+
+def test_env_info_uses_given_env():
+    assert env_info(child_env({}))["ROS_DOMAIN_ID"] == "87"
+
+
+def test_write_result_records_given_env(tmp_path):
+    p = write_result(tmp_path, "E-1", "측정", {}, {}, env=child_env({}))
+    data = json.loads(p.read_text(encoding="utf-8"))
+    assert data["env"]["ROS_DOMAIN_ID"] == "87"

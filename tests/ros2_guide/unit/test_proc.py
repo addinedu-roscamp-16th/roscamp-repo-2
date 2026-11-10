@@ -32,3 +32,15 @@ def test_wait_ready_and_stop():
     assert wait_ready(p, 5.0)
     stop_child(p, grace=1.0)
     assert p.poll() is not None
+
+
+def test_wait_ready_multiple_lines_in_one_write():
+    code = (
+        "import sys, time; sys.stdout.write('a\\nb\\nREADY\\n'); "
+        "sys.stdout.flush(); time.sleep(30)"
+    )
+    p = start_child([sys.executable, "-u", "-c", code], os.environ)
+    try:
+        assert wait_ready(p, 5.0)
+    finally:
+        stop_child(p, grace=1.0)
