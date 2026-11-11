@@ -6,6 +6,12 @@ RULE_VARIANTS_L01 = frozenset({"B", "C", "E-TL", "S"})
 PASS = "통과"
 FAIL = "실패"
 MEASURE = "측정"
+UNJUDGEABLE = "판정 불가"
+
+# 계획서 3.1의 공식 크기. 이 크기가 아니면 규칙 변형은 판정하지 않는다.
+STANDARD_TRIALS_L01 = 50
+STANDARD_SECONDS_L03 = 20.0
+STANDARD_REPEATS_L03 = 5
 
 
 def tally(sent: int, received_trials: Iterable[int]) -> dict:
@@ -57,3 +63,42 @@ def staleness_stats(samples_ms: list[float]) -> dict:
 def judge_l03_rule(runs: list[dict], limit_ms: float = 150.0, expected_runs: int = 5) -> str:
     ok = len(runs) == expected_runs and all(r["count"] > 0 and r["max"] <= limit_ms for r in runs)
     return PASS if ok else FAIL
+
+
+def split_live(
+    samples: Iterable[Iterable[int]], last_publish_ns: int
+) -> tuple[list[float], list[float]]:
+    """Staleness (ms) of [stamp_ns, proc_ns] samples, split at the publisher's last publish.
+
+    live: processed while the stream was still running (proc_ns <= last_publish_ns).
+    tail: processed after the stream ended; the last message ages until the next tick.
+    """
+    live: list[float] = []
+    tail: list[float] = []
+    for stamp_ns, proc_ns in samples:
+        ms = (proc_ns - stamp_ns) / 1e6
+        (live if proc_ns <= last_publish_ns else tail).append(ms)
+    return live, tail
+
+
+def tail_summary(tail_ms: list[float]) -> dict:
+    return {
+        "tail_count": len(tail_ms),
+        "tail_max_ms": round(max(tail_ms), 1) if tail_ms else None,
+    }
+
+
+def l01_is_standard(trials: int) -> bool:
+    return trials == STANDARD_TRIALS_L01
+
+
+def l03_is_standard(seconds: float, repeats: int) -> bool:
+    return seconds == STANDARD_SECONDS_L03 and repeats == STANDARD_REPEATS_L03
+
+
+def size_gate(judged: str, is_rule: bool, standard: bool, size_desc: str) -> tuple[str, str | None]:
+    """Non-standard runs are dev runs: rule verdicts become 판정 불가, all get a note."""
+    if standard:
+        return judged, None
+    note = f"개발 실행({size_desc}): 공식 판정 아님"
+    return (UNJUDGEABLE if is_rule else judged), note

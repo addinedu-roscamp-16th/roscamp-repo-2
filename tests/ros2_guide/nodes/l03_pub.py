@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""L-03 publisher: fixed-rate stream stamped right before each publish()."""
+"""L-03 publisher: fixed-rate stream stamped right before each publish().
+
+Last stdout line: {"sent", "last_publish_ns", "matched"}. last_publish_ns is time.time_ns()
+right after the last publish() returns; the runner uses it to cut the live window.
+"""
 import argparse
 import json
 import sys
@@ -29,6 +33,8 @@ def main(argv=None) -> int:
     rclpy.init()
     node = rclpy.create_node("r2g_l03_pub")
     sent = 0
+    last_publish_ns = None
+    matched = False
     try:
         pub = node.create_publisher(
             String, args.topic, qos.to_qos(qos.custom(args.reliability, "volatile", args.depth))
@@ -38,6 +44,7 @@ def main(argv=None) -> int:
             if time.monotonic() - t0 >= MATCH_WAIT_S:
                 break
             rclpy.spin_once(node, timeout_sec=0.01)
+        matched = pub.get_subscription_count() > 0
         period = 1.0 / args.rate
         total = int(round(args.seconds * args.rate))
         t0 = time.monotonic()
@@ -45,6 +52,7 @@ def main(argv=None) -> int:
             if not rclpy.ok():
                 break
             pub.publish(String(data=payload.encode(0, seq, time.time_ns())))
+            last_publish_ns = time.time_ns()
             sent += 1
             rclpy.spin_once(
                 node, timeout_sec=max(0.0, t0 + (seq + 1) * period - time.monotonic())
@@ -58,7 +66,8 @@ def main(argv=None) -> int:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
-    print(json.dumps({"sent": sent}), flush=True)
+    result = {"sent": sent, "last_publish_ns": last_publish_ns, "matched": matched}
+    print(json.dumps(result), flush=True)
     return 0
 
 

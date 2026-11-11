@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """L-03 subscriber: slow processing, naive callback vs store-latest + timer.
 
-Prints READY once and nothing afterwards; results go to --out (written even on SIGINT).
+Prints READY once and nothing afterwards; results go to --out (written even on SIGINT):
+{"processed", "samples": [[stamp_ns, proc_ns], ...], "bad"}. proc_ns is time.time_ns() when
+processing of that message starts; staleness = proc_ns - stamp_ns.
 """
 import argparse
 import json
@@ -33,26 +35,24 @@ def main(argv=None) -> int:
     ap.add_argument("--out", required=True)
     args = ap.parse_args(argv)
 
-    staleness: list[float] = []
+    samples: list[list[int]] = []
     bad = 0
     work_s = args.work_ms / 1000.0
     lock = threading.Lock()
     latest = None
 
-    def stale_ms(msg) -> float | None:
+    def record(msg) -> None:
         nonlocal bad
-        now_ns = time.time_ns()
+        proc_ns = time.time_ns()
         try:
             d = payload.decode(msg.data)
         except ValueError:
             bad += 1
-            return None
-        return (now_ns - d["stamp_ns"]) / 1e6
+            return
+        samples.append([d["stamp_ns"], proc_ns])
 
     def on_naive(msg) -> None:
-        s = stale_ms(msg)
-        if s is not None:
-            staleness.append(s)
+        record(msg)
         time.sleep(work_s)
 
     def on_scan(msg) -> None:
@@ -66,9 +66,7 @@ def main(argv=None) -> int:
             msg, latest = latest, None
         if msg is None:
             return
-        s = stale_ms(msg)
-        if s is not None:
-            staleness.append(s)
+        record(msg)
         time.sleep(work_s)
 
     rclpy.init()
@@ -94,7 +92,7 @@ def main(argv=None) -> int:
         pass
     finally:
         Path(args.out).write_text(
-            json.dumps({"processed": len(staleness), "staleness_ms": staleness, "bad": bad}),
+            json.dumps({"processed": len(samples), "samples": samples, "bad": bad}),
             encoding="utf-8",
         )
         if executor is not None:

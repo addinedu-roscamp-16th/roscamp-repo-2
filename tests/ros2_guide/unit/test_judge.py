@@ -48,3 +48,51 @@ def test_judge_l03_rule():
     assert judge_l03_rule([ok] * 4 + [{"count": 100, "max": 151.0}]) == "실패"
     assert judge_l03_rule([ok] * 4) == "실패"
     assert judge_l03_rule([ok] * 4 + [{"count": 0, "max": 0.0}]) == "실패"
+
+
+def test_split_live():
+    from r2g.judge import split_live
+
+    samples = [[0, 30_000_000], [100_000_000, 140_000_000], [180_000_000, 340_000_000]]
+    live, tail = split_live(samples, 200_000_000)
+    assert live == [30.0, 40.0] and tail == [160.0]
+    live, tail = split_live(samples, 340_000_000)
+    assert live == [30.0, 40.0, 160.0] and tail == []
+    assert split_live([], 1) == ([], [])
+
+
+def test_tail_summary():
+    from r2g.judge import tail_summary
+
+    assert tail_summary([]) == {"tail_count": 0, "tail_max_ms": None}
+    assert tail_summary([161.94, 20.0]) == {"tail_count": 2, "tail_max_ms": 161.9}
+
+
+def test_standard_sizes():
+    from r2g.judge import (
+        STANDARD_REPEATS_L03,
+        STANDARD_SECONDS_L03,
+        STANDARD_TRIALS_L01,
+        l01_is_standard,
+        l03_is_standard,
+    )
+
+    assert (STANDARD_TRIALS_L01, STANDARD_SECONDS_L03, STANDARD_REPEATS_L03) == (50, 20.0, 5)
+    assert l01_is_standard(50) and not l01_is_standard(2)
+    assert l03_is_standard(20, 5) and l03_is_standard(20.0, 5)
+    assert not l03_is_standard(3, 5) and not l03_is_standard(20, 2)
+
+
+@pytest.mark.parametrize("judged,is_rule,standard,expected", [
+    ("통과", True, True, ("통과", None)),
+    ("실패", True, True, ("실패", None)),
+    ("통과", True, False, ("판정 불가", "개발 실행(시도 2회): 공식 판정 아님")),
+    ("실패", True, False, ("판정 불가", "개발 실행(시도 2회): 공식 판정 아님")),
+    ("측정", False, False, ("측정", "개발 실행(시도 2회): 공식 판정 아님")),
+    ("측정", False, True, ("측정", None)),
+    ("판정 불가", True, False, ("판정 불가", "개발 실행(시도 2회): 공식 판정 아님")),
+])
+def test_size_gate(judged, is_rule, standard, expected):
+    from r2g.judge import size_gate
+
+    assert size_gate(judged, is_rule, standard, "시도 2회") == expected
