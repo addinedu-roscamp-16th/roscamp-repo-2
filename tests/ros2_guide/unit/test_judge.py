@@ -2,9 +2,12 @@ import pytest
 
 from r2g.judge import (
     first_receive,
+    heartbeat_gaps,
     judge_l01,
     judge_l03_rule,
     l02_is_standard,
+    l04_is_standard,
+    l04_risk,
     loss_stats,
     max_interval_ms,
     staleness_stats,
@@ -124,3 +127,32 @@ def test_max_interval_uses_one_clock():
 def test_l02_is_standard():
     assert l02_is_standard(30, 3)
     assert not l02_is_standard(3, 1)
+
+
+def test_heartbeat_gaps_with_window_edges():
+    s = 1_000_000_000
+    g = heartbeat_gaps([2 * s, 2 * s + s // 2, 5 * s], window_start_ns=s, window_end_ns=6 * s)
+    assert g["max_gap_ms"] == 2500.0 and g["over_count"] == 1 and g["over_at_s"] == [1.5]
+
+
+def test_heartbeat_gaps_no_receive():
+    g = heartbeat_gaps([], 0, 3_000_000_000)
+    assert (g["max_gap_ms"], g["over_count"]) == (3000.0, 1)
+
+
+def test_heartbeat_gaps_ignores_receipts_outside_window():
+    s = 1_000_000_000
+    g = heartbeat_gaps([0, s // 2, 2 * s, 9 * s], window_start_ns=s, window_end_ns=3 * s)
+    assert g == {"max_gap_ms": 1000.0, "over_count": 0, "over_at_s": []}
+
+
+def test_l04_risk():
+    ok = {"max_gap_ms": 600.0, "over_count": 0, "over_at_s": []}
+    bad = {"max_gap_ms": 1800.0, "over_count": 1, "over_at_s": [42.0]}
+    assert l04_risk({"pinky1": ok}) == []
+    assert l04_risk({"pinky1": bad})[0].startswith("pinky1 heartbeat 1회 1.5초 초과")
+    assert "42.0초" in l04_risk({"pinky1": bad})[0]
+
+
+def test_l04_is_standard():
+    assert l04_is_standard(120.0) and not l04_is_standard(15.0)

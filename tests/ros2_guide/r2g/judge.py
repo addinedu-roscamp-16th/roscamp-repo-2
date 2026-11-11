@@ -14,6 +14,7 @@ STANDARD_SECONDS_L03 = 20.0
 STANDARD_REPEATS_L03 = 5
 STANDARD_SECONDS_L02 = 30.0
 STANDARD_REPEATS_L02 = 3
+STANDARD_SECONDS_L04 = 120.0
 
 
 def tally(sent: int, received_trials: Iterable[int]) -> dict:
@@ -138,3 +139,40 @@ def max_interval_ms(recv_ns: list[int]) -> float | None:
     if len(recv_ns) < 2:
         return None
     return round(max(b - a for a, b in zip(recv_ns, recv_ns[1:], strict=False)) / 1e6, 1)
+
+
+def l04_is_standard(seconds: float) -> bool:
+    return seconds == STANDARD_SECONDS_L04
+
+
+def heartbeat_gaps(recv_ns: list[int], window_start_ns: int, window_end_ns: int,
+                   limit_s: float = 1.5) -> dict:  # fmt: skip
+    """Gaps between heartbeat receipts on ONE device, with the window edges as boundaries.
+
+    Receipts outside [window_start_ns, window_end_ns] are ignored. No receipt at all makes the
+    whole window one gap. over_at_s: start of each gap longer than limit_s, seconds from the
+    window start (1 decimal).
+    """
+    inside = sorted(t for t in recv_ns if window_start_ns <= t <= window_end_ns)
+    points = [window_start_ns, *inside, window_end_ns]
+    limit_ns = limit_s * 1e9
+    max_gap = 0
+    over_at: list[float] = []
+    for a, b in zip(points, points[1:], strict=False):
+        gap = b - a
+        max_gap = max(max_gap, gap)
+        if gap > limit_ns:
+            over_at.append(round((a - window_start_ns) / 1e9, 1))
+    return {"max_gap_ms": round(max_gap / 1e6, 1), "over_count": len(over_at),
+            "over_at_s": over_at}  # fmt: skip
+
+
+def l04_risk(robots: dict[str, dict], limit_s: float = 1.5) -> list[str]:
+    """One line per robot whose heartbeat stopped longer than limit_s at least once."""
+    lines = []
+    for robot, g in robots.items():
+        if g.get("over_count", 0) > 0:
+            at = ", ".join(f"{s:.1f}초" for s in g.get("over_at_s", []))
+            lines.append(f"{robot} heartbeat {g['over_count']}회 {limit_s:g}초 초과"
+                         f"(창 시작 후 {at})")  # fmt: skip
+    return lines
