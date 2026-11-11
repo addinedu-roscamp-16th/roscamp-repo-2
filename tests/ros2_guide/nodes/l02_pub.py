@@ -2,7 +2,10 @@
 """L-02 publisher (runs on the Raspberry Pi): fixed-rate, fixed-size stream.
 
 Waits up to --match-timeout for a subscriber; without one nothing is published. Last stdout
-line: {"sent", "matched"}. The expected count is int(round(seconds * rate)).
+line: {"sent", "matched", "elapsed_s", "achieved_hz", "error"}. elapsed_s runs from the first to
+the last send (monotonic clock), achieved_hz = (sent - 1) / elapsed_s. An exception while
+publishing is caught and reported in "error" so the result line is still printed. The expected
+count is int(round(seconds * rate)).
 """
 import argparse
 import json
@@ -36,6 +39,8 @@ def main(argv=None) -> int:
     node = rclpy.create_node("r2g_l02_pub")
     sent = 0
     matched = False
+    first_send = last_send = None
+    error = None
     try:
         pub = node.create_publisher(
             String, args.topic, qos.to_qos(qos.custom(args.reliability, "volatile", DEPTH))
@@ -54,6 +59,9 @@ def main(argv=None) -> int:
                 if not rclpy.ok():
                     break
                 pub.publish(String(data=payload.encode_sized(seq, time.time_ns(), args.size)))
+                last_send = time.monotonic()
+                if first_send is None:
+                    first_send = last_send
                 sent += 1
                 rclpy.spin_once(
                     node, timeout_sec=max(0.0, t0 + (seq + 1) * period - time.monotonic())
@@ -63,11 +71,19 @@ def main(argv=None) -> int:
                 rclpy.spin_once(node, timeout_sec=0.05)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception as exc:  # the result line must still be printed
+        error = repr(exc)
     finally:
-        node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
-    print(json.dumps({"sent": sent, "matched": matched}), flush=True)
+        try:
+            node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception as exc:  # keep printing the result line
+            error = error or repr(exc)
+    elapsed = None if first_send is None else round(last_send - first_send, 3)
+    achieved = round((sent - 1) / elapsed, 2) if elapsed else None
+    print(json.dumps({"sent": sent, "matched": matched, "elapsed_s": elapsed,
+                      "achieved_hz": achieved, "error": error}), flush=True)
     return 0
 
 

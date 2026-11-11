@@ -98,7 +98,9 @@ def judge_g11(res: dict[str, dict[str, dict]]) -> tuple[str, list[str]]:
     """results[case][direction] = {"received": int | None, "peer_seen_max": int | None}.
 
     Control must receive in both directions. Isolation = zero reception both ways; a missing
-    count (None) can neither prove nor disprove it, but any reception is a failure.
+    count (None) can neither prove nor disprove it, but any reception is a failure. Zero
+    reception is evidence only when the record is ok and the publisher sent a positive count;
+    otherwise (publisher failed, nothing sent) it counts as missing.
     Graph discovery (peer_seen_max) is only noted, never judged (review P2).
     """
     notes: list[str] = []
@@ -121,15 +123,19 @@ def judge_g11(res: dict[str, dict[str, dict]]) -> tuple[str, list[str]]:
     missing: list[str] = []
     for case in ISOLATION_CASES:
         for d in DIRECTIONS:
-            r = _count((res.get(case, {}).get(d) or {}).get("received"))
+            v = res.get(case, {}).get(d) or {}
+            r = _count(v.get("received"))
+            sent = _count(v.get("sent"))
             if r is None:
-                missing.append(f"{case} {d}")
+                missing.append(f"수신 수 없음(격리 판단 불가): {case} {d}")
             elif r > 0:
                 got.append(f"{case} {d}")
+            elif not (v.get("ok") is True and sent is not None and sent > 0):
+                missing.append(f"보내기 실패로 수신 0건이 격리 증거가 아님: {case} {d}")
     if got:
         return judge.FAIL, [f"격리 사례에서 수신됨: {x}" for x in got] + notes
     if missing:
-        return judge.UNJUDGEABLE, [f"수신 수 없음(격리 판단 불가): {x}" for x in missing] + notes
+        return judge.UNJUDGEABLE, missing + notes
     return judge.PASS, notes
 
 
@@ -205,7 +211,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--observe", type=float, default=float(cfg["observe_s"]))
     ap.add_argument("--out-root", default=str(HERE / "results"))
     ap.add_argument("--run-id", default=None)
-    ap.add_argument("--resume", action="store_true", help="끝난 방향을 건너뛰고 이어서 실행")
+    ap.add_argument("--resume", action="store_true",
+                    help="끝난 방향을 건너뛰고 이어서 실행(실패한 방향은 다시 실행)")
     args = ap.parse_args(argv)
 
     two_devices = args.pi_host != "local"
@@ -221,6 +228,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     run_dir = results.new_run_dir(Path(args.out_root), run_id)
     results.save_doctor(run_dir)
+    if args.resume:
+        for key in parts.retire_for_resume(run_dir, TEST_ID):
+            print(f"{TEST_ID} {key}: 실패한 방향 다시 실행", flush=True)
+        done = parts.done_keys(run_dir, TEST_ID)
     pc_launcher = remote.LocalLauncher(env)
     pi_launcher = remote.make_launcher(args.pi_host, env)
     started_at = results.now_iso()
@@ -281,9 +292,11 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _line(v: dict) -> str:
+    counts = (f"sent={v.get('sent')} received={v.get('received')} "
+              f"peer_seen_max={v.get('peer_seen_max')}")  # fmt: skip
     if not v.get("ok"):
-        return f"데이터 없음 ({v.get('reason')})"
-    return f"sent={v['sent']} received={v['received']} peer_seen_max={v['peer_seen_max']}"
+        return f"실패({v.get('reason')}) {counts}"
+    return counts
 
 
 if __name__ == "__main__":

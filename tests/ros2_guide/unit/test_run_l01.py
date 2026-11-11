@@ -373,3 +373,26 @@ def test_late_offset_basis_recorded_for_remote(monkeypatch, tmp_path):
     a = json.loads((tmp_path / "r" / "L-01-A.json").read_text(encoding="utf-8"))
     assert "하한" in e["conditions"]["late_offset_basis"]
     assert a["conditions"]["devices"] == "2대" and "late_offset_basis" not in a["conditions"]
+
+
+def test_retire_unjudgeable_moves_excluded_variants(tmp_path):
+    import json
+
+    from r2g import parts
+    from run_l01 import retire_unjudgeable
+
+    def write(v, result, excluded):
+        (tmp_path / f"L-01-W-{v}.json").write_text(json.dumps(
+            {"id": f"L-01-W-{v}", "result": result,
+             "observations": {"excluded_trials": excluded}}), encoding="utf-8")
+        parts.save_part(tmp_path, "L-01-W", v, {"variant": v, "result": result})
+
+    write("A", "판정 불가", [3])        # excluded trials -> re-run
+    write("B", "판정 불가", [])         # unjudgeable for other reasons -> kept
+    write("C", "통과", [])
+    write("D", "측정", [1, 2])          # measured despite exclusions -> kept
+    assert retire_unjudgeable(tmp_path, "L-01-W", ["A", "B", "C", "D", "F"]) == ["A"]
+    assert not (tmp_path / "L-01-W-A.json").exists()
+    assert len(list(tmp_path.glob("L-01-W-A.failed-*.json"))) == 1
+    assert parts.done_keys(tmp_path, "L-01-W") == {"B", "C", "D"}
+    assert (tmp_path / "L-01-W-B.json").exists()

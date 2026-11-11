@@ -107,3 +107,29 @@ def test_robots_problem():
     assert robots_problem({"sent": {}, "matched": False}, False, 0) == "관제 매칭 실패"
     assert robots_problem(ok, False, 1) == "로봇 노드 비정상 종료(rc=1)"
     assert robots_problem(ok, False, 0) is None
+
+
+def test_heartbeat_skip_needs_complete_robots_and_window():
+    from run_l04 import heartbeat_skip
+
+    good = {"sent": {}, "matched": True, "window": [1, 5], "hb_recv_ns": {"pinky1": []}}
+    assert heartbeat_skip(None, good, {}) is None
+    assert heartbeat_skip("로봇 노드 시간 초과", good, {}) == "로봇 노드 시간 초과"
+    assert heartbeat_skip(None, None, {}) is not None
+    assert heartbeat_skip(None, {**good, "matched": False}, {}) is not None
+    assert heartbeat_skip(None, good, None) is not None
+    assert heartbeat_skip(None, {**good, "window": [5, 5]}, {}) is not None
+    assert heartbeat_skip(None, {**good, "window": None}, {}) is not None
+    assert heartbeat_skip(None, {**good, "hb_recv_ns": {}}, {}) is not None
+
+
+def test_overall_risk_is_tri_state():
+    from run_l04 import overall_risk
+
+    clean = {"ok": True, "heartbeat": {"pinky1": {}}, "l04_risk": []}
+    risky = {"ok": True, "heartbeat": {"pinky1": {}}, "l04_risk": ["pinky1 ..."]}
+    unknown = {"ok": False, "heartbeat": None, "l04_risk": []}
+    assert overall_risk({"a": clean, "b": clean}) is False
+    assert overall_risk({"a": clean, "b": unknown}) is None
+    assert overall_risk({"a": risky, "b": unknown}) is True
+    assert overall_risk({"a": clean, "b": {"ok": False, "reason": "실행 기록 없음"}}) is None

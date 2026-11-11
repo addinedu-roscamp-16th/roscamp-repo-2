@@ -10,7 +10,7 @@ from run_g11 import (
 
 
 def ok(n):
-    return {"received": n, "peer_seen_max": 1 if n else 0}
+    return {"received": n, "peer_seen_max": 1 if n else 0, "ok": True, "sent": 50}
 
 
 def full(control=5, isolated=0):
@@ -32,7 +32,7 @@ def test_g11_control_must_communicate():
 
 def test_g11_graph_seen_is_note_only():
     r = full()
-    r["PC_LOCALHOST"]["PC→파이"] = {"received": 0, "peer_seen_max": 1}
+    r["PC_LOCALHOST"]["PC→파이"] = {**ok(0), "peer_seen_max": 1}
     verdict, notes = judge_g11(r)
     assert verdict == "통과" and "그래프에 상대 보임: PC_LOCALHOST PC→파이" in notes
 
@@ -63,6 +63,32 @@ def test_g11_missing_case_is_unjudgeable():
     r = full()
     del r["파이_LOCALHOST"]
     assert judge_g11(r)[0] == "판정 불가"
+
+
+def test_g11_zero_reception_with_failed_publisher_is_unjudgeable():
+    r = full()
+    failed = {"received": 0, "peer_seen_max": 0, "ok": False, "sent": None,
+              "reason": "보내는 노드 결과 줄 없음"}
+    r["도메인"]["PC→파이"] = dict(failed)
+    r["파이_LOCALHOST"]["파이→PC"] = {**failed, "ok": True, "sent": 0}
+    verdict, notes = judge_g11(r)
+    assert verdict == "판정 불가"
+    assert any("도메인 PC→파이" in n for n in notes)
+    assert any("파이_LOCALHOST 파이→PC" in n for n in notes)
+
+
+def test_g11_reception_with_failed_publisher_still_fails():
+    r = full()
+    r["도메인"]["PC→파이"] = {"received": 3, "peer_seen_max": 1, "ok": False, "sent": None}
+    assert judge_g11(r)[0] == "실패"
+
+
+def test_line_shows_received_when_not_ok():
+    from run_g11 import _line
+    rec = {"ok": False, "reason": "보내는 노드 결과 줄 없음", "received": 4, "sent": None,
+           "peer_seen_max": 1}
+    line = _line(rec)
+    assert "received=4" in line and "보내는 노드 결과 줄 없음" in line
 
 
 def test_cases_order_and_env():

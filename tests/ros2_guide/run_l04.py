@@ -148,6 +148,37 @@ def robots_problem(out: dict | None, timed_out: bool, rc: int | None) -> str | N
     return None
 
 
+def heartbeat_skip(core_reason: str | None, robots_out: dict | None,
+                   central_out: dict | None) -> str | None:  # fmt: skip
+    """Why the heartbeat of a combo cannot be judged, or None when it can.
+
+    Only robots that ran to completion (no robots/central failure, matched) with a real Pi
+    window (end > start) give heartbeat data; a video problem alone does not block it.
+    """
+    if core_reason is not None:
+        return core_reason
+    if robots_out is None or not robots_out.get("matched"):
+        return "로봇 노드 결과 없음"
+    if central_out is None:
+        return "관제 노드 out 파일 없음"
+    w = robots_out.get("window")
+    if not (isinstance(w, list) and len(w) == 2 and all(isinstance(x, int) for x in w)
+            and w[1] > w[0]):  # fmt: skip
+        return "라즈베리파이 창(window) 없음"
+    if not isinstance(robots_out.get("hb_recv_ns"), dict) or not robots_out["hb_recv_ns"]:
+        return "heartbeat 수신 기록 없음"
+    return None
+
+
+def overall_risk(recs: dict[str, dict]) -> bool | None:
+    """True if any combo shows a risk; None if none does but a combo lacks heartbeat data."""
+    if any(v.get("l04_risk") for v in recs.values()):
+        return True
+    if any(v.get("heartbeat") is None for v in recs.values()):
+        return None
+    return False
+
+
 def _read_json(path: Path) -> dict | None:
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
@@ -222,6 +253,7 @@ def run_combo(level: str, background: str, cfg: dict, seconds: float, env: dict,
     central_out = _read_json(central_out_path)
     if reason is None and central_out is None:
         reason = "관제 노드 out 파일 없음"
+    skip = heartbeat_skip(reason, robots_out, central_out)
     mbps = None
     if background == VIDEO_BG:
         mbps = video_mbps(_read_json(counter_out)) if counter_out is not None else None
@@ -231,17 +263,19 @@ def run_combo(level: str, background: str, cfg: dict, seconds: float, env: dict,
     rec = {
         "level": level, "background": background, "ok": reason is None, "reason": reason,
         "state_hz": lv["state_hz"], "vision_hz": lv["vision_hz"],
-        "topics": {}, "heartbeat": {}, "l04_risk": [], "video_mbps": mbps,
+        "topics": {}, "heartbeat": None, "heartbeat_skip": skip, "l04_risk": [],
+        "video_mbps": mbps,
         "video_early_exit": video_early if background == VIDEO_BG else None, "wifi": wifi,
     }  # fmt: skip
-    if robots_out is not None and isinstance(robots_out.get("sent"), dict) and \
-            robots_out.get("matched") and central_out is not None:
+    if skip is None:
         hb = heartbeat_table(robots_out, cfg["heartbeat_stop_s"])
         rec["heartbeat"] = hb
-        rec["topics"] = topic_table(robots_out, central_out, hb)
         rec["l04_risk"] = judge.l04_risk(hb, cfg["heartbeat_stop_s"])
         start, end = robots_out["window"]
         rec["window_s"] = round((end - start) / 1e9, 1)
+    if robots_out is not None and isinstance(robots_out.get("sent"), dict) and \
+            robots_out.get("matched") and central_out is not None:
+        rec["topics"] = topic_table(robots_out, central_out, rec["heartbeat"] or {})
     return rec
 
 
@@ -257,7 +291,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--seconds", type=float, default=float(cfg["seconds"]))
     ap.add_argument("--out-root", default=str(HERE / "results"))
     ap.add_argument("--run-id", default=None)
-    ap.add_argument("--resume", action="store_true", help="끝난 조합을 건너뛰고 이어서 실행")
+    ap.add_argument("--resume", action="store_true",
+                    help="끝난 조합을 건너뛰고 이어서 실행(실패한 조합은 다시 실행)")
     args = ap.parse_args(argv)
 
     two_devices = args.pi_host != "local"
@@ -273,6 +308,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     run_dir = results.new_run_dir(Path(args.out_root), run_id)
     results.save_doctor(run_dir)
+    if args.resume:
+        for key in parts.retire_for_resume(run_dir, TEST_ID):
+            print(f"{TEST_ID} {key}: 실패한 조합 다시 실행", flush=True)
+        done = parts.done_keys(run_dir, TEST_ID)
     launcher = remote.make_launcher(args.pi_host, env)
     pi_over = {"ROS_AUTOMATIC_DISCOVERY_RANGE": env["ROS_AUTOMATIC_DISCOVERY_RANGE"],
                "ROS_DOMAIN_ID": env["ROS_DOMAIN_ID"]}  # fmt: skip
@@ -297,11 +336,14 @@ def main(argv: list[str] | None = None) -> int:
     recs = {}
     for level, background in COMBOS:
         key = combo_key(level, background)
-        recs[key] = parts.load_part(run_dir, TEST_ID, key)
+        recs[key] = parts.load_part(run_dir, TEST_ID, key) or {
+            "ok": False, "reason": "실행 기록 없음"}
     notes = [f"{k}: {v['reason']}" for k, v in recs.items() if not v["ok"]]
     risk_notes = [f"통합 운영 위험: {k} {line}"
                   for k, v in recs.items() for line in v.get("l04_risk", [])]  # fmt: skip
     notes += risk_notes
+    notes += [f"heartbeat 확인 못 함: {k} ({v.get('heartbeat_skip') or v.get('reason')})"
+              for k, v in recs.items() if v.get("heartbeat") is None]  # fmt: skip
     _, size_note = judge.size_gate(judge.MEASURE, False, judge.l04_is_standard(args.seconds),
                                    size_desc(args.seconds))  # fmt: skip
     if size_note:
@@ -325,7 +367,7 @@ def main(argv: list[str] | None = None) -> int:
                           "전·종료 후 포함), 참고용"),
         "vision_loss_note": "LATCHED depth 1: 덮어쓴 샘플도 순번 빈자리로 셈",
     }  # fmt: skip
-    observations = {"combos": recs, "risk": bool(risk_notes)}
+    observations = {"combos": recs, "risk": overall_risk(recs)}
     results.write_result(run_dir, TEST_ID, judge.MEASURE, observations, conditions, notes,
                          env=env, started_at=started_at)  # fmt: skip
     print(f"{TEST_ID}: 측정", flush=True)
@@ -333,7 +375,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _line(v: dict) -> str:
-    hb = v.get("heartbeat", {})
+    hb = v.get("heartbeat") or {}
     worst = max((g["max_gap_ms"] for g in hb.values()), default=None)
     head = "ok" if v.get("ok") else f"실패({v.get('reason')})"
     return (f"{head} heartbeat_max_gap_ms={worst} video_mbps={v.get('video_mbps')} "

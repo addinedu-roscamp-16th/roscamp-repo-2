@@ -45,7 +45,7 @@ def expected_sent(seconds: float, rate: int) -> int:
 
 
 def parse_pub(stdout: str) -> dict | None:
-    """Last JSON line of l02_pub: {sent, matched}, or None."""
+    """Last JSON line of l02_pub: {sent, matched, elapsed_s, achieved_hz, error}, or None."""
     for line in reversed(stdout.splitlines()):
         line = line.strip()
         if not line:
@@ -56,7 +56,9 @@ def parse_pub(stdout: str) -> dict | None:
             continue
         if not isinstance(obj, dict) or not isinstance(obj.get("sent"), int):
             return None
-        return {"sent": obj["sent"], "matched": obj.get("matched") is True}
+        return {"sent": obj["sent"], "matched": obj.get("matched") is True,
+                "elapsed_s": obj.get("elapsed_s"), "achieved_hz": obj.get("achieved_hz"),
+                "error": obj.get("error")}  # fmt: skip
     return None
 
 
@@ -65,11 +67,30 @@ def l02_problem(pub: dict | None, timed_out: bool, expected: int) -> str | None:
         return "발행 노드 시간 초과"
     if pub is None:
         return "발행 노드 결과 줄 없음"
+    if pub.get("error"):
+        return f"발행 노드 오류({pub['error']})"
     if not pub["matched"]:
         return "구독자 매칭 실패"
     if pub["sent"] < expected:
         return f"발행 수 미달(실제 {pub['sent']} / 예정 {expected})"
     return None
+
+
+def fill_counts(rec: dict, pub_info: dict | None, out: dict | None) -> dict:
+    """Add the publisher's numbers and the loss stats to rec. Without a publisher result line
+    sent is None (unknown, not 0) and every loss stat is None."""
+    pub = pub_info or {}
+    sent = pub_info["sent"] if pub_info else None
+    rec.update({"elapsed_s": pub.get("elapsed_s"), "achieved_hz": pub.get("achieved_hz"),
+                "error": pub.get("error")})  # fmt: skip
+    if out is not None and sent is not None:
+        rec.update(judge.loss_stats(sent, out.get("seqs", [])))
+        rec["max_interval_ms"] = judge.max_interval_ms(out.get("recv_ns", []))
+        rec["bad"] = out.get("bad")
+    else:
+        rec.update({"sent": sent, "received": None, "lost": None, "loss_rate": None,
+                    "dup": None, "longest_gap": None, "max_interval_ms": None})  # fmt: skip
+    return rec
 
 
 def _read_json(path: Path) -> dict | None:
@@ -124,15 +145,7 @@ def run_combo(rel: str, size_name: str, size: int, rate: int, rep: int, seconds:
         "ok": reason is None, "reason": reason, "topic": topic, "wifi": wifi,
         "expected": expected,
     }  # fmt: skip
-    sent = pub_info["sent"] if pub_info else 0
-    if out is not None and pub_info is not None:
-        rec.update(judge.loss_stats(sent, out.get("seqs", [])))
-        rec["max_interval_ms"] = judge.max_interval_ms(out.get("recv_ns", []))
-        rec["bad"] = out.get("bad")
-    else:
-        rec.update({"sent": sent, "received": None, "lost": None, "loss_rate": None,
-                    "dup": None, "longest_gap": None, "max_interval_ms": None})  # fmt: skip
-    return rec
+    return fill_counts(rec, pub_info, out)
 
 
 def size_desc(seconds: float, repeats: int) -> str:
@@ -148,7 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repeats", type=int, default=int(cfg["repeats"]))
     ap.add_argument("--out-root", default=str(HERE / "results"))
     ap.add_argument("--run-id", default=None)
-    ap.add_argument("--resume", action="store_true", help="끝난 조합을 건너뛰고 이어서 실행")
+    ap.add_argument("--resume", action="store_true",
+                    help="끝난 조합을 건너뛰고 이어서 실행(실패한 조합은 다시 실행)")
     args = ap.parse_args(argv)
 
     two_devices = args.pi_host != "local"
@@ -164,6 +178,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     run_dir = results.new_run_dir(Path(args.out_root), run_id)
     results.save_doctor(run_dir)
+    if args.resume:
+        for key in parts.retire_for_resume(run_dir, TEST_ID):
+            print(f"{TEST_ID} {key}: 실패한 조합 다시 실행", flush=True)
+        done = parts.done_keys(run_dir, TEST_ID)
     launcher = remote.make_launcher(args.pi_host, env)
     pi_over = {"ROS_AUTOMATIC_DISCOVERY_RANGE": env["ROS_AUTOMATIC_DISCOVERY_RANGE"],
                "ROS_DOMAIN_ID": env["ROS_DOMAIN_ID"]}  # fmt: skip
@@ -189,7 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     recs = {}
     for rel, name, _size, rate, rep in all_combos:
         key = combo_key(rel, name, rate, rep)
-        recs[key] = parts.load_part(run_dir, TEST_ID, key)
+        recs[key] = parts.load_part(run_dir, TEST_ID, key) or {
+            "ok": False, "reason": "실행 기록 없음"}
     notes = [f"{k}: {v['reason']}" for k, v in recs.items() if not v["ok"]]
     _, size_note = judge.size_gate(
         judge.MEASURE, False, judge.l02_is_standard(args.seconds, args.repeats),
@@ -218,7 +237,7 @@ def _line(v: dict) -> str:
         return f"데이터 없음 ({v.get('reason')})"
     return (f"sent={v['sent']} received={v['received']} lost={v['lost']} "
             f"loss_rate={v['loss_rate']} dup={v['dup']} gap={v['longest_gap']} "
-            f"max_interval_ms={v['max_interval_ms']}")  # fmt: skip
+            f"max_interval_ms={v['max_interval_ms']} achieved_hz={v.get('achieved_hz')}")
 
 
 if __name__ == "__main__":

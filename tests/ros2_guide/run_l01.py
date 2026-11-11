@@ -598,6 +598,28 @@ def _finish_variant(v: str, obs: dict, cond: dict, notes: list, trials: int,
     return result
 
 
+def retire_unjudgeable(run_dir: Path, prefix: str, names: Iterable[str]) -> list[str]:
+    """--resume of L-01-W: move aside variants whose result is 판정 불가 with excluded trials
+    (or with every trial excluded), plus their part, so they run again. Returns the variants."""
+    retired = []
+    for v in names:
+        path = Path(run_dir) / f"{prefix}-{v}.json"
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+            obs = d.get("observations") or {}
+        except (OSError, ValueError, AttributeError):
+            continue
+        excluded = obs.get("excluded_trials") or []
+        all_out = bool(excluded) and obs.get("counted") == 0
+        if (d.get("result") == "판정 불가" and excluded) or all_out:
+            parts.retire_file(path)
+            part = parts.part_path(run_dir, prefix, v)
+            if part.exists():
+                parts.retire_file(part)
+            retired.append(v)
+    return retired
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=50)
@@ -614,7 +636,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--id-prefix", default=STAGE1_ID_PREFIX,
                     help="결과 ID 접두사(2단계는 L-01-W)")
     ap.add_argument("--resume", action="store_true",
-                    help="--pi-host 실행에서 끝난 변형을 건너뛰고 이어서 실행")
+                    help="--pi-host 실행에서 끝난 변형을 건너뛰고 이어서 실행"
+                         "(제외된 시도로 판정 불가인 변형은 다시 실행)")
     args = ap.parse_args(argv)
 
     names = [v.strip() for v in args.variants.split(",") if v.strip()]
@@ -646,6 +669,10 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     run_dir = results.new_run_dir(Path(args.out_root), run_id)
     results.save_doctor(run_dir)
+    if args.resume:
+        for v in retire_unjudgeable(run_dir, prefix, names):
+            print(f"{prefix}-{v}: 제외된 시도로 판정 불가 → 다시 실행", flush=True)
+        done = parts.done_keys(run_dir, prefix)
     launcher = None
     side = PiSide(env, prefix=topic_prefix(prefix))
     if args.pi_host is not None:
