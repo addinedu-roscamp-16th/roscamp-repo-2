@@ -1,0 +1,24 @@
+# 2단계 시험 값. 근거: 계획서 3.1절(L-02, L-04), 3.3절(G-11). "작성자 가정"은 계획서에 값이 없어 정한 값.
+l02:
+  sizes: {1KB: 1024, 64KB: 65536, 500KB: 512000}  # 계획서 L-02 메시지 크기
+  rates_hz: [10, 50]                # 계획서 L-02 발행 속도
+  reliabilities: [best_effort, reliable]  # 계획서 L-02 신뢰성
+  depth: 50                         # EVENT 프로파일 깊이(contract.yaml)와 같게 둠: 작성자 가정
+  seconds: 30                       # 공식 크기: 조합마다 30초
+  repeats: 3                        # 공식 크기: 조합마다 3회
+l04:
+  levels:                           # 계획서 L-04 주기 단계
+    낮음: {state_hz: 5, vision_hz: 1}
+    중간: {state_hz: 10, vision_hz: 5}
+    높음: {state_hz: 20, vision_hz: 10}
+  heartbeat_hz: 2                   # 계획서 L-04
+  robots_hz: 1                      # 계획서 L-04
+  events_hz: 0.5                    # 계획서의 "수시"를 2초마다 1건으로 둠: 작성자 가정
+  state_bytes: 200                  # 작성자 가정
+  vision_bytes: 640                 # 물체 10개 x 64바이트: 작성자 가정
+  heartbeat_stop_s: 1.5             # 하트비트 끊김 판정 간격: 작성자 가정
+  seconds: 120                      # 공식 크기: 조합마다 120초
+  video: {width: 640, height: 480, fps: 15, bitrate_kbps: 2000, port: 5600}  # 계획서 L-04 영상
+g11:
+  observe_s: 10                     # 공식 크기: 방향마다 관찰 10초
+  other_domain_id: 88               # 기준 도메인(87)과 다른 도메인: 작성자 가정
