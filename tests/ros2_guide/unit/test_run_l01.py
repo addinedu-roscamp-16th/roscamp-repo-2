@@ -286,7 +286,8 @@ def test_main_pi_host_resume_and_notes(monkeypatch, tmp_path):
     (tmp_path / "r" / "L-01-W-S.json").unlink()
     ran.clear()
     assert run_l01.main(argv + ["--resume"]) == 0
-    assert ran == []  # S part exists (done_keys), A json exists
+    assert ran == ["S"]  # a part alone does not skip: S json is missing, A json exists
+    assert (tmp_path / "r" / "L-01-W-S.json").exists()
 
 
 def test_main_resume_runs_only_missing(monkeypatch, tmp_path):
@@ -308,3 +309,67 @@ def test_main_without_pi_host_unchanged_fields(monkeypatch, tmp_path):
     d = json.loads((tmp_path / "s1" / "L-01-A.json").read_text(encoding="utf-8"))
     assert "pi_host" not in d["conditions"] and "devices" not in d["conditions"]
     assert not (tmp_path / "s1" / "parts").exists()
+
+
+def test_remote_first_receive():
+    from run_l01 import remote_first_receive
+
+    assert remote_first_receive([]) is None
+    assert remote_first_receive([(3, 900), (1, 500), (2, 700)]) == {
+        "first_seq": 1, "time_to_first_ms": None}
+
+
+def test_remote_stream_keeps_first_seq(monkeypatch, tmp_path):
+    import json
+
+    import run_l01
+
+    class L(_FakeLauncher):
+        def __init__(self):
+            super().__init__(local=False)
+            self.pub = 0
+
+        def run(self, script, args, timeout, env_over):
+            self.pub += 1
+            out = json.dumps({"trial": 0, "sent": 30, "publish_ns": 1, "pub_start_ns": 1,
+                              "matched": None, "wait_ms": None})
+            return run_l01.proc.ChildResult(0, out + "\n", False)
+
+    class Sub:
+        def poll(self):
+            return None
+
+    rx = tmp_path / "l01_F.jsonl"
+    rx.write_text(json.dumps({"trial": 0, "seq": 4, "rx_ns": 20}) + "\n"
+                  + json.dumps({"trial": 0, "seq": 2, "rx_ns": 10}) + "\n", encoding="utf-8")
+    (tmp_path / "l01_F.jsonl.summary.json").write_text('{"bad": 0}', encoding="utf-8")
+    monkeypatch.setattr(run_l01.proc, "start_child", lambda cmd, env: Sub())
+    monkeypatch.setattr(run_l01.proc, "wait_ready", lambda p, t: True)
+    monkeypatch.setattr(run_l01.proc, "stop_child", lambda p: None)
+    monkeypatch.setattr(run_l01.time, "sleep", lambda s: None)
+    side = run_l01.PiSide({}, L(), {}, "l01w")
+    obs, _, _ = run_l01.run_variant("F", 1, {}, tmp_path, side)
+    assert obs["first_receive"] == {"0": {"first_seq": 2, "time_to_first_ms": None}}
+    assert obs["first_seq_stats"]["count"] == 1 and obs["first_seq_stats"]["min"] == 2
+
+
+def test_discovery_range_rejected_with_pi_host(monkeypatch, tmp_path):
+    import pytest
+
+    run_l01, _, _ = _fake_main_env(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit):
+        run_l01.main(["--pi-host", "local", "--discovery-range", "LOCALHOST",
+                      "--out-root", str(tmp_path)])
+
+
+def test_late_offset_basis_recorded_for_remote(monkeypatch, tmp_path):
+    import json
+
+    run_l01, launcher, _ = _fake_main_env(monkeypatch, tmp_path)
+    launcher.is_local = False
+    assert run_l01.main(["--pi-host", "sbt-pi", "--trials", "2", "--variants", "E-VOL,A",
+                         "--out-root", str(tmp_path), "--run-id", "r"]) == 0
+    e = json.loads((tmp_path / "r" / "L-01-E-VOL.json").read_text(encoding="utf-8"))
+    a = json.loads((tmp_path / "r" / "L-01-A.json").read_text(encoding="utf-8"))
+    assert "하한" in e["conditions"]["late_offset_basis"]
+    assert a["conditions"]["devices"] == "2대" and "late_offset_basis" not in a["conditions"]

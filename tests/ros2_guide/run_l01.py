@@ -31,7 +31,8 @@ VARIANTS: dict[str, dict] = {
 W_ORDER = ["A", "B", "C", "F", "D", "E-VOL", "E-TL", "S"]
 STAGE1_ID_PREFIX = "L-01"
 LOCAL_DEVICE_NOTE = "장비 1대(PI_HOST=local): 공식 판정 아님"
-CLOCK_NOTE = "장비 간 시계를 비교하지 않아 첫 수신 시간 생략"
+CLOCK_NOTE = "2대 실행: 장비 간 시계를 비교하지 않아 첫 수신까지의 시간(ms)은 생략"
+LATE_OFFSET_BASIS = "PC가 발행 노드 READY를 받은 시각 기준(하한)"
 
 PUB_TIMEOUT = {"once": 15.0, "wait_match": 15.0, "stream": 15.0}
 TRIAL_GAP_S = 0.5
@@ -212,6 +213,14 @@ def offset_stats(offsets: list[float]) -> dict:
         "median": statistics.median(offsets),
         "max": max(offsets),
     }
+
+
+def remote_first_receive(rx: list[tuple[int, int]]) -> dict | None:
+    """First received seq (ordered by this PC's rx clock only); no time across machines."""
+    if not rx:
+        return None
+    seq, _ = min(rx, key=lambda r: r[1])
+    return {"first_seq": seq, "time_to_first_ms": None}
 
 
 def counted_tally(trials: int, received: Iterable[int], excluded: Iterable[int]) -> dict:
@@ -520,10 +529,17 @@ def _run_persistent_sub(
         for trial in range(trials):
             p = pubs.get(trial)
             fr = None
-            if p is not None and trial not in excluded and not side.remote:
-                fr = judge.first_receive(p["pub_start_ns"], rx.get(trial, []))
+            if p is not None and trial not in excluded:
+                if side.remote:
+                    fr = remote_first_receive(rx.get(trial, []))
+                else:
+                    fr = judge.first_receive(p["pub_start_ns"], rx.get(trial, []))
             firsts[str(trial)] = fr
         obs["first_receive"] = firsts
+        if side.remote:
+            obs["first_seq_stats"] = offset_stats(
+                [f["first_seq"] for f in firsts.values() if f is not None]
+            )
     cond = {
         "trials": trials,
         "profile": cfg["profile"],
@@ -575,6 +591,8 @@ def _finish_variant(v: str, obs: dict, cond: dict, notes: list, trials: int,
             notes.append(dev_note)
         cond["pi_host"] = pi_host
         cond["devices"] = "1대" if pi_host == "local" else "2대"
+        if remote_pi and VARIANTS[v]["late_sub"]:
+            cond["late_offset_basis"] = LATE_OFFSET_BASIS
     if remote_pi and VARIANTS[v]["mode"] == "stream":
         notes.append(CLOCK_NOTE)
     return result
@@ -587,8 +605,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--out-root", default=str(HERE / "results"))
     ap.add_argument("--run-id", default=None)
     ap.add_argument(
-        "--discovery-range", choices=proc.DISCOVERY_RANGES, default=proc.STAGE1_DISCOVERY,
-        help="ROS_AUTOMATIC_DISCOVERY_RANGE for every child and ros2 doctor (기본 LOCALHOST)",
+        "--discovery-range", choices=proc.DISCOVERY_RANGES, default=None,
+        help="ROS_AUTOMATIC_DISCOVERY_RANGE for every child and ros2 doctor (기본 LOCALHOST; "
+        "--pi-host와 함께 쓸 수 없음)",
     )
     ap.add_argument("--pi-host", default=None,
                     help="발행·클라이언트 측을 돌릴 라즈베리파이(local = 이 PC 한 대). 기본: 1단계")
@@ -602,13 +621,17 @@ def main(argv: list[str] | None = None) -> int:
     unknown = [v for v in names if v not in VARIANTS]
     if unknown:
         ap.error(f"unknown variants: {unknown}")
+    if args.pi_host is not None and args.discovery_range is not None:
+        ap.error("--discovery-range cannot be combined with --pi-host "
+                 "(SUBNET for a real host, LOCALHOST for local)")
     if args.resume and args.pi_host is None:
         ap.error("--resume needs --pi-host")
     if args.pi_host is not None:
         names.sort(key=W_ORDER.index)
 
     two_devices = args.pi_host is not None and args.pi_host != "local"
-    proc.pin_discovery(os.environ, "SUBNET" if two_devices else args.discovery_range)
+    local_range = args.discovery_range or proc.STAGE1_DISCOVERY
+    proc.pin_discovery(os.environ, "SUBNET" if two_devices else local_range)
     env = proc.child_env(os.environ)
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
     run_path = Path(args.out_root) / run_id
@@ -637,7 +660,7 @@ def main(argv: list[str] | None = None) -> int:
         with tempfile.TemporaryDirectory(prefix="r2g_l01_") as td:
             for v in names:
                 test_id = f"{prefix}-{v}"
-                if v in done or (run_dir / f"{test_id}.json").exists():
+                if (run_dir / f"{test_id}.json").exists():
                     print(f"{test_id}: 건너뜀(이미 끝남)", flush=True)
                     continue
                 started_at = results.now_iso()
@@ -648,7 +671,7 @@ def main(argv: list[str] | None = None) -> int:
                 results.write_result(
                     run_dir, test_id, result, obs, cond, notes, env=env, started_at=started_at
                 )
-                if args.pi_host is not None:
+                if args.pi_host is not None and v not in done:
                     parts.save_part(run_dir, prefix, v, {"variant": v, "result": result})
                 print(
                     f"{test_id}: {result} lost={obs['lost']}/{obs['counted']} "
