@@ -143,3 +143,9 @@ def test_parse_last_json_skips_trailing_noise():
 def test_robots_problem_nonzero_rc_without_result():
     assert robots_problem(None, False, 139) == "로봇 노드 비정상 종료(rc=139)"
     assert robots_problem(None, False, 0) == "로봇 노드 결과 줄 없음"
+
+
+def test_robots_problem_reports_node_error():
+    out = {"sent": {}, "matched": True, "error": "RCLError('timer is canceled')"}
+    assert robots_problem(out, False, 0) == "로봇 노드 오류(RCLError('timer is canceled'))"
+    assert robots_problem({"sent": {}, "matched": True, "error": None}, False, 0) is None

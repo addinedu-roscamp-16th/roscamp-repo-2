@@ -136,6 +136,8 @@ def robots_problem(out: dict | None, timed_out: bool, rc: int | None) -> str | N
         return "로봇 노드 결과 줄 없음"
     if not out.get("matched"):
         return "관제 매칭 실패"
+    if out.get("error"):
+        return f"로봇 노드 오류({out['error']})"
     if rc != 0:
         return f"로봇 노드 비정상 종료(rc={rc})"
     return None

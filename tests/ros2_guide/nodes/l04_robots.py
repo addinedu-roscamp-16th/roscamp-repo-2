@@ -42,6 +42,7 @@ class Robot:
         self.args = args
         self.sent: dict[str, int] = {}
         self.timers = []
+        self.publishing = False
         self.state_topic = f"/{name}/state"
         self.state_pub = self.node.create_publisher(
             String, self.state_topic, qos.to_qos(profiles["STATE"])
@@ -78,13 +79,16 @@ class Robot:
         return self.state_pub.get_subscription_count() > 0
 
     def start(self) -> None:
+        self.publishing = True
         self.timers.append(self.node.create_timer(1.0 / self.args.state_hz, self._state))
         if self.vision_pub is not None:
             self.timers.append(self.node.create_timer(1.0 / self.args.vision_hz, self._vision))
 
     def stop(self) -> None:
-        for t in self.timers:
-            t.cancel()
+        # Do not cancel the timers: a timer the executor has already taken from the wait set
+        # raises "timer is canceled" (seen on the Pi). Callbacks just stop publishing; the
+        # timers go away with executor.shutdown() and destroy_node().
+        self.publishing = False
 
     def _state(self) -> None:
         self._publish(self.state_pub, self.state_topic, self.args.state_bytes)
@@ -93,6 +97,8 @@ class Robot:
         self._publish(self.vision_pub, self.vision_topic, self.args.vision_bytes)
 
     def _publish(self, pub, topic: str, size: int) -> None:
+        if not self.publishing:
+            return
         seq = self.sent[topic]
         pub.publish(String(data=payload.encode_sized(seq, time.time_ns(), size)))
         self.sent[topic] = seq + 1
@@ -136,6 +142,7 @@ def main(argv=None) -> int:
     robots: list[Robot] = []
     window = [0, 0]
     matched = False
+    error = None
     rclpy.init()
     executor = MultiThreadedExecutor()
     try:
@@ -158,17 +165,22 @@ def main(argv=None) -> int:
             _spin_until(executor, time.monotonic() + TAIL_S)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except Exception as exc:  # the result line must still be printed
+        error = repr(exc)
     finally:
         for r in robots:
             r.stop()
-        executor.shutdown()
-        for r in robots:
-            r.node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+        try:
+            executor.shutdown()
+            for r in robots:
+                r.node.destroy_node()
+            if rclpy.ok():
+                rclpy.shutdown()
+        except Exception as exc:  # keep printing the result line
+            error = error or repr(exc)
     sent = {topic: n for r in robots for topic, n in r.sent.items()}
     print(json.dumps({"sent": sent, "hb_recv_ns": hb_recv_ns, "window": window,
-                      "seqs": seqs, "matched": matched}), flush=True)  # fmt: skip
+                      "seqs": seqs, "matched": matched, "error": error}), flush=True)  # fmt: skip
     return 0
 
 
