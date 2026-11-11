@@ -86,23 +86,23 @@ def pi_to_pc_stats(sent: int, seqs: list[int], recv_ns: list[int]) -> dict:
 
 
 def pc_to_pi_stats(sent: int, seqs: list[int], max_gap_ms: float | None) -> dict:
-    """Central -> robot topic: central's sent count, robots' seqs.
+    """Central -> robot topic, counted over [first received seq, last received seq].
 
-    The central runs before the robots start and after they stop, so `loss_rate` over all of
-    `sent` also counts messages sent while no robot existed. `span` repeats the count over
-    [first received seq, last received seq] only.
+    The central runs before the robots start and after they stop, so its full count also holds
+    messages sent while no robot existed. The primary fields (sent, received, lost, loss_rate,
+    dup, longest_gap) cover the received span only; sent_full / loss_rate_full keep the full
+    count for reference. With nothing received the span falls back to the full count.
     """
-    rec = {**judge.loss_stats(sent, seqs), "max_gap_ms": max_gap_ms}
+    full = judge.loss_stats(sent, seqs)
     valid = sorted({s for s in seqs if 0 <= s < sent})
-    if not valid:
-        rec["span"] = None
-        return rec
-    first, last = valid[0], valid[-1]
-    expected = last - first + 1
-    lost = expected - len(valid)
-    rec["span"] = {"first_seq": first, "last_seq": last, "expected": expected, "lost": lost,
-                   "loss_rate": round(lost / expected, 4)}  # fmt: skip
-    return rec
+    if valid:
+        first, last = valid[0], valid[-1]
+        span = judge.loss_stats(last - first + 1, [s - first for s in seqs if 0 <= s < sent])
+    else:
+        first = last = None
+        span = full
+    return {**span, "first_seq": first, "last_seq": last, "sent_full": full["sent"],
+            "loss_rate_full": full["loss_rate"], "max_gap_ms": max_gap_ms}  # fmt: skip
 
 
 def topic_table(robots_out: dict, central_out: dict, hb: dict) -> dict:
@@ -320,8 +320,10 @@ def main(argv: list[str] | None = None) -> int:
         "interval_clock": ("로봇→관제 끊김은 PC의 time.monotonic_ns(), heartbeat 끊김은 "
                            "라즈베리파이의 time.monotonic_ns()와 그 장비의 창 "
                            "(두 장비 시계는 빼지 않음)"),
-        "pc_to_pi_loss": ("sent는 관제 발행 전체(로봇 시작 전·종료 후 포함), "
-                          "span은 처음~마지막 받은 seq 구간만"),
+        "pc_to_pi_loss": ("관제→로봇 토픽의 sent·lost·loss_rate는 처음~마지막 받은 seq "
+                          "구간만 셈. sent_full·loss_rate_full은 관제 발행 전체(로봇 시작 "
+                          "전·종료 후 포함), 참고용"),
+        "vision_loss_note": "LATCHED depth 1: 덮어쓴 샘플도 순번 빈자리로 셈",
     }  # fmt: skip
     observations = {"combos": recs, "risk": bool(risk_notes)}
     results.write_result(run_dir, TEST_ID, judge.MEASURE, observations, conditions, notes,

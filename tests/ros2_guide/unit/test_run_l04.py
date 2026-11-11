@@ -53,12 +53,24 @@ def test_pi_to_pc_stats_uses_robot_sent_and_pc_receive_times():
     assert got["max_gap_ms"] == 250.0
 
 
-def test_pc_to_pi_stats_keeps_central_sent_and_reports_span():
+def test_pc_to_pi_stats_counts_over_received_span():
     got = pc_to_pi_stats(10, [3, 4, 6, 7], max_gap_ms=None)
-    assert (got["sent"], got["received"], got["loss_rate"]) == (10, 4, 0.6)
-    assert got["span"] == {"first_seq": 3, "last_seq": 7, "expected": 5, "lost": 1,
-                           "loss_rate": 0.2}
-    assert pc_to_pi_stats(5, [], max_gap_ms=None)["span"] is None
+    assert (got["sent"], got["received"], got["lost"], got["loss_rate"]) == (5, 4, 1, 0.2)
+    assert (got["first_seq"], got["last_seq"]) == (3, 7)
+    assert (got["sent_full"], got["loss_rate_full"]) == (10, 0.6)
+
+
+def test_pc_to_pi_stats_perfect_link_with_extra_central_seqs_is_zero_loss():
+    got = pc_to_pi_stats(20, list(range(4, 15)), max_gap_ms=500.0)
+    assert (got["sent"], got["received"], got["lost"], got["loss_rate"]) == (11, 11, 0, 0.0)
+    assert got["longest_gap"] == 0 and got["max_gap_ms"] == 500.0
+    assert got["sent_full"] == 20 and got["loss_rate_full"] == 0.45
+
+
+def test_pc_to_pi_stats_nothing_received_falls_back_to_full_count():
+    got = pc_to_pi_stats(5, [], max_gap_ms=None)
+    assert (got["sent"], got["received"], got["loss_rate"]) == (5, 0, 1.0)
+    assert got["first_seq"] is None and got["loss_rate_full"] == 1.0
 
 
 def test_heartbeat_and_topic_tables_use_each_side_counts():
@@ -82,9 +94,10 @@ def test_heartbeat_and_topic_tables_use_each_side_counts():
     assert table["/pinky1/state"]["sent"] == 3 and table["/pinky1/state"]["lost"] == 1
     assert table["/pinky1/state"]["max_gap_ms"] == 200.0
     beat = table["/fleet/heartbeat@pinky1"]
-    assert (beat["sent"], beat["received"], beat["max_gap_ms"]) == (6, 3, 1000.0)
-    assert beat["span"]["loss_rate"] == 0.0
-    assert table["/central/events"]["sent"] == 2 and table["/fleet/robots"]["received"] == 2
+    assert (beat["sent"], beat["received"], beat["max_gap_ms"]) == (3, 3, 1000.0)
+    assert beat["loss_rate"] == 0.0 and beat["sent_full"] == 6
+    assert beat["loss_rate_full"] == 0.5
+    assert table["/central/events"]["sent_full"] == 2 and table["/fleet/robots"]["received"] == 2
 
 
 def test_robots_problem():
