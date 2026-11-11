@@ -2,6 +2,7 @@
 # Stage 2 evening batch: preflight, then L-01-W, L-02, L-04, G-11 under one run ID.
 # Usage: PI_HOST=sbt-pi run_stage2.sh [--run-id ID] [--resume] [--only L-01-W,L-02,L-04,G-11] [--quick]
 # PI_HOST defaults to "local" (one PC, results are not official).
+# --resume skips finished combos and re-runs failed ones (moved aside as *.failed-<time>.json).
 # Exit code: 2 refused to start (reused run ID, bad option), 3 preflight failed, 1 a runner
 # crashed or refused; 실패 or 판정 불가 verdicts never change it. Read the summary or the JSON files.
 set -euo pipefail
@@ -100,24 +101,14 @@ fi
 python3 "$HERE/stage2_preflight.py" --pi-host "$PI_HOST" --cleanup-only || true
 
 echo "== 결과 요약 ($RUN_DIR) =="
-python3 - "$RUN_DIR" <<'PY'
-import json
+python3 - "$HERE" "$RUN_DIR" "$ONLY" <<'PY' || echo "요약 실패: $RUN_DIR 의 JSON 파일을 직접 확인" >&2
 import sys
 from pathlib import Path
 
-run_dir = Path(sys.argv[1])
-paths = sorted(run_dir.glob("L-01-W-*.json"))
-paths += [run_dir / n for n in ("L-02.json", "L-04.json", "G-11.json")]
-for path in paths:
-    if path.name.endswith(".samples.json") or not path.exists():
-        continue
-    try:
-        d = json.loads(path.read_text(encoding="utf-8"))
-        extra = ""
-        if d["id"] == "L-04":
-            extra = f" (통합 운영 위험: {'있음' if d['observations'].get('risk') else '없음'})"
-        print(f"{d['id']}: {d['result']}{extra}")
-    except (OSError, ValueError, KeyError) as e:
-        print(f"{path.stem}: 읽기 실패 ({e})")
+sys.path.insert(0, sys.argv[1])
+from r2g import summary  # noqa: E402
+
+for line in summary.summary_lines(Path(sys.argv[2]), sys.argv[3].split(",")):
+    print(line)
 PY
 exit "$rc"
