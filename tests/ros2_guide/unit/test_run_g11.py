@@ -1,4 +1,12 @@
-from run_g11 import CASES, DIRECTIONS, case_key, daemon_stop_cmd, judge_g11, parse_result
+from run_g11 import (
+    CASES,
+    DIRECTIONS,
+    build_record,
+    case_key,
+    daemon_stop_cmd,
+    judge_g11,
+    parse_result,
+)
 
 
 def ok(n):
@@ -89,3 +97,30 @@ def test_daemon_stop_cmd():
     assert "source /opt/ros/jazzy/setup.bash" in cmd
     assert "ROS_DOMAIN_ID=88" in cmd and "ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET" in cmd
     assert cmd.endswith("ros2 daemon stop")
+
+
+def test_record_keeps_received_when_publisher_failed():
+    rec = build_record("PC→파이", "/t", {"received": 3, "peer_seen_max": 1}, None,
+                       "보내는 노드 시간 초과")  # fmt: skip
+    assert rec["received"] == 3 and not rec["ok"] and rec["pub_saw_subscribers_max"] is None
+    r = full()
+    r["도메인"]["PC→파이"] = rec
+    assert judge_g11(r)[0] == "실패"
+
+
+def test_record_keeps_both_views():
+    rec = build_record("파이→PC", "/t", {"received": 0, "peer_seen_max": 0},
+                       {"sent": 50, "peer_seen_max": 1}, None)  # fmt: skip
+    assert rec["sub_saw_publishers_max"] == 0 and rec["pub_saw_subscribers_max"] == 1
+    assert rec["peer_seen_max"] == 1 and rec["received"] == 0
+    r = full()
+    r["PC_LOCALHOST"]["파이→PC"] = rec
+    verdict, notes = judge_g11(r)
+    assert verdict == "통과"
+    assert "그래프에 상대 보임: PC_LOCALHOST 파이→PC" in notes
+    assert "그래프에 상대 보임(보내는 쪽이 구독자를 봄): PC_LOCALHOST 파이→PC" in notes
+
+
+def test_record_no_results():
+    rec = build_record("PC→파이", "/t", None, None, "받는 노드가 READY를 내지 않음")
+    assert rec["received"] is None and rec["peer_seen_max"] is None

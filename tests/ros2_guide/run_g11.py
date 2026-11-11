@@ -108,6 +108,11 @@ def judge_g11(res: dict[str, dict[str, dict]]) -> tuple[str, list[str]]:
             r = _count((res.get(case, {}).get(d) or {}).get("received"))
             if r == 0 and peer:
                 notes.append(f"그래프에 상대 보임: {case} {d}")
+                v = res[case][d]
+                if v.get("sub_saw_publishers_max"):
+                    notes.append(f"그래프에 상대 보임(받는 쪽이 발행자를 봄): {case} {d}")
+                if v.get("pub_saw_subscribers_max"):
+                    notes.append(f"그래프에 상대 보임(보내는 쪽이 구독자를 봄): {case} {d}")
     bad_control = [d for d in DIRECTIONS
                    if not (_count((res.get(CONTROL, {}).get(d) or {}).get("received")) or 0) > 0]
     if bad_control:
@@ -126,6 +131,22 @@ def judge_g11(res: dict[str, dict[str, dict]]) -> tuple[str, list[str]]:
     if missing:
         return judge.UNJUDGEABLE, [f"수신 수 없음(격리 판단 불가): {x}" for x in missing] + notes
     return judge.PASS, notes
+
+
+def build_record(direction: str, topic: str, sub_res: dict | None, pub_res: dict | None,
+                 reason: str | None) -> dict:
+    """Record of one direction. `received` is kept whenever the subscriber result parsed,
+    even if the publisher failed: a real reception in an isolation case must stay visible."""
+    sub_saw = sub_res["peer_seen_max"] if sub_res else None
+    pub_saw = pub_res["peer_seen_max"] if pub_res else None
+    seen = [v for v in (sub_saw, pub_saw) if v is not None]
+    return {
+        "direction": direction, "topic": topic, "ok": reason is None, "reason": reason,
+        "received": sub_res["received"] if sub_res else None,
+        "sent": pub_res.get("sent") if pub_res else None,
+        "sub_saw_publishers_max": sub_saw, "pub_saw_subscribers_max": pub_saw,
+        "peer_seen_max": max(seen) if seen else None,
+    }
 
 
 def run_direction(case: dict, direction: str, observe: float, pc_launcher, pi_launcher) -> dict:
@@ -159,13 +180,7 @@ def run_direction(case: dict, direction: str, observe: float, pc_launcher, pi_la
     finally:
         if sub is not None:
             sub_l.stop(sub)
-    rec = {"direction": direction, "topic": topic, "ok": reason is None, "reason": reason,
-           "received": None, "sent": pub_res.get("sent") if pub_res else None,
-           "peer_seen_max": None}  # fmt: skip
-    if sub_res is not None and reason is None:
-        rec["received"] = sub_res["received"]
-        rec["peer_seen_max"] = max(sub_res["peer_seen_max"], pub_res["peer_seen_max"])
-    return rec
+    return build_record(direction, topic, sub_res, pub_res, reason)
 
 
 def stop_daemons(case: dict, pc_launcher, pi_launcher) -> list[str]:
