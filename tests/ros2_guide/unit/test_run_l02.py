@@ -59,3 +59,8 @@ def test_combo_order_reliability_size_rate_rep():
     assert got[2] == ("a", "S", 1, 50, 0)
     assert got[4] == ("a", "L", 2, 10, 0)
     assert got[8][0] == "b"
+
+
+def test_parse_pub_skips_trailing_noise():
+    out = '{"sent": 5, "matched": true}\n[ERROR] shutdown\n'
+    assert parse_pub(out)["sent"] == 5

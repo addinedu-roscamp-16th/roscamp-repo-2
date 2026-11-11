@@ -10,7 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from r2g import config, judge, parts, proc, remote, results  # noqa: E402
+from r2g import config, judge, lines, parts, proc, remote, results  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 NODES = HERE / "nodes"
@@ -45,21 +45,13 @@ def expected_sent(seconds: float, rate: int) -> int:
 
 
 def parse_pub(stdout: str) -> dict | None:
-    """Last JSON line of l02_pub: {sent, matched, elapsed_s, achieved_hz, error}, or None."""
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(obj, dict) or not isinstance(obj.get("sent"), int):
-            return None
-        return {"sent": obj["sent"], "matched": obj.get("matched") is True,
-                "elapsed_s": obj.get("elapsed_s"), "achieved_hz": obj.get("achieved_hz"),
-                "error": obj.get("error")}  # fmt: skip
-    return None
+    """Last JSON object line of l02_pub: {sent, matched, elapsed_s, achieved_hz, error}."""
+    obj = lines.last_json_object(stdout)
+    if obj is None or not isinstance(obj.get("sent"), int):
+        return None
+    return {"sent": obj["sent"], "matched": obj.get("matched") is True,
+            "elapsed_s": obj.get("elapsed_s"), "achieved_hz": obj.get("achieved_hz"),
+            "error": obj.get("error")}  # fmt: skip
 
 
 def l02_problem(pub: dict | None, timed_out: bool, expected: int) -> str | None:
@@ -120,6 +112,7 @@ def run_combo(rel: str, size_name: str, size: int, rate: int, rep: int, seconds:
     ]  # fmt: skip
     sub = None
     pub_info = None
+    pub_tail = None
     reason = None
     try:
         sub = proc.start_child(sub_cmd, env)
@@ -128,6 +121,8 @@ def run_combo(rel: str, size_name: str, size: int, rate: int, rep: int, seconds:
         else:
             pub = launcher.run("l02_pub.py", pub_args, seconds + PUB_MARGIN_S, pi_over)
             pub_info = parse_pub(pub.stdout)
+            if pub_info is None or pub.rc != 0:
+                pub_tail = lines.stdout_tail(pub.stdout)
             reason = l02_problem(pub_info, pub.timed_out, expected)
             if reason is None and pub.rc != 0:
                 reason = f"발행 노드 비정상 종료(rc={pub.rc})"
@@ -145,7 +140,10 @@ def run_combo(rel: str, size_name: str, size: int, rate: int, rep: int, seconds:
         "ok": reason is None, "reason": reason, "topic": topic, "wifi": wifi,
         "expected": expected,
     }  # fmt: skip
-    return fill_counts(rec, pub_info, out)
+    rec = fill_counts(rec, pub_info, out)
+    if pub_tail is not None:
+        rec["pub_stdout_tail"] = pub_tail
+    return rec
 
 
 def size_desc(seconds: float, repeats: int) -> str:

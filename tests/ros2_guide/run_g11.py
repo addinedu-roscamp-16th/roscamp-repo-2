@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """G-11 runner: PC <-> Raspberry Pi isolation (other domain, LOCALHOST on one side)."""
 import argparse
-import json
 import os
 import shlex
 import sys
@@ -10,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from r2g import config, judge, parts, proc, remote, results  # noqa: E402
+from r2g import config, judge, lines, parts, proc, remote, results  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 
@@ -68,25 +67,15 @@ def daemon_stop_cmd(env: dict) -> str:
 
 
 def parse_result(stdout: str) -> dict | None:
-    """Last JSON line of g11_node: {sent|received, peer_seen_max}, or None."""
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(obj, dict):
-            return None
-        peer = obj.get("peer_seen_max")
-        if not isinstance(peer, int):
-            return None
-        if isinstance(obj.get("received"), int):
-            return {"received": obj["received"], "peer_seen_max": peer}
-        if isinstance(obj.get("sent"), int):
-            return {"sent": obj["sent"], "peer_seen_max": peer}
+    """Last JSON object line of g11_node: {sent|received, peer_seen_max}, or None."""
+    obj = lines.last_json_object(stdout)
+    if obj is None or not isinstance(obj.get("peer_seen_max"), int):
         return None
+    peer = obj["peer_seen_max"]
+    if isinstance(obj.get("received"), int):
+        return {"received": obj["received"], "peer_seen_max": peer}
+    if isinstance(obj.get("sent"), int):
+        return {"sent": obj["sent"], "peer_seen_max": peer}
     return None
 
 
@@ -165,6 +154,7 @@ def run_direction(case: dict, direction: str, observe: float, pc_launcher, pi_la
     sub = None
     reason = None
     sub_res = pub_res = None
+    tail: dict = {}
     try:
         sub = sub_l.start("g11_node.py",
                           ["--role", "sub", "--topic", topic, "--seconds", str(sub_s)], sub_over)
@@ -174,6 +164,8 @@ def run_direction(case: dict, direction: str, observe: float, pc_launcher, pi_la
             pub_args = ["--role", "pub", "--topic", topic, "--seconds", str(observe)]
             pub = pub_l.run("g11_node.py", pub_args, observe + PUB_MARGIN_S, pub_over)
             pub_res = parse_result(pub.stdout)
+            if pub_res is None or pub.rc != 0:
+                tail["pub"] = lines.stdout_tail(pub.stdout)
             if pub.timed_out:
                 reason = "보내는 노드 시간 초과"
             elif pub_res is None:
@@ -181,12 +173,17 @@ def run_direction(case: dict, direction: str, observe: float, pc_launcher, pi_la
             done = proc.finish_child(sub, sub_s + SUB_FINISH_MARGIN_S)
             sub = None
             sub_res = parse_result(done.stdout)
+            if sub_res is None:
+                tail["sub"] = lines.stdout_tail(done.stdout)
             if sub_res is None and reason is None:
                 reason = "받는 노드 결과 줄 없음" + ("(시간 초과)" if done.timed_out else "")
     finally:
         if sub is not None:
             sub_l.stop(sub)
-    return build_record(direction, topic, sub_res, pub_res, reason)
+    rec = build_record(direction, topic, sub_res, pub_res, reason)
+    if tail:
+        rec["stdout_tail"] = tail
+    return rec
 
 
 def stop_daemons(case: dict, pc_launcher, pi_launcher) -> list[str]:

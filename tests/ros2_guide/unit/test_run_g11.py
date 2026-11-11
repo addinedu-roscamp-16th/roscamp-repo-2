@@ -150,3 +150,38 @@ def test_record_keeps_both_views():
 def test_record_no_results():
     rec = build_record("PC→파이", "/t", None, None, "받는 노드가 READY를 내지 않음")
     assert rec["received"] is None and rec["peer_seen_max"] is None
+
+
+def test_parse_result_skips_trailing_noise():
+    out = '{"sent": 4, "peer_seen_max": 1}\nTraceback\n'
+    assert parse_result(out) == {"sent": 4, "peer_seen_max": 1}
+
+
+def test_run_direction_stores_stdout_tail_when_result_missing(monkeypatch):
+    import run_g11
+    from r2g.proc import ChildResult
+
+    class L:
+        def __init__(self, stdout):
+            self.stdout = stdout
+
+        def run(self, *a, **k):
+            return ChildResult(rc=1, stdout=self.stdout, timed_out=False)
+
+        def start(self, *a, **k):
+            return object()
+
+        def stop(self, *a, **k):
+            pass
+
+    monkeypatch.setattr(run_g11.proc, "wait_ready", lambda p, t: True)
+    monkeypatch.setattr(
+        run_g11.proc, "finish_child",
+        lambda p, t: ChildResult(rc=0, stdout='{"received": 3, "peer_seen_max": 1}\n',
+                                 timed_out=False),
+    )
+    case = {"name": "대조", "pc": {}, "pi": {}}
+    rec = run_g11.run_direction(case, DIRECTIONS[0], 1.0, L("READY\n" + "x" * 400 + "\n"), L(""))
+    assert rec["ok"] is False and rec["reason"] == "보내는 노드 결과 줄 없음"
+    assert rec["stdout_tail"]["pub"] == ["READY", "x" * 300]
+    assert "sub" not in rec["stdout_tail"]

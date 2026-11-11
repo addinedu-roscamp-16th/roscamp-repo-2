@@ -19,10 +19,14 @@ import rclpy  # noqa: E402
 from rclpy.executors import ExternalShutdownException  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 
-from r2g import qos  # noqa: E402
+from r2g import pacing, qos  # noqa: E402
 
 RATE_HZ = 5.0
 POLL_S = 0.5
+
+
+def spin(node, timeout_sec: float) -> None:
+    rclpy.spin_once(node, timeout_sec=timeout_sec)
 
 
 def main(argv=None) -> int:
@@ -47,8 +51,8 @@ def main(argv=None) -> int:
                 pub.publish(String(data=f"g11 {count}"))
                 count += 1
                 peer_max = max(peer_max, pub.get_subscription_count())
-                rclpy.spin_once(
-                    node, timeout_sec=max(0.0, t0 + count * period - time.monotonic())
+                pacing.wait_until(
+                    t0 + count * period, lambda timeout_sec: spin(node, timeout_sec)
                 )
         else:
             def on_msg(_msg) -> None:

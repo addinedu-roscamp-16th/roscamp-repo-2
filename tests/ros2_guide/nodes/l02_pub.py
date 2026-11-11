@@ -19,10 +19,14 @@ import rclpy  # noqa: E402
 from rclpy.executors import ExternalShutdownException  # noqa: E402
 from std_msgs.msg import String  # noqa: E402
 
-from r2g import payload, qos  # noqa: E402
+from r2g import pacing, payload, qos  # noqa: E402
 
 DEPTH = 50
 SETTLE_S = 2.0
+
+
+def spin(node, timeout_sec: float) -> None:
+    rclpy.spin_once(node, timeout_sec=timeout_sec)
 
 
 def main(argv=None) -> int:
@@ -63,8 +67,8 @@ def main(argv=None) -> int:
                 if first_send is None:
                     first_send = last_send
                 sent += 1
-                rclpy.spin_once(
-                    node, timeout_sec=max(0.0, t0 + (seq + 1) * period - time.monotonic())
+                pacing.wait_until(
+                    t0 + (seq + 1) * period, lambda timeout_sec: spin(node, timeout_sec)
                 )
             end = time.monotonic() + SETTLE_S
             while rclpy.ok() and time.monotonic() < end:

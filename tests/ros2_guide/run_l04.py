@@ -15,7 +15,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from r2g import config, judge, parts, proc, remote, results  # noqa: E402
+from r2g import config, judge, lines, parts, proc, remote, results  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 NODES = HERE / "nodes"
@@ -52,17 +52,8 @@ def gst_sender_cmd(video: dict, pc_addr: str) -> str:
 
 
 def parse_last_json(stdout: str) -> dict | None:
-    """Last non-empty line as a JSON object, or None."""
-    for line in reversed(stdout.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except ValueError:
-            return None
-        return obj if isinstance(obj, dict) else None
-    return None
+    """Last stdout line that is a JSON object (non-JSON lines after it are skipped)."""
+    return lines.last_json_object(stdout)
 
 
 def video_mbps(counter: dict | None) -> float | None:
@@ -140,6 +131,8 @@ def robots_problem(out: dict | None, timed_out: bool, rc: int | None) -> str | N
     if timed_out:
         return "로봇 노드 시간 초과"
     if out is None or not isinstance(out.get("sent"), dict):
+        if rc not in (0, None):
+            return f"로봇 노드 비정상 종료(rc={rc})"
         return "로봇 노드 결과 줄 없음"
     if not out.get("matched"):
         return "관제 매칭 실패"
@@ -226,6 +219,7 @@ def run_combo(level: str, background: str, cfg: dict, seconds: float, env: dict,
     central = counter = gst = None
     counter_out = None
     robots_out = None
+    robots_tail = None
     video_early = False
     video_reason = None
     reason = None
@@ -241,6 +235,8 @@ def run_combo(level: str, background: str, cfg: dict, seconds: float, env: dict,
                                seconds + SETTLE_S + ROBOTS_MARGIN_S, pi_over)  # fmt: skip
             robots_out = parse_last_json(res.stdout)
             reason = robots_problem(robots_out, res.timed_out, res.rc)
+            if robots_out is None or res.rc != 0:
+                robots_tail = lines.stdout_tail(res.stdout)
             if central.poll() is not None and reason is None:
                 reason = f"관제 노드가 시험 중 종료됨(rc={central.poll()})"
     finally:
@@ -267,6 +263,8 @@ def run_combo(level: str, background: str, cfg: dict, seconds: float, env: dict,
         "video_mbps": mbps,
         "video_early_exit": video_early if background == VIDEO_BG else None, "wifi": wifi,
     }  # fmt: skip
+    if robots_tail is not None:
+        rec["robots_stdout_tail"] = robots_tail
     if skip is None:
         hb = heartbeat_table(robots_out, cfg["heartbeat_stop_s"])
         rec["heartbeat"] = hb

@@ -133,3 +133,13 @@ def test_overall_risk_is_tri_state():
     assert overall_risk({"a": clean, "b": unknown}) is None
     assert overall_risk({"a": risky, "b": unknown}) is True
     assert overall_risk({"a": clean, "b": {"ok": False, "reason": "실행 기록 없음"}}) is None
+
+
+def test_parse_last_json_skips_trailing_noise():
+    out = 'READY\n{"sent": {"a": 1}}\n[ERROR] rcl shutdown\nTraceback (most recent call last)\n'
+    assert parse_last_json(out) == {"sent": {"a": 1}}
+
+
+def test_robots_problem_nonzero_rc_without_result():
+    assert robots_problem(None, False, 139) == "로봇 노드 비정상 종료(rc=139)"
+    assert robots_problem(None, False, 0) == "로봇 노드 결과 줄 없음"
