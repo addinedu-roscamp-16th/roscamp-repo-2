@@ -44,6 +44,7 @@ LATE_PUB_TIMEOUT_S = 15.0
 CLIENT_TIMEOUT_S = 5.0
 CLIENT_PROC_TIMEOUT_S = 15.0
 NOTHING_SENT = "발행 노드가 보낸 메시지 없음"
+MATCH_TIMEOUT = "구독자 매칭 시간 초과(발행 생략)"
 
 
 def topic_for(variant: str) -> str:
@@ -123,6 +124,8 @@ def pub_trial_exclusion(timed_out: bool, rc: int | None, info: dict | None) -> s
         return f"발행 노드 비정상 종료(rc={rc})"
     if info is None:
         return "발행 노드 결과 줄 없음"
+    if info.get("matched") is False:
+        return MATCH_TIMEOUT
     if not info.get("sent") or info.get("publish_ns") is None:
         return NOTHING_SENT
     return None
@@ -475,6 +478,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--variants", default=",".join(VARIANTS))
     ap.add_argument("--out-root", default=str(HERE / "results"))
     ap.add_argument("--run-id", default=None)
+    ap.add_argument(
+        "--discovery-range", choices=proc.DISCOVERY_RANGES, default=proc.STAGE1_DISCOVERY,
+        help="ROS_AUTOMATIC_DISCOVERY_RANGE for every child and ros2 doctor (기본 LOCALHOST)",
+    )
     args = ap.parse_args(argv)
 
     names = [v.strip() for v in args.variants.split(",") if v.strip()]
@@ -482,6 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         ap.error(f"unknown variants: {unknown}")
 
+    proc.pin_discovery(os.environ, args.discovery_range)
     env = proc.child_env(os.environ)
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
     clash = results.existing_targets(Path(args.out_root) / run_id, target_files(names))

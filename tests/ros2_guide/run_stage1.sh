@@ -33,6 +33,8 @@ if [ -z "${ROS_DISTRO:-}" ]; then
     source /opt/ros/jazzy/setup.bash
     set -u
 fi
+# ROS setup exports SUBNET by default; stage 1 runs on one PC only.
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
 
 rc=0
 python3 "$HERE/run_l01.py" --trials "$TRIALS" --out-root "$OUT_ROOT" --run-id "$RUN_ID" || rc=1

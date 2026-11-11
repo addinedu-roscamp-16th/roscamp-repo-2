@@ -43,7 +43,8 @@ def first_receive(pub_start_ns: int, rx: list[tuple[int, int]]) -> dict | None:
 def staleness_stats(samples_ms: list[float]) -> dict:
     n = len(samples_ms)
     if n == 0:
-        return {"count": 0, "p50": 0.0, "p99": 0.0, "max": 0.0, "trend_ms": 0.0}
+        return {"count": 0, "p50": 0.0, "p99": 0.0, "max": 0.0, "max_exact": 0.0,
+                "trend_ms": 0.0}
     s = sorted(samples_ms)
     k = n // 10
     trend = 0.0
@@ -56,12 +57,15 @@ def staleness_stats(samples_ms: list[float]) -> dict:
         "p50": round(s[math.ceil(0.5 * n) - 1], 1),
         "p99": round(s[math.ceil(0.99 * n) - 1], 1),
         "max": round(s[-1], 1),
+        "max_exact": s[-1],  # judged unrounded; "max" is for display
         "trend_ms": round(trend, 1),
     }
 
 
 def judge_l03_rule(runs: list[dict], limit_ms: float = 150.0, expected_runs: int = 5) -> str:
-    ok = len(runs) == expected_runs and all(r["count"] > 0 and r["max"] <= limit_ms for r in runs)
+    ok = len(runs) == expected_runs and all(
+        r["count"] > 0 and r.get("max_exact", r["max"]) <= limit_ms for r in runs
+    )
     return PASS if ok else FAIL
 
 

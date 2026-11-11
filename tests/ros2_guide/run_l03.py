@@ -97,10 +97,17 @@ def combo_observation(pub: dict | None, out: dict | None) -> dict | None:
     }
 
 
-def data_problem(obs: dict) -> str | None:
-    """A run with no matched subscriber or no processed message is not data."""
+def expected_sent(seconds: float) -> int:
+    """Messages the publisher must send in a full run (same rounding as l03_pub)."""
+    return int(round(seconds * RATE_HZ))
+
+
+def data_problem(obs: dict, expected_sent: int | None = None) -> str | None:
+    """A run with no matched subscriber, a short stream or no processed message is not data."""
     if not obs["matched"]:
         return "구독자 매칭 실패"
+    if expected_sent is not None and obs["sent"] < expected_sent:
+        return f"발행 수 미달(실제 {obs['sent']} / 예정 {expected_sent})"
     if obs["processed"] == 0:
         return "처리한 메시지 없음"
     if obs["processed_live"] == 0:
@@ -187,7 +194,8 @@ def run_one(mode: str, depth: int, reliability: str, rep: int, seconds: float,
     if reason is None and obs is None:
         reason = "구독 노드 out 파일 없음"
     if reason is None and obs is not None:
-        reason = data_problem(obs)
+        obs["expected_sent"] = expected_sent(seconds)
+        reason = data_problem(obs, obs["expected_sent"])
     ok = sub_verdict(alive, obs is not None, "측정") == "측정" and reason is None
     raw = {
         "topic": topic,
@@ -205,8 +213,13 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--repeats", type=int, default=RULE["repeats"])
     ap.add_argument("--out-root", default=str(HERE / "results"))
     ap.add_argument("--run-id", default=None)
+    ap.add_argument(
+        "--discovery-range", choices=proc.DISCOVERY_RANGES, default=proc.STAGE1_DISCOVERY,
+        help="ROS_AUTOMATIC_DISCOVERY_RANGE for every child and ros2 doctor (기본 LOCALHOST)",
+    )
     args = ap.parse_args(argv)
 
+    proc.pin_discovery(os.environ, args.discovery_range)
     env = proc.child_env(os.environ)
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
     clash = results.existing_targets(Path(args.out_root) / run_id, target_files())

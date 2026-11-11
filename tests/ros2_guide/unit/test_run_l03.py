@@ -103,3 +103,17 @@ def test_rule_notes():
 def test_target_files():
     assert target_files() == [
         "L-03-대조.json", "L-03-대조.samples.json", "L-03-규칙.json", "L-03-규칙.samples.json"]
+
+
+def test_data_problem_short_publish():
+    pub = {"sent": 2, "last_publish_ns": 1000 * MS, "matched": True}
+    obs = combo_observation(pub, _out([[0, 30 * MS]]))
+    assert data_problem(obs, expected_sent=1000) == "발행 수 미달(실제 2 / 예정 1000)"
+    full = combo_observation({**pub, "sent": 1000}, _out([[0, 30 * MS]]))
+    assert data_problem(full, expected_sent=1000) is None
+
+
+def test_expected_sent():
+    from run_l03 import expected_sent
+
+    assert expected_sent(20) == 1000 and expected_sent(3) == 150

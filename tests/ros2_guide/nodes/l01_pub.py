@@ -64,7 +64,8 @@ def main(argv=None) -> int:
                 rclpy.spin_once(node, timeout_sec=0.01)
             matched = pub.get_subscription_count() > 0
             wait_ms = round((time.monotonic() - t0) * 1000, 1)
-            send(0)
+            if matched:  # the rule is "publish after a subscriber is matched"; else skip
+                send(0)
         elif args.mode == "once":
             send(0)
         else:

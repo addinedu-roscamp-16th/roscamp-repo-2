@@ -4,10 +4,24 @@ import select
 import signal
 import subprocess
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from dataclasses import dataclass
 
 _KILL_WAIT = 2.0
+DISCOVERY_RANGES = ("LOCALHOST", "SUBNET", "OFF", "SYSTEM_DEFAULT")
+STAGE1_DISCOVERY = "LOCALHOST"
+
+
+def pin_discovery(environ: MutableMapping[str, str], value: str = STAGE1_DISCOVERY) -> None:
+    """Set ROS_AUTOMATIC_DISCOVERY_RANGE explicitly.
+
+    Sourcing ROS Jazzy exports SUBNET when the variable is unset, so a default via
+    `child_env` never applies. Runners call this before starting children and
+    `ros2 doctor`, so every process of a run sees the same value.
+    """
+    if value not in DISCOVERY_RANGES:
+        raise ValueError(f"unknown discovery range: {value}")
+    environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = value
 
 
 def child_env(base: Mapping[str, str]) -> dict[str, str]:

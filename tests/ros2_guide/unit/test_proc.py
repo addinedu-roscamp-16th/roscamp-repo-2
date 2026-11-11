@@ -1,7 +1,16 @@
 import os
 import sys
 
-from r2g.proc import child_env, run_child, start_child, stop_child, wait_ready
+import pytest
+
+from r2g.proc import (
+    child_env,
+    pin_discovery,
+    run_child,
+    start_child,
+    stop_child,
+    wait_ready,
+)
 
 
 def test_child_env_defaults():
@@ -55,3 +64,18 @@ def test_finish_child_timeout_and_ok():
     p = start_child([sys.executable, "-c", "import time; time.sleep(30)"], os.environ)
     r = finish_child(p, 0.5)
     assert r.timed_out is True and r.rc is not None
+
+
+def test_pin_discovery_overrides_sourced_subnet():
+    environ = {"ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"}
+    pin_discovery(environ)
+    assert environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "LOCALHOST"
+    assert child_env(environ)["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "LOCALHOST"
+
+
+def test_pin_discovery_explicit_and_invalid():
+    environ = {}
+    pin_discovery(environ, "SUBNET")
+    assert environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "SUBNET"
+    with pytest.raises(ValueError):
+        pin_discovery(environ, "subnet")

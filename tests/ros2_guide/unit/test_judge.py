@@ -96,3 +96,10 @@ def test_size_gate(judged, is_rule, standard, expected):
     from r2g.judge import size_gate
 
     assert size_gate(judged, is_rule, standard, "시도 2회") == expected
+
+
+def test_l03_boundary_uses_unrounded_max():
+    s = staleness_stats([10.0, 150.04])
+    assert s["max"] == 150.0 and s["max_exact"] == 150.04
+    assert judge_l03_rule([s] * 5) == "실패"
+    assert judge_l03_rule([staleness_stats([10.0, 150.0])] * 5) == "통과"

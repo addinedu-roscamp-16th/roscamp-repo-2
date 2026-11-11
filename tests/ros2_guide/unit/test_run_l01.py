@@ -154,3 +154,12 @@ def test_l01_size_gate():
     assert gated_verdict("S", "실패", 10)[0] == "판정 불가"
     assert gated_verdict("A", "측정", 2) == ("측정", "개발 실행(시도 2회): 공식 판정 아님")
     assert gated_verdict("F", "측정", 50) == ("측정", None)
+
+
+def test_match_timeout_is_excluded():
+    from run_l01 import MATCH_TIMEOUT, pub_trial_exclusion
+
+    skipped = {"trial": 0, "publish_ns": None, "sent": 0, "matched": False}
+    assert pub_trial_exclusion(False, 0, skipped) == MATCH_TIMEOUT
+    assert pub_trial_exclusion(False, 0, {"trial": 0, "publish_ns": 5, "sent": 1,
+                                         "matched": True}) is None
