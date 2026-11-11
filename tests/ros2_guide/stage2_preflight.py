@@ -31,6 +31,7 @@ FAIL_REASONS = {
     "pi_to_pc": "라즈베리파이 → PC 수신 0건(PC 방화벽 확인)",
 }
 GST_WARNING = "gst: gst-launch-1.0 또는 x264enc 없음(L-04 영상 동시 조합은 사유를 남기고 진행)"
+WIFI_WARNING = "wifi: 신호 세기를 읽지 못함"
 TWO_WAY_SECONDS = 3.0
 LOCAL_SKIP = "PI_HOST=local: 생략"
 SHELL_TIMEOUT_S = 30.0
@@ -51,6 +52,8 @@ def preflight_verdict(checks: dict[str, bool | None]) -> tuple[bool, list[str]]:
     ok = not reasons
     if checks.get("gst") is not True:
         reasons.append(GST_WARNING)
+    if checks.get("wifi") is False:  # None = not checked (PI_HOST=local): no warning
+        reasons.append(WIFI_WARNING)
     return ok, reasons
 
 
@@ -83,7 +86,7 @@ GST_CHECK_CMD = "command -v gst-launch-1.0 >/dev/null && gst-inspect-1.0 x264enc
 def run_checks(pi_host: str, env: dict[str, str], pc_launcher, pi_launcher,
                run_dir: Path) -> tuple[dict[str, bool | None], dict[str, str]]:
     local = pi_host == "local"
-    checks: dict[str, bool | None] = {k: None for k in (*REQUIRED, "gst")}
+    checks: dict[str, bool | None] = {k: None for k in (*REQUIRED, "gst", "wifi")}
     detail: dict[str, str] = {}
 
     if local:
@@ -128,6 +131,14 @@ def run_checks(pi_host: str, env: dict[str, str], pc_launcher, pi_launcher,
     r = pi_launcher.shell(GST_CHECK_CMD, SHELL_TIMEOUT_S)
     checks["gst"] = r.rc == 0 and not r.timed_out
     detail["gst"] = f"rc={r.rc}"
+
+    if local:
+        detail["wifi"] = LOCAL_SKIP
+    else:
+        wifi = remote.wifi_info(pi_launcher)
+        checks["wifi"] = wifi["signal_dbm"] is not None
+        detail["wifi"] = (f"signal_dbm={wifi['signal_dbm']} iface={wifi['iface']} "
+                          f"source={wifi['source']}")  # fmt: skip
     return checks, detail
 
 

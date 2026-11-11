@@ -239,10 +239,87 @@ def parse_iwconfig(text: str) -> dict:
     }
 
 
+def parse_iw_link(text: str) -> int | None:
+    """`iw dev <if> link`: "signal: -52 dBm"."""
+    m = re.search(r"signal:\s*(-?\d+)\s*dBm", text)
+    return int(m.group(1)) if m else None
+
+
+def _proc_wireless_rows(text: str) -> list[list[str]]:
+    """Interface rows of /proc/net/wireless (after the two header lines)."""
+    rows = []
+    for line in text.splitlines()[2:]:
+        name, sep, rest = line.partition(":")
+        if sep and name.strip():
+            rows.append([name.strip(), *rest.split()])
+    return rows
+
+
+def wireless_iface(text: str) -> str | None:
+    """First wireless interface listed in /proc/net/wireless, or None."""
+    rows = _proc_wireless_rows(text)
+    return rows[0][0] if rows else None
+
+
+def parse_proc_wireless(text: str, iface: str | None = None) -> tuple[int | None, str | None]:
+    """(signal_dbm, link) from /proc/net/wireless: status, link, level, noise columns."""
+    for row in _proc_wireless_rows(text):
+        if iface is not None and row[0] != iface or len(row) < 4:
+            continue
+        try:
+            link = int(float(row[2]))
+            level = int(float(row[3]))
+        except ValueError:
+            return None, None
+        if level > 0:  # 8-bit dBm reported unsigned
+            level -= 256
+        return (level if level < 0 else None), str(link)
+    return None, None
+
+
+_WIFI_CMD = (
+    'export PATH="$PATH:/usr/sbin:/sbin"; '
+    "echo '@@r2g proc'; cat /proc/net/wireless 2>/dev/null; "
+    "IF=$(awk 'NR>2 {sub(\":\", \"\", $1); print $1; exit}' /proc/net/wireless 2>/dev/null); "
+    'IF="${IF:-wlan0}"; echo \'@@r2g iface\'; echo "$IF"; '
+    'echo \'@@r2g iwconfig\'; iwconfig "$IF" 2>&1; '
+    'echo \'@@r2g iw\'; iw dev "$IF" link 2>&1; true'
+)
+
+
+def parse_wifi_report(text: str) -> dict:
+    """Signal from iwconfig, else `iw dev <if> link`, else /proc/net/wireless."""
+    sections: dict[str, str] = {}
+    name = None
+    for line in text.splitlines(keepends=True):
+        if line.startswith("@@r2g "):
+            name = line[len("@@r2g "):].strip()
+            sections[name] = ""
+        elif name is not None:
+            sections[name] += line
+    iface = sections.get("iface", "").strip() or None
+    info = {"signal_dbm": None, "link_quality": None, "iface": iface, "source": None,
+            "raw": text}  # fmt: skip
+    iwc = parse_iwconfig(sections.get("iwconfig", ""))
+    if iwc["signal_dbm"] is not None:
+        info.update(signal_dbm=iwc["signal_dbm"], link_quality=iwc["link_quality"],
+                    source="iwconfig")  # fmt: skip
+        return info
+    sig = parse_iw_link(sections.get("iw", ""))
+    if sig is not None:
+        info.update(signal_dbm=sig, source="iw")
+        return info
+    sig, link = parse_proc_wireless(sections.get("proc", ""), iface)
+    if sig is not None:
+        info.update(signal_dbm=sig, link_quality=link, source="proc")
+    return info
+
+
 def wifi_info(launcher: Launcher) -> dict:
     if launcher.is_local:
-        return {"signal_dbm": None, "link_quality": None, "raw": "PI_HOST=local"}
-    return parse_iwconfig(launcher.shell("iwconfig wlan0 2>&1", _PROBE_TIMEOUT).stdout)
+        return {"signal_dbm": None, "link_quality": None, "iface": None, "source": None,
+                "raw": "PI_HOST=local"}  # fmt: skip
+    return parse_wifi_report(launcher.shell(_WIFI_CMD, _PROBE_TIMEOUT).stdout)
 
 
 def pc_address_seen_by(host: str) -> str | None:

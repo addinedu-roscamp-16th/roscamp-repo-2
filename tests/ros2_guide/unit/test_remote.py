@@ -188,3 +188,60 @@ def test_local_cleanup_stops_only_own_commands(monkeypatch):
     finally:
         unrelated.kill()
         unrelated.wait()
+
+
+PROC_WIRELESS = (
+    "Inter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n"
+    " face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n"
+    "wlp1s0: 0000   58.  -52.  -256        0      0      0      0      0        0\n"
+)
+
+
+def test_parse_iw_link():
+    text = ("Connected to aa:bb:cc:dd:ee:ff (on wlan0)\n\tSSID: lab\n\tfreq: 5180\n"
+            "\tsignal: -61 dBm\n\ttx bitrate: 433.3 MBit/s\n")
+    assert remote.parse_iw_link(text) == -61
+    assert remote.parse_iw_link("Not connected.\n") is None
+
+
+def test_parse_proc_wireless_and_iface():
+    assert remote.wireless_iface(PROC_WIRELESS) == "wlp1s0"
+    assert remote.parse_proc_wireless(PROC_WIRELESS) == (-52, "58")
+    header_only = "\n".join(PROC_WIRELESS.splitlines()[:2])
+    assert remote.wireless_iface(header_only) is None
+    assert remote.parse_proc_wireless(header_only) == (None, None)
+
+
+def _report(iwconfig="", iw="", proc_wireless="", iface="wlan0"):
+    return (f"@@r2g proc\n{proc_wireless}@@r2g iface\n{iface}\n@@r2g iwconfig\n{iwconfig}"
+            f"@@r2g iw\n{iw}")
+
+
+def test_parse_wifi_report_prefers_iwconfig_then_iw_then_proc():
+    iwc = 'wlan0  IEEE 802.11  ESSID:"x"\n   Link Quality=58/70  Signal level=-50 dBm\n'
+    got = remote.parse_wifi_report(_report(iwconfig=iwc, iw="signal: -60 dBm\n"))
+    assert (got["signal_dbm"], got["link_quality"], got["source"]) == (-50, "58/70", "iwconfig")
+    got = remote.parse_wifi_report(_report(iwconfig="bash: iwconfig: command not found\n",
+                                           iw="\tsignal: -60 dBm\n"))
+    assert (got["signal_dbm"], got["source"], got["iface"]) == (-60, "iw", "wlan0")
+    got = remote.parse_wifi_report(_report(iwconfig="", iw="command not found\n",
+                                           proc_wireless=PROC_WIRELESS, iface="wlp1s0"))
+    assert (got["signal_dbm"], got["link_quality"], got["source"]) == (-52, "58", "proc")
+    assert got["iface"] == "wlp1s0"
+    got = remote.parse_wifi_report(_report())
+    assert got["signal_dbm"] is None and got["source"] is None and "raw" in got
+
+
+def test_wifi_info_remote_uses_one_shell_call():
+    calls = []
+
+    class Fake:
+        is_local = False
+
+        def shell(self, command, timeout):
+            calls.append(command)
+            return proc.ChildResult(0, _report(iw="signal: -70 dBm\n"), False)
+
+    got = remote.wifi_info(Fake())
+    assert got["signal_dbm"] == -70 and len(calls) == 1
+    assert "/proc/net/wireless" in calls[0] and "iw dev" in calls[0]

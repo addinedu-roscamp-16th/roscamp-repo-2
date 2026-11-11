@@ -79,3 +79,19 @@ def test_pin_discovery_explicit_and_invalid():
     assert environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] == "SUBNET"
     with pytest.raises(ValueError):
         pin_discovery(environ, "subnet")
+
+
+def test_child_stdin_is_devnull():
+    """A child (e.g. ssh) must never read the terminal: stdin gives EOF at once, even when the
+    parent's stdin is an open pipe that never ends."""
+    r_fd, w_fd = os.pipe()
+    saved = os.dup(0)
+    os.dup2(r_fd, 0)
+    try:
+        r = run_child([sys.executable, "-c", "import sys; print(repr(sys.stdin.read()))"],
+                      5.0, os.environ)
+    finally:
+        os.dup2(saved, 0)
+        for fd in (saved, r_fd, w_fd):
+            os.close(fd)
+    assert (r.timed_out, r.stdout.strip()) == (False, "''")

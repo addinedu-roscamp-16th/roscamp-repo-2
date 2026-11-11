@@ -46,3 +46,10 @@ def test_doctor_pi_cmd_sources_ros_with_env():
     cmd = doctor_pi_cmd({"ROS_DOMAIN_ID": "87", "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"})
     assert cmd.startswith("source /opt/ros/jazzy/setup.bash")
     assert "ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET" in cmd and "ros2 doctor --report" in cmd
+
+
+def test_preflight_wifi_signal_unknown_warns_only():
+    ok, reasons = preflight_verdict({**ALL_OK, "wifi": False})
+    assert ok and "wifi: 신호 세기를 읽지 못함" in reasons
+    assert preflight_verdict({**ALL_OK, "wifi": None}) == (True, [])
+    assert preflight_verdict({**ALL_OK, "wifi": True}) == (True, [])

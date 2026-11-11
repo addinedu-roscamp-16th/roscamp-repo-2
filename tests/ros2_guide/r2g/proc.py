@@ -39,9 +39,11 @@ class ChildResult:
 
 
 def start_child(cmd: list[str], env: Mapping[str, str]) -> subprocess.Popen:
+    """stdin is /dev/null: children (ssh above all) never read the terminal."""
     return subprocess.Popen(
         cmd,
         env=dict(env),
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
