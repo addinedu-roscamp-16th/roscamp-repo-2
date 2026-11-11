@@ -163,3 +163,148 @@ def test_match_timeout_is_excluded():
     assert pub_trial_exclusion(False, 0, skipped) == MATCH_TIMEOUT
     assert pub_trial_exclusion(False, 0, {"trial": 0, "publish_ns": 5, "sent": 1,
                                          "matched": True}) is None
+
+
+def test_topic_for_stage2():
+    from run_l01 import topic_for
+
+    assert topic_for("A", "l01w") == "/r2g/l01w/a"
+    assert topic_for("E-TL", "l01w") == "/r2g/l01w/e_tl"
+    assert topic_for("A") == "/r2g/l01/a"
+
+
+def test_topic_prefix_and_targets():
+    from run_l01 import target_files, topic_prefix
+
+    assert topic_prefix("L-01") == "l01" and topic_prefix("L-01-W") == "l01w"
+    assert target_files(["A", "S"], "L-01-W") == ["L-01-W-A.json", "L-01-W-S.json"]
+    assert target_files(["A"]) == ["L-01-A.json"]
+
+
+def test_w_order_puts_priority_first():
+    from run_l01 import VARIANTS, W_ORDER
+
+    assert W_ORDER[:4] == ["A", "B", "C", "F"] and set(W_ORDER) == set(VARIANTS)
+    assert len(W_ORDER) == len(VARIANTS)
+
+
+def test_device_gate():
+    from run_l01 import device_gate
+
+    note = "장비 1대(PI_HOST=local): 공식 판정 아님"
+    assert device_gate("통과", "B", "local") == ("판정 불가", note)
+    assert device_gate("측정", "A", "local") == ("측정", note)
+    assert device_gate("통과", "B", "sbt-pi") == ("통과", None)
+    assert device_gate("통과", "B", None) == ("통과", None)
+
+
+class _FakeLauncher:
+    def __init__(self, local):
+        self.is_local = local
+        self.calls = []
+
+    def start(self, script, args, env_over):
+        self.calls.append(("start", script, args, dict(env_over)))
+        return "P"
+
+    def run(self, script, args, timeout, env_over):
+        self.calls.append(("run", script, args, dict(env_over)))
+        return "R"
+
+    def stop(self, p):
+        self.calls.append(("stop", p))
+
+
+def test_pi_side_routes_through_launcher():
+    from run_l01 import PiSide
+
+    fl = _FakeLauncher(local=False)
+    side = PiSide({}, fl, {"ROS_DOMAIN_ID": "87"}, "l01w")
+    assert side.remote
+    assert side.start("l01_pub.py", ["--x"]) == "P"
+    assert side.run("l01_srv.py", ["client"], 5.0) == "R"
+    side.stop("P")
+    assert fl.calls[0] == ("start", "l01_pub.py", ["--x"], {"ROS_DOMAIN_ID": "87"})
+    assert fl.calls[1][:2] == ("run", "l01_srv.py")
+    assert fl.calls[2] == ("stop", "P")
+    assert not PiSide({}, _FakeLauncher(local=True)).remote
+    assert not PiSide({}).remote
+
+
+def test_pi_side_without_launcher_is_stage1_command(monkeypatch):
+    import sys
+
+    import run_l01
+    from run_l01 import PiSide
+
+    seen = {}
+    monkeypatch.setattr(run_l01.proc, "run_child",
+                        lambda cmd, t, env: seen.update(cmd=cmd, t=t, env=env))
+    PiSide({"E": "1"}).run("l01_pub.py", ["--topic", "/t"], 15.0)
+    assert seen["cmd"] == [sys.executable, str(run_l01.NODES / "l01_pub.py"), "--topic", "/t"]
+    assert seen["env"] == {"E": "1"} and seen["t"] == 15.0
+
+
+def _fake_main_env(monkeypatch, tmp_path):
+    import run_l01
+
+    launcher = _FakeLauncher(local=True)
+    launcher.cleaned = 0
+    launcher.cleanup = lambda: setattr(launcher, "cleaned", launcher.cleaned + 1)
+    ran = []
+
+    def fake_run_variant(v, trials, env, tmp, side=None):
+        ran.append(v)
+        obs = {"proc_label": "구독 노드", "sub_ready": True, "sub_alive": True,
+               "sub_summary_present": True, "excluded_trials": [], "excluded_reasons": {},
+               "counted": trials, "received": trials, "lost": 0, "loss_rate": 0.0,
+               "lost_trials": [], "sub_exit_code": None}
+        return obs, {"trials": trials}, []
+
+    monkeypatch.setattr(run_l01, "run_variant", fake_run_variant)
+    monkeypatch.setattr(run_l01.results, "save_doctor", lambda d: d / "doctor.txt")
+    monkeypatch.setattr(run_l01.remote, "make_launcher", lambda host, env: launcher)
+    monkeypatch.setattr(run_l01.os, "environ", dict(run_l01.os.environ))
+    return run_l01, launcher, ran
+
+
+def test_main_pi_host_resume_and_notes(monkeypatch, tmp_path):
+    import json
+
+    run_l01, launcher, ran = _fake_main_env(monkeypatch, tmp_path)
+    argv = ["--pi-host", "local", "--id-prefix", "L-01-W", "--trials", "2",
+            "--variants", "S,A", "--out-root", str(tmp_path), "--run-id", "r"]
+    assert run_l01.main(argv) == 0
+    assert ran == ["A", "S"]  # W_ORDER, not the given order
+    a = json.loads((tmp_path / "r" / "L-01-W-A.json").read_text(encoding="utf-8"))
+    s = json.loads((tmp_path / "r" / "L-01-W-S.json").read_text(encoding="utf-8"))
+    assert a["conditions"]["pi_host"] == "local" and a["conditions"]["devices"] == "1대"
+    assert s["result"] == "판정 불가"
+    assert "장비 1대(PI_HOST=local): 공식 판정 아님" in s["notes"]
+    assert launcher.cleaned == 1
+    assert run_l01.main(argv) == 2  # existing results, no --resume: refuse
+    (tmp_path / "r" / "L-01-W-S.json").unlink()
+    ran.clear()
+    assert run_l01.main(argv + ["--resume"]) == 0
+    assert ran == []  # S part exists (done_keys), A json exists
+
+
+def test_main_resume_runs_only_missing(monkeypatch, tmp_path):
+    run_l01, _, ran = _fake_main_env(monkeypatch, tmp_path)
+    argv = ["--pi-host", "local", "--id-prefix", "L-01-W", "--trials", "2",
+            "--variants", "A,B", "--out-root", str(tmp_path), "--run-id", "r"]
+    assert run_l01.main(argv[:-2] + ["--variants", "A", "--run-id", "r"]) == 0
+    ran.clear()
+    assert run_l01.main(argv + ["--resume"]) == 0
+    assert ran == ["B"]
+
+
+def test_main_without_pi_host_unchanged_fields(monkeypatch, tmp_path):
+    import json
+
+    run_l01, _, ran = _fake_main_env(monkeypatch, tmp_path)
+    assert run_l01.main(["--trials", "2", "--variants", "A", "--out-root", str(tmp_path),
+                         "--run-id", "s1"]) == 0
+    d = json.loads((tmp_path / "s1" / "L-01-A.json").read_text(encoding="utf-8"))
+    assert "pi_host" not in d["conditions"] and "devices" not in d["conditions"]
+    assert not (tmp_path / "s1" / "parts").exists()

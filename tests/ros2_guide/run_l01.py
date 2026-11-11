@@ -12,7 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-from r2g import judge, proc, qos, results  # noqa: E402
+from r2g import judge, parts, proc, qos, remote, results  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 NODES = HERE / "nodes"
@@ -27,6 +27,11 @@ VARIANTS: dict[str, dict] = {
     "F": {"profile": "EVENT", "mode": "stream", "late_sub": False},
     "S": {"profile": None, "mode": "service", "late_sub": False},
 }
+
+W_ORDER = ["A", "B", "C", "F", "D", "E-VOL", "E-TL", "S"]
+STAGE1_ID_PREFIX = "L-01"
+LOCAL_DEVICE_NOTE = "장비 1대(PI_HOST=local): 공식 판정 아님"
+CLOCK_NOTE = "장비 간 시계를 비교하지 않아 첫 수신 시간 생략"
 
 PUB_TIMEOUT = {"once": 15.0, "wait_match": 15.0, "stream": 15.0}
 TRIAL_GAP_S = 0.5
@@ -47,12 +52,64 @@ NOTHING_SENT = "발행 노드가 보낸 메시지 없음"
 MATCH_TIMEOUT = "구독자 매칭 시간 초과(발행 생략)"
 
 
-def topic_for(variant: str) -> str:
-    return "/r2g/l01/" + variant.lower().replace("-", "_")
+def topic_for(variant: str, prefix: str = "l01") -> str:
+    return f"/r2g/{prefix}/" + variant.lower().replace("-", "_")
 
 
-def target_files(variants: Iterable[str]) -> list[str]:
-    return [f"L-01-{v}.json" for v in variants]
+def topic_prefix(id_prefix: str) -> str:
+    """`L-01` -> `l01`, `L-01-W` -> `l01w`."""
+    return id_prefix.lower().replace("-", "")
+
+
+def target_files(variants: Iterable[str], id_prefix: str = STAGE1_ID_PREFIX) -> list[str]:
+    return [f"{id_prefix}-{v}.json" for v in variants]
+
+
+def device_gate(judged: str, variant: str, pi_host: str | None) -> tuple[str, str | None]:
+    """One machine (PI_HOST=local) cannot give an official rule verdict."""
+    if pi_host != "local":
+        return judged, None
+    return (
+        judge.UNJUDGEABLE if variant in judge.RULE_VARIANTS_L01 else judged,
+        LOCAL_DEVICE_NOTE,
+    )
+
+
+class PiSide:
+    """Runs the Raspberry Pi side (publisher, service client).
+
+    Without a launcher it spawns the same local commands stage 1 always did.
+    """
+
+    def __init__(self, env: dict, launcher: remote.Launcher | None = None,
+                 pi_env: dict | None = None, prefix: str = "l01"):
+        self.env = env
+        self.launcher = launcher
+        self.pi_env = pi_env or {}
+        self.prefix = prefix
+
+    @property
+    def remote(self) -> bool:
+        return self.launcher is not None and not self.launcher.is_local
+
+    def _cmd(self, script: str, args: list[str]) -> list[str]:
+        return [sys.executable, str(NODES / script), *args]
+
+    def start(self, script: str, args: list[str]):
+        if self.launcher is None:
+            return proc.start_child(self._cmd(script, args), self.env)
+        return self.launcher.start(script, args, self.pi_env)
+
+    def run(self, script: str, args: list[str], timeout: float) -> proc.ChildResult:
+        if self.launcher is None:
+            return proc.run_child(self._cmd(script, args), timeout, self.env)
+        return self.launcher.run(script, args, timeout, self.pi_env)
+
+    def stop(self, p) -> None:
+        if self.launcher is None:
+            proc.stop_child(p)
+        else:
+            self.launcher.stop(p)
 
 
 def sub_verdict(alive_through_settle: bool, summary_present: bool, judged: str) -> str:
@@ -207,12 +264,14 @@ def _read_bad(path: Path) -> int | None:
         return None
 
 
-def run_variant(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, dict, list]:
+def run_variant(variant: str, trials: int, env: dict, tmp: Path,
+                side: PiSide | None = None) -> tuple[dict, dict, list]:
+    side = side or PiSide(env)
     if VARIANTS[variant]["mode"] == "service":
-        return _run_service(variant, trials, env)
+        return _run_service(variant, trials, env, side)
     if VARIANTS[variant]["late_sub"]:
-        return _run_late_sub(variant, trials, env, tmp)
-    return _run_persistent_sub(variant, trials, env, tmp)
+        return _run_late_sub(variant, trials, env, tmp, side)
+    return _run_persistent_sub(variant, trials, env, tmp, side)
 
 
 def _read_summary(path: Path) -> dict | None:
@@ -231,9 +290,10 @@ def _read_json(path: Path) -> dict | None:
     return d if isinstance(d, dict) else None
 
 
-def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict, dict, list]:
+def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path,
+                  side: PiSide) -> tuple[dict, dict, list]:
     cfg = VARIANTS[variant]
-    topic = topic_for(variant)
+    topic = topic_for(variant, side.prefix)
     tag = variant.lower().replace("-", "_")
     received: list[int] = []
     reasons: dict[int, str] = {}
@@ -242,12 +302,13 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
     for trial in range(trials):
         out_path = tmp / f"l01_e_{tag}_{trial}.jsonl"
         res_path = tmp / f"l01_e_{tag}_{trial}.pub.json"
-        pub_cmd = [
-            sys.executable, str(NODES / "l01_pub.py"), "--topic", topic,
+        pub_args = [
+            "--topic", topic,
             "--profile", cfg["profile"], "--trial", str(trial), "--mode", "once",
             "--linger", str(LATE_PUB_LINGER_S), "--ready-after-publish",
-            "--result-out", str(res_path),
         ]  # fmt: skip
+        if not side.remote:  # a remote publisher reports on stdout instead
+            pub_args += ["--result-out", str(res_path)]
         sub_cmd = [
             sys.executable, str(NODES / "l01_sub.py"), "--topic", topic,
             "--profile", cfg["profile"], "--out", str(out_path),
@@ -258,18 +319,25 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
         pub_res = proc.ChildResult(None, "", True)
         sub_res = proc.ChildResult(None, "", True)
         try:
-            pub = proc.start_child(pub_cmd, env)
+            pub = side.start("l01_pub.py", pub_args)
             pub_ready = proc.wait_ready(pub, READY_TIMEOUT_S)
+            ready_ns = time.time_ns()  # this PC's clock, for remote offsets
             if pub_ready:
                 time.sleep(LATE_SUB_DELAY_S)
                 sub_res = proc.run_child(sub_cmd, LATE_SUB_TIMEOUT_S, env)
                 pub_res = proc.finish_child(pub, LATE_PUB_TIMEOUT_S)
         finally:
             if pub is not None:
-                proc.stop_child(pub)
-        pub_info = _read_json(res_path) or {}
+                side.stop(pub)
+        if side.remote:
+            pub_info = _parse_pub_line(pub_res.stdout) or {}
+            # Two machines' clocks are never subtracted: READY seen on this PC (after the
+            # publish) stands in for publish time, so the measured offset is a lower bound.
+            publish_ns = ready_ns if pub_info.get("publish_ns") is not None else None
+        else:
+            pub_info = _read_json(res_path) or {}
+            publish_ns = pub_info.get("publish_ns")
         pub_infos.append(pub_info)
-        publish_ns = pub_info.get("publish_ns")
         sub_created_ns = (_read_summary(out_path) or {}).get("sub_created_ns")
         offset = late_offset_ms(sub_created_ns, publish_ns)
         offsets[str(trial)] = offset
@@ -311,8 +379,9 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
     return obs, cond, []
 
 
-def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list]:
-    service = topic_for(variant)
+def _run_service(variant: str, trials: int, env: dict,
+                 side: PiSide) -> tuple[dict, dict, list]:
+    service = topic_for(variant, side.prefix)
     server = None
     ready = False
     alive = True
@@ -328,10 +397,10 @@ def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list
         if ready:
             for trial in range(trials):
                 cmd = [
-                    sys.executable, str(NODES / "l01_srv.py"), "client", "--service", service,
+                    "client", "--service", service,
                     "--trial", str(trial), "--timeout", str(CLIENT_TIMEOUT_S),
                 ]  # fmt: skip
-                r = proc.run_child(cmd, CLIENT_PROC_TIMEOUT_S, env)
+                r = side.run("l01_srv.py", cmd, CLIENT_PROC_TIMEOUT_S)
                 info = _parse_pub_line(r.stdout)
                 if info is not None:
                     wait_ms[str(trial)] = info.get("wait_ms")
@@ -378,10 +447,10 @@ def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list
 
 
 def _run_persistent_sub(
-    variant: str, trials: int, env: dict, tmp: Path
+    variant: str, trials: int, env: dict, tmp: Path, side: PiSide
 ) -> tuple[dict, dict, list]:
     cfg = VARIANTS[variant]
-    topic = topic_for(variant)
+    topic = topic_for(variant, side.prefix)
     mode = cfg["mode"]
     out_path = tmp / f"l01_{variant}.jsonl"
     sub = None
@@ -402,12 +471,12 @@ def _run_persistent_sub(
         if sub_ready:
             for trial in range(trials):
                 cmd = [
-                    sys.executable, str(NODES / "l01_pub.py"), "--topic", topic,
+                    "--topic", topic,
                     "--profile", cfg["profile"], "--trial", str(trial), "--mode", mode,
                     "--wait-timeout", str(WAIT_TIMEOUT_S), "--rate", str(RATE_HZ),
                     "--stream-seconds", str(STREAM_SECONDS),
                 ]  # fmt: skip
-                r = proc.run_child(cmd, PUB_TIMEOUT[mode], env)
+                r = side.run("l01_pub.py", cmd, PUB_TIMEOUT[mode])
                 info = _parse_pub_line(r.stdout)
                 why = pub_trial_exclusion(r.timed_out, r.rc, info)
                 if why is not None:
@@ -451,7 +520,7 @@ def _run_persistent_sub(
         for trial in range(trials):
             p = pubs.get(trial)
             fr = None
-            if p is not None and trial not in excluded:
+            if p is not None and trial not in excluded and not side.remote:
                 fr = judge.first_receive(p["pub_start_ns"], rx.get(trial, []))
             firsts[str(trial)] = fr
         obs["first_receive"] = firsts
@@ -472,6 +541,45 @@ def _run_persistent_sub(
     return obs, cond, [] if sub_ready else ["구독 노드가 READY를 내지 않음"]
 
 
+def _finish_variant(v: str, obs: dict, cond: dict, notes: list, trials: int,
+                    pi_host: str | None, remote_pi: bool) -> str:
+    """Verdict and notes for one variant (shared by stage 1 and L-01-W)."""
+    result = "판정 불가"
+    label = obs["proc_label"]
+    if obs["sub_ready"]:
+        result = sub_verdict(
+            obs["sub_alive"],
+            obs["sub_summary_present"],
+            l01_verdict(v, obs, len(obs["excluded_trials"])),
+        )
+    if obs["excluded_trials"]:
+        why = "; ".join(f"{k}: {r}" for k, r in obs["excluded_reasons"].items())
+        notes.append(
+            f"제외 {len(obs['excluded_trials'])}건/{trials}건, "
+            f"집계 {obs['counted']}건 ({why})"
+        )
+        if v in judge.RULE_VARIANTS_L01:
+            notes.append("판정 규칙 변형에서 제외된 시도가 있어 판정 불가")
+    if obs["sub_ready"] and not obs["sub_alive"]:
+        notes.append(f"{label}가 시험 중 종료됨(rc={obs['sub_exit_code']})")
+    if obs["sub_ready"] and not obs["sub_summary_present"]:
+        notes.append(f"{label} summary 파일 없음")
+    if result != "판정 불가" and v == "A" and obs["lost_trials"]:
+        notes.append("재현됨")
+    result, dev_note = gated_verdict(v, result, trials)
+    if dev_note:
+        notes.append(dev_note)
+    if pi_host is not None:
+        result, dev_note = device_gate(result, v, pi_host)
+        if dev_note:
+            notes.append(dev_note)
+        cond["pi_host"] = pi_host
+        cond["devices"] = "1대" if pi_host == "local" else "2대"
+    if remote_pi and VARIANTS[v]["mode"] == "stream":
+        notes.append(CLOCK_NOTE)
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--trials", type=int, default=50)
@@ -482,61 +590,74 @@ def main(argv: list[str] | None = None) -> int:
         "--discovery-range", choices=proc.DISCOVERY_RANGES, default=proc.STAGE1_DISCOVERY,
         help="ROS_AUTOMATIC_DISCOVERY_RANGE for every child and ros2 doctor (기본 LOCALHOST)",
     )
+    ap.add_argument("--pi-host", default=None,
+                    help="발행·클라이언트 측을 돌릴 라즈베리파이(local = 이 PC 한 대). 기본: 1단계")
+    ap.add_argument("--id-prefix", default=STAGE1_ID_PREFIX,
+                    help="결과 ID 접두사(2단계는 L-01-W)")
+    ap.add_argument("--resume", action="store_true",
+                    help="--pi-host 실행에서 끝난 변형을 건너뛰고 이어서 실행")
     args = ap.parse_args(argv)
 
     names = [v.strip() for v in args.variants.split(",") if v.strip()]
     unknown = [v for v in names if v not in VARIANTS]
     if unknown:
         ap.error(f"unknown variants: {unknown}")
+    if args.resume and args.pi_host is None:
+        ap.error("--resume needs --pi-host")
+    if args.pi_host is not None:
+        names.sort(key=W_ORDER.index)
 
-    proc.pin_discovery(os.environ, args.discovery_range)
+    two_devices = args.pi_host is not None and args.pi_host != "local"
+    proc.pin_discovery(os.environ, "SUBNET" if two_devices else args.discovery_range)
     env = proc.child_env(os.environ)
     run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
-    clash = results.existing_targets(Path(args.out_root) / run_id, target_files(names))
-    if clash:
-        print(f"실행 ID {run_id!r}에 이미 결과가 있습니다: {', '.join(clash)}. "
+    run_path = Path(args.out_root) / run_id
+    prefix = args.id_prefix
+    done: set[str] = set()
+    if args.pi_host is not None:
+        done = parts.done_keys(run_path, prefix)
+    clash = results.existing_targets(run_path, target_files(names, prefix))
+    if (clash or done) and not args.resume:
+        print(f"실행 ID {run_id!r}에 이미 결과가 있습니다: {', '.join(clash or sorted(done))}. "
               "다른 --run-id를 쓰세요.", file=sys.stderr)  # fmt: skip
         return 2
     run_dir = results.new_run_dir(Path(args.out_root), run_id)
     results.save_doctor(run_dir)
-    with tempfile.TemporaryDirectory(prefix="r2g_l01_") as td:
-        for v in names:
-            test_id = f"L-01-{v}"
-            started_at = results.now_iso()
-            obs, cond, notes = run_variant(v, args.trials, env, Path(td))
-            result = "판정 불가"
-            label = obs["proc_label"]
-            if obs["sub_ready"]:
-                result = sub_verdict(
-                    obs["sub_alive"],
-                    obs["sub_summary_present"],
-                    l01_verdict(v, obs, len(obs["excluded_trials"])),
+    launcher = None
+    side = PiSide(env, prefix=topic_prefix(prefix))
+    if args.pi_host is not None:
+        launcher = remote.make_launcher(args.pi_host, env)
+        side = PiSide(
+            env, launcher,
+            {"ROS_AUTOMATIC_DISCOVERY_RANGE": env["ROS_AUTOMATIC_DISCOVERY_RANGE"],
+             "ROS_DOMAIN_ID": env["ROS_DOMAIN_ID"]},
+            topic_prefix(prefix),
+        )
+    try:
+        with tempfile.TemporaryDirectory(prefix="r2g_l01_") as td:
+            for v in names:
+                test_id = f"{prefix}-{v}"
+                if v in done or (run_dir / f"{test_id}.json").exists():
+                    print(f"{test_id}: 건너뜀(이미 끝남)", flush=True)
+                    continue
+                started_at = results.now_iso()
+                obs, cond, notes = run_variant(v, args.trials, env, Path(td), side)
+                result = _finish_variant(
+                    v, obs, cond, notes, args.trials, args.pi_host, side.remote
                 )
-            if obs["excluded_trials"]:
-                why = "; ".join(f"{k}: {r}" for k, r in obs["excluded_reasons"].items())
-                notes.append(
-                    f"제외 {len(obs['excluded_trials'])}건/{args.trials}건, "
-                    f"집계 {obs['counted']}건 ({why})"
+                results.write_result(
+                    run_dir, test_id, result, obs, cond, notes, env=env, started_at=started_at
                 )
-                if v in judge.RULE_VARIANTS_L01:
-                    notes.append("판정 규칙 변형에서 제외된 시도가 있어 판정 불가")
-            if obs["sub_ready"] and not obs["sub_alive"]:
-                notes.append(f"{label}가 시험 중 종료됨(rc={obs['sub_exit_code']})")
-            if obs["sub_ready"] and not obs["sub_summary_present"]:
-                notes.append(f"{label} summary 파일 없음")
-            if result != "판정 불가" and v == "A" and obs["lost_trials"]:
-                notes.append("재현됨")
-            result, dev_note = gated_verdict(v, result, args.trials)
-            if dev_note:
-                notes.append(dev_note)
-            results.write_result(
-                run_dir, test_id, result, obs, cond, notes, env=env, started_at=started_at
-            )
-            print(
-                f"{test_id}: {result} lost={obs['lost']}/{obs['counted']} "
-                f"excluded={len(obs['excluded_trials'])}",
-                flush=True,
-            )
+                if args.pi_host is not None:
+                    parts.save_part(run_dir, prefix, v, {"variant": v, "result": result})
+                print(
+                    f"{test_id}: {result} lost={obs['lost']}/{obs['counted']} "
+                    f"excluded={len(obs['excluded_trials'])}",
+                    flush=True,
+                )
+    finally:
+        if launcher is not None:
+            launcher.cleanup()
     return 0
 
 
