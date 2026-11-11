@@ -12,6 +12,8 @@ UNJUDGEABLE = "판정 불가"
 STANDARD_TRIALS_L01 = 50
 STANDARD_SECONDS_L03 = 20.0
 STANDARD_REPEATS_L03 = 5
+STANDARD_SECONDS_L02 = 30.0
+STANDARD_REPEATS_L02 = 3
 
 
 def tally(sent: int, received_trials: Iterable[int]) -> dict:
@@ -106,3 +108,33 @@ def size_gate(judged: str, is_rule: bool, standard: bool, size_desc: str) -> tup
         return judged, None
     note = f"개발 실행({size_desc}): 공식 판정 아님"
     return (UNJUDGEABLE if is_rule else judged), note
+
+
+def l02_is_standard(seconds: float, repeats: int) -> bool:
+    return seconds == STANDARD_SECONDS_L02 and repeats == STANDARD_REPEATS_L02
+
+
+def loss_stats(sent: int, seqs: Iterable[int]) -> dict:
+    """Loss of one stream; only seqs in [0, sent) count, others are ignored."""
+    valid = [s for s in seqs if 0 <= s < sent]
+    got = set(valid)
+    longest = run = 0
+    for i in range(sent):
+        run = 0 if i in got else run + 1
+        longest = max(longest, run)
+    lost = sent - len(got)
+    return {
+        "sent": sent,
+        "received": len(got),
+        "lost": lost,
+        "loss_rate": round(lost / sent, 4) if sent else None,
+        "dup": len(valid) - len(got),
+        "longest_gap": longest,
+    }
+
+
+def max_interval_ms(recv_ns: list[int]) -> float | None:
+    """Largest gap between consecutive receive times taken on ONE device's clock."""
+    if len(recv_ns) < 2:
+        return None
+    return round(max(b - a for a, b in zip(recv_ns, recv_ns[1:], strict=False)) / 1e6, 1)

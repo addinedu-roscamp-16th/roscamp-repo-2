@@ -24,3 +24,11 @@ def decode(data: str) -> dict:
         }
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError(f"missing or invalid key: {exc}") from exc
+
+
+def encode_sized(seq: int, stamp_ns: int, size: int) -> str:
+    """Payload whose UTF-8 length is exactly `size` bytes (padding is ASCII)."""
+    head = len(encode(0, seq, stamp_ns).encode("utf-8"))
+    if size < head:
+        raise ValueError(f"size {size} is smaller than the {head}-byte header")
+    return encode(0, seq, stamp_ns, pad_bytes=size - head)

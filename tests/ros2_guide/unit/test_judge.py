@@ -4,6 +4,9 @@ from r2g.judge import (
     first_receive,
     judge_l01,
     judge_l03_rule,
+    l02_is_standard,
+    loss_stats,
+    max_interval_ms,
     staleness_stats,
     tally,
 )
@@ -103,3 +106,21 @@ def test_l03_boundary_uses_unrounded_max():
     assert s["max"] == 150.0 and s["max_exact"] == 150.04
     assert judge_l03_rule([s] * 5) == "실패"
     assert judge_l03_rule([staleness_stats([10.0, 150.0])] * 5) == "통과"
+
+
+def test_loss_stats():
+    s = loss_stats(10, [0, 1, 2, 2, 5, 6, 9, 42])
+    assert (s["received"], s["lost"], s["dup"], s["longest_gap"]) == (6, 4, 1, 2)
+    assert s["loss_rate"] == 0.4
+    assert loss_stats(0, [])["loss_rate"] is None
+    assert loss_stats(5, [])["longest_gap"] == 5
+
+
+def test_max_interval_uses_one_clock():
+    assert max_interval_ms([0, 100_000_000, 350_000_000]) == 250.0
+    assert max_interval_ms([5]) is None
+
+
+def test_l02_is_standard():
+    assert l02_is_standard(30, 3)
+    assert not l02_is_standard(3, 1)
