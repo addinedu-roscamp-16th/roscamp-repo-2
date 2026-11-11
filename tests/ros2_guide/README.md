@@ -73,6 +73,64 @@ L-03은 원시 표본을 `L-03-대조.samples.json`, `L-03-규칙.samples.json`�
 
 근거로 인용할 공식 실행만 `tests/ros2_guide/evidence/<실행 ID>/`에 사본으로 남깁니다(`tests/service_bridge/evidence/`와 같은 방식). 사본에는 `.samples.json`과 `doctor.txt`도 함께 넣습니다.
 
+## 2단계 (저녁, 라즈베리파이)
+
+PC와 라즈베리파이 2대로 Wi-Fi 구간을 시험합니다: L-01-W(무선 시작 직후 발행), L-02(주기 메시지 손실), L-04(통합 운영 부하), G-11(장비 간 격리). 한 번에 `run_stage2.sh`로 돌립니다.
+
+### 준비
+
+- PC에서 라즈베리파이로 SSH 키 로그인이 되어야 합니다(`ssh -o BatchMode=yes <호스트> true`). 호스트 이름은 `PI_HOST`로 넘깁니다.
+- PC와 라즈베리파이가 같은 공유기에 있어야 합니다. 라즈베리파이에는 ROS 2 Jazzy(`/opt/ros/jazzy`)가 있어야 하고, L-04 영상 동시 조합에는 `gst-launch-1.0`과 `x264enc`도 필요합니다(없으면 그 조합만 사유를 남깁니다).
+- PC 방화벽에서 DDS UDP(7400~7500대 포트)와 영상 포트 5600(UDP)을 허용합니다.
+- 시험 도구는 사전 점검이 `rsync`로 라즈베리파이의 `~/r2g/`에 복사합니다.
+
+### 실행
+
+```bash
+PI_HOST=sbt-pi tests/ros2_guide/run_stage2.sh                         # 공식 크기 전체
+PI_HOST=sbt-pi tests/ros2_guide/run_stage2.sh --run-id 20260612-evening --resume   # 끊긴 실행 이어서
+tests/ros2_guide/run_stage2.sh --quick --run-id dev-s2                # PI_HOST=local 소량 확인
+```
+
+옵션은 `--run-id ID`(기본 `날짜-시각`), `--resume`, `--only L-01-W,L-02,L-04,G-11`(실행할 시험만 고름), `--quick`(개발 크기: L-01-W 3회, L-02 5초·1회, L-04 20초, G-11 3초)입니다. 실행 순서는 사전 점검, L-01-W, L-02, L-04, G-11, 양쪽 시험 프로세스 정리, 결과 요약입니다. 하나의 실행 ID를 네 시험이 함께 씁니다.
+
+- 끊겼을 때: `--run-id <같은 ID> --resume`. 끝난 조합은 `parts/` 폴더에 남아 있어 건너뛰고, 그 다음 조합부터 이어서 실행합니다. 사전 점검은 다시 돌며, 이전 `preflight.json`은 `preflight.<시각>.json`으로 보관합니다.
+- `--resume` 없이 같은 실행 ID에 결과(`L-01-W-*.json`, `L-02.json`, `L-04.json`, `G-11.json`, `parts/`)가 있으면 아무것도 실행하지 않고 멈춥니다(종료 코드 2).
+- 종료 코드: 2 시작 거부(이미 쓰인 실행 ID, 잘못된 옵션), 3 사전 점검 실패, 1 실행 도구가 비정상 종료. `실패`나 `판정 불가` 판정으로는 바뀌지 않으므로 판정은 요약이나 JSON에서 확인합니다.
+- 예상 시간(공식 크기): L-01-W 약 50분, L-02 약 25분, L-04 약 15분, G-11 약 10분. 사전 점검과 정리를 더해 약 1시간 40분입니다.
+
+### 사전 점검
+
+SSH 확인, 라즈베리파이의 `ROS_DISTRO`(jazzy), 시험 도구 복사, 이전 프로세스 정리, 양방향 3초 통신 확인, `gst-launch-1.0`/`x264enc` 확인 순서입니다. `ssh`, `pi_ros_jazzy`, `sync`, `pc_to_pi`, `pi_to_pc` 중 하나라도 통과하지 못하면 아무 시험도 돌리지 않고 종료 코드 3으로 멈춥니다. 한쪽 방향만 통신되면(예: 라즈베리파이 → PC 수신 0건) 대개 PC 방화벽이 원인입니다. `gst`가 없으면 경고만 하고 진행합니다.
+
+### 시험 내용과 판정
+
+| 시험 | 크기(공식) | 판정 |
+|---|---|---|
+| L-01-W | 변형마다 50회 (L-01-A~S, 무선) | B, C, E-TL, S는 통과/실패, 나머지는 측정 |
+| L-02 | 크기 3 × 속도 2 × 신뢰성 2 조합마다 30초·3회 | 측정 |
+| L-04 | 부하 3단계 × (ROS만 / 영상 동시) 조합마다 120초 | 측정 (`observations.risk`로 통합 운영 위험 표시) |
+| G-11 | 방향마다 관찰 10초 (대조 + 도메인/PC_LOCALHOST/파이_LOCALHOST 격리) | 통과/실패 (대조에서 통신이 안 되면 판정 불가) |
+
+공식 크기가 아니면 규칙 판정(L-01-W B, C, E-TL, S와 G-11)은 `판정 불가`이고 모든 결과에 "개발 실행(…): 공식 판정 아님" 메모가 붙습니다.
+
+### PI_HOST=local (미리 돌려 보기)
+
+`PI_HOST`의 기본값은 `local`이고, `run_l02.py`, `run_l04.py`, `run_g11.py`도 `--pi-host`를 생략하면 `local`입니다. 이 PC 한 대에서 두 장비 역할을 모두 하므로 통신 범위는 `LOCALHOST`이고 SSH와 복사는 건너뜁니다. 도구가 끝까지 도는지 확인하는 용도이며, 결과에는 "장비 1대(PI_HOST=local): 공식 판정 아님" 메모가 붙고 규칙 판정은 `판정 불가`입니다. 근거로 인용하지 않습니다.
+
+### 결과 파일
+
+`tests/ros2_guide/results/<실행 ID>/`에 다음이 저장됩니다(커밋하지 않음).
+
+- `L-01-W-*.json`, `L-02.json`, `L-04.json`, `G-11.json`: 시험마다 JSON 하나(필드는 위 결과 절과 같음).
+- `parts/<시험 ID>/<조합>.json`: 조합(방향)마다 끝날 때 저장하는 부분 결과. `--resume`이 이것을 보고 이어서 실행하며, 최종 JSON의 원자료이기도 합니다.
+- `preflight.json`: 사전 점검 항목별 결과(`checks`), 상세(`detail`), 진행 여부(`proceed`), 사유(`reasons`).
+- `doctor.txt`(PC)와 `doctor_pi.txt`(라즈베리파이)의 `ros2 doctor --report` 출력.
+
+시계 규칙: 두 장비의 시각 차이는 계산에 쓰지 않습니다. 끊김과 간격은 한 장비 안의 단조 시계(`time.monotonic_ns()`)로만 잽니다.
+
+근거로 인용할 공식 실행만 `tests/ros2_guide/evidence/<실행 ID>/`에 사본으로 남깁니다. 사본에는 `parts/` 폴더, `doctor.txt`, `doctor_pi.txt`, `preflight.json`을 함께 넣습니다.
+
 ## 단위 시험
 
 ```bash
