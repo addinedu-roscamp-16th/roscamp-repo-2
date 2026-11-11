@@ -114,6 +114,7 @@ class LocalLauncher(Launcher):
 
     def __init__(self, env: Mapping[str, str]):
         self.env = proc.child_env(env)
+        self._commands: list[subprocess.Popen] = []  # start_command children (gst-launch)
 
     def _env(self, env_over: Mapping[str, str]) -> dict[str, str]:
         return {**self.env, **env_over}
@@ -126,7 +127,9 @@ class LocalLauncher(Launcher):
         return proc.start_child(self._script_cmd(script, args), self._env(env_over))
 
     def start_command(self, command, env_over):
-        return proc.start_child(["bash", "-c", command], self._env(env_over))
+        p = proc.start_child(["bash", "-c", command], self._env(env_over))
+        self._commands.append(p)
+        return p
 
     def run(self, script, args, timeout, env_over):
         return proc.run_child(self._script_cmd(script, args), timeout, self._env(env_over))
@@ -138,8 +141,11 @@ class LocalLauncher(Launcher):
         return proc.run_child(["bash", "-c", command], timeout, self.env)
 
     def cleanup(self):
-        for pattern in (LOCAL_CLEANUP_PATTERN, r"gst-launch-1\.0"):
-            proc.run_child(["pkill", "-f", pattern], 10.0, self.env)
+        # Only commands this launcher started: unrelated gst-launch processes stay alone.
+        commands, self._commands = self._commands, []
+        for p in commands:
+            proc.stop_child(p)
+        proc.run_child(["pkill", "-f", LOCAL_CLEANUP_PATTERN], 10.0, self.env)
 
 
 class RemoteLauncher(Launcher):
@@ -159,6 +165,9 @@ class RemoteLauncher(Launcher):
     def _start(self, cmd: list[str]) -> subprocess.Popen:
         p = proc.start_child(cmd, os.environ)
         p.r2g_pid = _read_pid_line(p, _PID_WAIT)
+        if p.r2g_pid is None:
+            print(f"warning: no PID line from {self.host} for {cmd[-1]!r}; "
+                  "the remote process cannot be stopped by PID", file=sys.stderr)
         return p
 
     def start(self, script, args, env_over):
@@ -178,6 +187,9 @@ class RemoteLauncher(Launcher):
 
     def stop(self, p):
         pid = getattr(p, "r2g_pid", None)
+        if pid is None and p.poll() is None:
+            print(f"warning: no remote PID for {self.host}; stopping only the local ssh "
+                  "(the remote process may keep running until cleanup)", file=sys.stderr)
         if pid is not None and p.poll() is None:
             self._kill(pid, "INT")
             try:
@@ -247,7 +259,10 @@ _PI_ENV_CMD = (
 
 
 def pi_env(launcher: Launcher) -> dict:
-    out = launcher.shell(_PI_ENV_CMD, _PROBE_TIMEOUT).stdout
+    return parse_pi_env(launcher.shell(_PI_ENV_CMD, _PROBE_TIMEOUT).stdout)
+
+
+def parse_pi_env(out: str) -> dict:
     kv = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
     return {
         "ROS_DISTRO": kv.get("ROS_DISTRO") or "",

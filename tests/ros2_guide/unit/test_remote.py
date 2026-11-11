@@ -1,3 +1,6 @@
+import os
+import subprocess
+import time
 from pathlib import Path
 
 from r2g import proc, remote
@@ -79,3 +82,109 @@ def test_local_start_command_merges_env_over():
     p = lau.start_command("echo $A-$B", {"B": "2"})
     out = proc.finish_child(p, 5.0)
     assert out.stdout.strip() == "1-2"
+
+
+def _bash(script):
+    return proc.start_child(["bash", "-c", script], os.environ)
+
+
+def test_read_pid_line_keeps_ready_in_pipe():
+    p = _bash("echo PID 5; echo READY; sleep 5")
+    try:
+        assert remote._read_pid_line(p, 5.0) == 5
+        assert proc.wait_ready(p, 5.0)
+    finally:
+        proc.stop_child(p)
+
+
+def test_read_pid_line_none_without_pid():
+    p = _bash("echo hello; sleep 5")
+    try:
+        t0 = time.monotonic()
+        assert remote._read_pid_line(p, 0.5) is None
+        assert time.monotonic() - t0 < 3.0
+    finally:
+        proc.stop_child(p)
+
+
+def test_remote_run_timeout_kills_remote_pid(monkeypatch):
+    lau = remote.RemoteLauncher("h", "87")
+    kills = []
+    monkeypatch.setattr(proc, "run_child",
+                        lambda cmd, t, env: proc.ChildResult(None, "PID 77\nx\n", True))
+    monkeypatch.setattr(lau, "_kill", lambda pid, sig: kills.append((pid, sig)))
+    assert lau.run("l02_pub.py", [], 1.0, {}).timed_out
+    assert kills == [(77, "KILL")]
+
+
+def test_remote_run_timeout_without_pid_no_kill(monkeypatch):
+    lau = remote.RemoteLauncher("h", "87")
+    kills = []
+    monkeypatch.setattr(proc, "run_child",
+                        lambda cmd, t, env: proc.ChildResult(None, "nothing\n", True))
+    monkeypatch.setattr(lau, "_kill", lambda pid, sig: kills.append((pid, sig)))
+    lau.run("l02_pub.py", [], 1.0, {})
+    assert kills == []
+
+
+def test_remote_run_ok_no_kill(monkeypatch):
+    lau = remote.RemoteLauncher("h", "87")
+    kills = []
+    monkeypatch.setattr(proc, "run_child",
+                        lambda cmd, t, env: proc.ChildResult(0, "PID 77\n", False))
+    monkeypatch.setattr(lau, "_kill", lambda pid, sig: kills.append((pid, sig)))
+    lau.run("l02_pub.py", [], 1.0, {})
+    assert kills == []
+
+
+def test_remote_stop_sends_int_then_kill_and_stops_local(monkeypatch):
+    lau = remote.RemoteLauncher("h", "87")
+    kills = []
+    monkeypatch.setattr(lau, "_kill", lambda pid, sig: kills.append((pid, sig)))
+    p = _bash("trap '' INT; sleep 30")  # ignores INT, so only the local stop reaps it
+    p.r2g_pid = 99
+    lau.stop(p)
+    assert p.poll() is not None
+    assert kills == [(99, "INT"), (99, "KILL")]
+
+
+def test_remote_stop_without_pid_warns(capsys):
+    lau = remote.RemoteLauncher("h", "87")
+    p = _bash("sleep 30")
+    p.r2g_pid = None
+    lau.stop(p)
+    assert p.poll() is not None
+    assert "only the local ssh" in capsys.readouterr().err
+
+
+def test_remote_start_warns_without_pid(monkeypatch, capsys):
+    lau = remote.RemoteLauncher("h", "87")
+    monkeypatch.setattr(remote, "_PID_WAIT", 0.3)
+    monkeypatch.setattr(remote, "remote_cmd", lambda *a: ["bash", "-c", "sleep 5"])
+    p = lau.start("l02_pub.py", [], {})
+    try:
+        assert p.r2g_pid is None
+        assert "no PID line from h" in capsys.readouterr().err
+    finally:
+        proc.stop_child(p)
+
+
+def test_parse_pi_env():
+    out = "ROS_DISTRO=jazzy\nRMW_IMPLEMENTATION=\nhost=pi\narch=aarch64\n"
+    assert remote.parse_pi_env(out) == {
+        "ROS_DISTRO": "jazzy", "RMW_IMPLEMENTATION": "기본", "host": "pi", "arch": "aarch64"}
+    assert remote.parse_pi_env("")["RMW_IMPLEMENTATION"] == "기본"
+
+
+def test_local_cleanup_stops_only_own_commands(monkeypatch):
+    lau = make_launcher("local", {})
+    monkeypatch.setattr(proc, "run_child", lambda cmd, t, env: proc.ChildResult(0, "", False))
+    mine = lau.start_command("sleep 30", {})
+    unrelated = subprocess.Popen(["sleep", "30"])
+    try:
+        lau.cleanup()
+        assert mine.poll() is not None
+        assert unrelated.poll() is None
+    finally:
+        unrelated.kill()
+        unrelated.wait()
