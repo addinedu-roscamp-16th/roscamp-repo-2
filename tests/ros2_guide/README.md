@@ -22,7 +22,10 @@ tests/ros2_guide/run_stage1.sh --trials 2 --seconds 3 --run-id dev-check   # 소
 ```
 
 옵션은 `--trials N`(L-01 변형별 횟수), `--seconds S`(L-03 조합별 시간), `--run-id ID`(기본 `날짜-시각`)입니다.
-L-03은 5회 반복합니다. 전체 실행은 약 30분 걸립니다. 어느 도구든 실패하면 종료 코드가 0이 아니며, 끝에 결과 요약을 항상 출력합니다.
+L-03은 5회 반복합니다. 전체 실행은 약 30분 걸립니다. 끝에 결과 요약을 항상 출력합니다.
+
+종료 코드는 실행 도구가 비정상 종료했거나 시작을 거부했을 때(이미 쓰인 실행 ID 등)만 0이 아닙니다. `실패`나 `판정 불가` 판정으로는 바뀌지 않으므로 판정은 요약이나 JSON에서 확인합니다.
+같은 실행 ID에 결과 파일이 이미 있으면 아무것도 실행하지 않고 멈춥니다.
 
 ## 시험 내용과 판정
 
@@ -36,14 +39,16 @@ L-03은 5회 반복합니다. 전체 실행은 약 30분 걸립니다. 어느 �
 | L-01 E-TL | 구독자가 1초 늦게 뜸, transient_local | 통과/실패 |
 | L-01 F | 10 Hz로 계속 발행: 첫 수신 순번과 첫 수신까지 걸린 시간 | 측정 |
 | L-01 S | `wait_for_service()` 후 서비스 1회 호출 | 통과/실패 |
-| L-03 규칙 | 최신 메시지만 저장하고 타이머로 처리(depth 1, best_effort). 5회 모두 묵은 정도 150 ms 이하 | 통과/실패 |
+| L-03 규칙 | 최신 메시지만 저장하고 타이머로 처리(depth 1, best_effort). 5회 모두 라이브 구간의 묵은 정도 150 ms 이하 | 통과/실패 |
 | L-03 대조 | depth 1/5/50 × best_effort/reliable, 느린 구독자(100 ms 처리)의 처리·버림·묵은 정도 | 측정 |
 
 ## 결과
 
 결과는 `tests/ros2_guide/results/<실행 ID>/`에 시험 ID마다 JSON 하나(`L-01-A.json`, `L-03-규칙.json` 등)와 `ros2 doctor --report` 출력(`doctor.txt`)으로 저장됩니다. 이 폴더는 커밋하지 않습니다.
 
-JSON 필드: `id`, `result`, `run_id`, `written_at`, `env`(`ROS_DISTRO`, `RMW_IMPLEMENTATION`, `ROS_DOMAIN_ID`, `host`), `conditions`, `observations`, `notes`.
+JSON 필드: `id`, `result`, `run_id`, `started_at`(변형·시험 시작), `written_at`, `tool_commit`(시험 도구의 git 커밋, 모르면 `알 수 없음`), `env`(`ROS_DISTRO`, `RMW_IMPLEMENTATION`, `ROS_DOMAIN_ID`, `ROS_AUTOMATIC_DISCOVERY_RANGE`, `host`), `conditions`, `observations`, `notes`.
+
+L-03은 원시 표본을 `L-03-대조.samples.json`, `L-03-규칙.samples.json`에 따로 남기고 결과의 `observations.samples_file`이 이 파일을 가리킵니다. 조합·반복마다 `samples`(`[발행 시각 ns, 처리 시각 ns]` 목록)와 `last_publish_ns`가 들어 있습니다.
 
 `result` 값:
 
@@ -55,9 +60,15 @@ JSON 필드: `id`, `result`, `run_id`, `written_at`, `env`(`ROS_DISTRO`, `RMW_IM
 | 판정 불가 | 측정 자체가 온전하지 않아 판단할 수 없음 |
 | 측정 | 합격 기준이 없는 항목. 값만 기록함 |
 
-제외된 시도(구독 노드가 죽는 등 측정이 온전하지 않은 시도)는 분모에서 뺍니다. 규칙 변형에서 제외된 시도가 하나라도 있으면 `판정 불가`입니다.
+제외된 시도(구독 노드가 죽거나, 발행 노드가 메시지를 하나도 보내지 않는 등 측정이 온전하지 않은 시도)는 분모에서 뺍니다. 규칙 변형에서 제외된 시도가 하나라도 있으면 `판정 불가`입니다. L-01의 `counted`는 집계한 시도 수, `trials`는 실행한 시도 수, `pub_sent_total`은 발행 노드들이 보고한 발행 수 합계입니다.
 
-근거로 인용할 공식 실행만 `evidence/<실행 ID>/`에 사본으로 남깁니다(`tests/service_bridge/evidence/`와 같은 방식).
+판정 세부 규칙:
+
+- 공식 크기: L-01은 `--trials 50`, L-03은 `--seconds 20`과 5회 반복입니다. 이 크기가 아니면 규칙 변형(L-01 B, C, E-TL, S와 L-03 규칙)은 `판정 불가`이고, 모든 결과에 "개발 실행(…): 공식 판정 아님" 메모가 붙습니다. 측정 변형은 `측정`을 유지합니다.
+- L-03 라이브 구간: 처리 시각이 발행 노드의 마지막 발행 시각 이하인 처리만 판정과 `staleness_stats`에 씁니다. 발행이 끝난 뒤의 처리(마지막 메시지가 다음 타이머까지 묵는 꼬리)는 `tail_count`, `tail_max_ms`로 따로 남깁니다. 대조 조합도 같습니다.
+- L-03에서 구독자와 매칭되지 않았거나(`matched: false`) 처리한 메시지가 없는 반복·조합은 데이터가 아니므로 `ok: false`이고, 규칙은 `판정 불가`가 됩니다.
+
+근거로 인용할 공식 실행만 `tests/ros2_guide/evidence/<실행 ID>/`에 사본으로 남깁니다(`tests/service_bridge/evidence/`와 같은 방식). 사본에는 `.samples.json`과 `doctor.txt`도 함께 넣습니다.
 
 ## 단위 시험
 

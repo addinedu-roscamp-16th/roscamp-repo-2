@@ -58,7 +58,9 @@ def main(argv=None) -> int:
     finally:
         out.close()
         summary = out_path.with_name(out_path.name + ".summary.json")
-        summary.write_text(json.dumps({"bad": bad, "sub_created_ns": sub_created_ns}), encoding="utf-8")
+        summary.write_text(
+            json.dumps({"bad": bad, "sub_created_ns": sub_created_ns}), encoding="utf-8"
+        )
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()

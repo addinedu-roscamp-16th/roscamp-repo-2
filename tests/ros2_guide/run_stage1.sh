@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Stage 1 batch runner: L-01 (all variants) and L-03 under one run ID.
 # Usage: run_stage1.sh [--trials N] [--seconds S] [--run-id ID]
+# Exit code is non-zero only when a runner crashes or refuses to start (e.g. a reused run ID);
+# 실패 or 판정 불가 verdicts never change it. Read the summary or the JSON files for verdicts.
 set -euo pipefail
 
 TRIALS=50
@@ -20,6 +22,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUT_ROOT="$HERE/results"
 RUN_DIR="$OUT_ROOT/$RUN_ID"
 
+if compgen -G "$RUN_DIR/L-*.json" > /dev/null; then
+    echo "실행 ID '$RUN_ID'에 이미 결과가 있습니다($RUN_DIR). 다른 --run-id를 쓰세요." >&2
+    exit 2
+fi
+
 if [ -z "${ROS_DISTRO:-}" ]; then
     set +u
     # shellcheck disable=SC1091
@@ -38,6 +45,8 @@ import sys
 from pathlib import Path
 
 for path in sorted(Path(sys.argv[1]).glob("L-*.json")):
+    if path.name.endswith(".samples.json"):
+        continue
     try:
         d = json.loads(path.read_text(encoding="utf-8"))
         print(f"{d['id']}: {d['result']}")

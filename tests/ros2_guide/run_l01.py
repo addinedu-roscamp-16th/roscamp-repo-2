@@ -27,7 +27,6 @@ VARIANTS: dict[str, dict] = {
     "F": {"profile": "EVENT", "mode": "stream", "late_sub": False},
     "S": {"profile": None, "mode": "service", "late_sub": False},
 }
-IMPLEMENTED = ("A", "B", "C", "D", "E-VOL", "E-TL", "F", "S")
 
 PUB_TIMEOUT = {"once": 15.0, "wait_match": 15.0, "stream": 15.0}
 TRIAL_GAP_S = 0.5
@@ -44,10 +43,15 @@ LATE_SUB_TIMEOUT_S = 15.0
 LATE_PUB_TIMEOUT_S = 15.0
 CLIENT_TIMEOUT_S = 5.0
 CLIENT_PROC_TIMEOUT_S = 15.0
+NOTHING_SENT = "발행 노드가 보낸 메시지 없음"
 
 
 def topic_for(variant: str) -> str:
     return "/r2g/l01/" + variant.lower().replace("-", "_")
+
+
+def target_files(variants: Iterable[str]) -> list[str]:
+    return [f"L-01-{v}.json" for v in variants]
 
 
 def sub_verdict(alive_through_settle: bool, summary_present: bool, judged: str) -> str:
@@ -80,6 +84,7 @@ def late_trial_exclusion(
     pub_timed_out: bool,
     pub_rc: int | None,
     publish_ns: int | None,
+    pub_sent: int | None,
     sub_timed_out: bool,
     sub_rc: int | None,
     sub_created_ns: int | None,
@@ -94,6 +99,8 @@ def late_trial_exclusion(
         return f"발행 노드 비정상 종료(rc={pub_rc})"
     if publish_ns is None:
         return "발행 노드 결과 파일 없음"
+    if not pub_sent:
+        return NOTHING_SENT
     if sub_timed_out:
         return "구독 노드 타임아웃"
     if sub_rc != 0:
@@ -103,6 +110,37 @@ def late_trial_exclusion(
     if offset_ms is None or offset_ms < MIN_LATE_OFFSET_MS:
         return f"구독 생성 오프셋 {offset_ms}ms < {MIN_LATE_OFFSET_MS:g}ms (늦은 구독 아님)"
     return None
+
+
+def pub_trial_exclusion(timed_out: bool, rc: int | None, info: dict | None) -> str | None:
+    """Reason a publisher trial cannot be scored (None = countable).
+
+    rc 0 alone is not enough: a publisher that sent nothing must not count as a loss.
+    """
+    if timed_out:
+        return "발행 노드 타임아웃"
+    if rc != 0:
+        return f"발행 노드 비정상 종료(rc={rc})"
+    if info is None:
+        return "발행 노드 결과 줄 없음"
+    if not info.get("sent") or info.get("publish_ns") is None:
+        return NOTHING_SENT
+    return None
+
+
+def pub_sent_total(infos: Iterable[dict]) -> int:
+    """Sum of the `sent` counts the publishers reported."""
+    return sum(i["sent"] for i in infos if isinstance(i.get("sent"), int))
+
+
+def gated_verdict(variant: str, judged: str, trials: int) -> tuple[str, str | None]:
+    """Rule variants are judged only at the standard trial count."""
+    return judge.size_gate(
+        judged,
+        variant in judge.RULE_VARIANTS_L01,
+        judge.l01_is_standard(trials),
+        f"시도 {trials}회",
+    )
 
 
 def offset_stats(offsets: list[float]) -> dict:
@@ -124,7 +162,7 @@ def counted_tally(trials: int, received: Iterable[int], excluded: Iterable[int])
     lost_trials = [t for t in counted if t not in got]
     n = len(counted)
     return {
-        "sent": n,
+        "counted": n,
         "received": len(got),
         "lost": len(lost_trials),
         "loss_rate": round(len(lost_trials) / n, 4) if n else 0.0,
@@ -133,11 +171,11 @@ def counted_tally(trials: int, received: Iterable[int], excluded: Iterable[int])
 
 
 def l01_verdict(variant: str, t: dict, excluded_count: int) -> str:
-    if t["sent"] == 0:
+    if t["counted"] == 0:
         return "판정 불가"
     if variant in judge.RULE_VARIANTS_L01 and excluded_count > 0:
         return "판정 불가"
-    return judge.judge_l01(variant, t, t["sent"])
+    return judge.judge_l01(variant, {"sent": t["counted"], "lost": t["lost"]}, t["counted"])
 
 
 def service_call_ok(timed_out: bool, rc: int | None, info: dict | None) -> bool:
@@ -197,6 +235,7 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
     received: list[int] = []
     reasons: dict[int, str] = {}
     offsets: dict[str, float | None] = {}
+    pub_infos: list[dict] = []
     for trial in range(trials):
         out_path = tmp / f"l01_e_{tag}_{trial}.jsonl"
         res_path = tmp / f"l01_e_{tag}_{trial}.pub.json"
@@ -225,12 +264,14 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
         finally:
             if pub is not None:
                 proc.stop_child(pub)
-        publish_ns = (_read_json(res_path) or {}).get("publish_ns")
+        pub_info = _read_json(res_path) or {}
+        pub_infos.append(pub_info)
+        publish_ns = pub_info.get("publish_ns")
         sub_created_ns = (_read_summary(out_path) or {}).get("sub_created_ns")
         offset = late_offset_ms(sub_created_ns, publish_ns)
         offsets[str(trial)] = offset
         why = late_trial_exclusion(
-            pub_ready, pub_res.timed_out, pub_res.rc, publish_ns,
+            pub_ready, pub_res.timed_out, pub_res.rc, publish_ns, pub_info.get("sent"),
             sub_res.timed_out, sub_res.rc, sub_created_ns, offset,
         )  # fmt: skip
         if why is not None:
@@ -241,7 +282,7 @@ def _run_late_sub(variant: str, trials: int, env: dict, tmp: Path) -> tuple[dict
     t = counted_tally(trials, received, reasons)
     obs = dict(t)
     obs["trials"] = trials
-    obs["counted"] = t["sent"]
+    obs["pub_sent_total"] = pub_sent_total(pub_infos)
     obs["sub_ready"] = True
     obs["sub_alive"] = True
     obs["sub_summary_present"] = True
@@ -312,7 +353,7 @@ def _run_service(variant: str, trials: int, env: dict) -> tuple[dict, dict, list
     t = counted_tally(trials, received, reasons)
     obs = dict(t)
     obs["trials"] = trials
-    obs["counted"] = t["sent"]
+    obs["pub_sent_total"] = None  # 서비스: 발행 노드 없음(클라이언트 호출 = 시도)
     obs["sub_ready"] = ready
     obs["sub_alive"] = alive
     obs["sub_summary_present"] = True
@@ -365,15 +406,10 @@ def _run_persistent_sub(
                 ]  # fmt: skip
                 r = proc.run_child(cmd, PUB_TIMEOUT[mode], env)
                 info = _parse_pub_line(r.stdout)
-                if r.timed_out:
-                    timed_out.append(trial)
-                    reasons[trial] = "발행 노드 타임아웃"
-                elif r.rc != 0:
-                    failed.append(trial)
-                    reasons[trial] = f"발행 노드 비정상 종료(rc={r.rc})"
-                elif info is None:
-                    failed.append(trial)
-                    reasons[trial] = "발행 노드 결과 줄 없음"
+                why = pub_trial_exclusion(r.timed_out, r.rc, info)
+                if why is not None:
+                    reasons[trial] = why
+                    (timed_out if r.timed_out else failed).append(trial)
                 if info is not None:
                     pubs[trial] = info
                 if sub.poll() is not None:
@@ -393,7 +429,7 @@ def _run_persistent_sub(
     t = counted_tally(trials, list(rx), excluded)
     obs = dict(t)
     obs["trials"] = trials
-    obs["counted"] = t["sent"]
+    obs["pub_sent_total"] = pub_sent_total(pubs.values())
     obs["proc_label"] = "구독 노드"
     obs["sub_ready"] = sub_ready
     obs["bad_messages"] = bad
@@ -447,17 +483,18 @@ def main(argv: list[str] | None = None) -> int:
         ap.error(f"unknown variants: {unknown}")
 
     env = proc.child_env(os.environ)
-    run_dir = results.new_run_dir(Path(args.out_root), args.run_id)
+    run_id = args.run_id or time.strftime("%Y%m%d-%H%M%S")
+    clash = results.existing_targets(Path(args.out_root) / run_id, target_files(names))
+    if clash:
+        print(f"실행 ID {run_id!r}에 이미 결과가 있습니다: {', '.join(clash)}. "
+              "다른 --run-id를 쓰세요.", file=sys.stderr)  # fmt: skip
+        return 2
+    run_dir = results.new_run_dir(Path(args.out_root), run_id)
     results.save_doctor(run_dir)
     with tempfile.TemporaryDirectory(prefix="r2g_l01_") as td:
         for v in names:
             test_id = f"L-01-{v}"
-            if v not in IMPLEMENTED:
-                results.write_result(
-                    run_dir, test_id, "미실행", {}, {"trials": args.trials},
-                    ["Task 4에서 구현"], env=env,
-                )  # fmt: skip
-                continue
+            started_at = results.now_iso()
             obs, cond, notes = run_variant(v, args.trials, env, Path(td))
             result = "판정 불가"
             label = obs["proc_label"]
@@ -481,9 +518,14 @@ def main(argv: list[str] | None = None) -> int:
                 notes.append(f"{label} summary 파일 없음")
             if result != "판정 불가" and v == "A" and obs["lost_trials"]:
                 notes.append("재현됨")
-            results.write_result(run_dir, test_id, result, obs, cond, notes, env=env)
+            result, dev_note = gated_verdict(v, result, args.trials)
+            if dev_note:
+                notes.append(dev_note)
+            results.write_result(
+                run_dir, test_id, result, obs, cond, notes, env=env, started_at=started_at
+            )
             print(
-                f"{test_id}: {result} lost={obs['lost']}/{obs['sent']} "
+                f"{test_id}: {result} lost={obs['lost']}/{obs['counted']} "
                 f"excluded={len(obs['excluded_trials'])}",
                 flush=True,
             )
