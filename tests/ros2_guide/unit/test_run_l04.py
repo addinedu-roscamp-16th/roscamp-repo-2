@@ -23,7 +23,7 @@ def test_gst_sender_cmd_uses_config():
                           "bitrate_kbps": 2000, "port": 5600}, "192.168.0.10")
     assert "framerate=15/1" in cmd and "bitrate=2000" in cmd
     assert "host=192.168.0.10 port=5600" in cmd
-    assert cmd.startswith("gst-launch-1.0 -q videotestsrc is-live=true pattern=ball ! ")
+    assert cmd.startswith("gst-launch-1.0 -q videotestsrc is-live=true pattern=snow ! ")
     assert "video/x-raw,width=640,height=480,framerate=15/1" in cmd
 
 

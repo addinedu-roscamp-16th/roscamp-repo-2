@@ -43,7 +43,7 @@ def combo_key(level: str, background: str) -> str:
 
 def gst_sender_cmd(video: dict, pc_addr: str) -> str:
     return (
-        "gst-launch-1.0 -q videotestsrc is-live=true pattern=ball ! "
+        "gst-launch-1.0 -q videotestsrc is-live=true pattern=snow ! "
         f"video/x-raw,width={video['width']},height={video['height']},"
         f"framerate={video['fps']}/1 ! "
         f"x264enc tune=zerolatency speed-preset=ultrafast bitrate={video['bitrate_kbps']} ! "
