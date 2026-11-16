@@ -1,0 +1,21 @@
+{
+  "direction": "파이→PC",
+  "topic": "/r2g/g11/domain_pi_to_pc",
+  "ok": true,
+  "reason": null,
+  "received": 0,
+  "sent": 50,
+  "sub_saw_publishers_max": 0,
+  "pub_saw_subscribers_max": 0,
+  "peer_seen_max": 0,
+  "case": "도메인",
+  "pc_env": {
+    "ROS_DOMAIN_ID": "99",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+  },
+  "pi_env": {
+    "ROS_DOMAIN_ID": "88",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+  },
+  "notes": []
+}

@@ -1,0 +1,21 @@
+{
+  "direction": "PC→파이",
+  "topic": "/r2g/g11/control_pc_to_pi",
+  "ok": true,
+  "reason": null,
+  "received": 49,
+  "sent": 50,
+  "sub_saw_publishers_max": 1,
+  "pub_saw_subscribers_max": 1,
+  "peer_seen_max": 1,
+  "case": "대조",
+  "pc_env": {
+    "ROS_DOMAIN_ID": "99",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+  },
+  "pi_env": {
+    "ROS_DOMAIN_ID": "99",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+  },
+  "notes": []
+}

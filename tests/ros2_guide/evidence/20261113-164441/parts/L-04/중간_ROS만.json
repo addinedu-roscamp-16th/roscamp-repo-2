@@ -1,0 +1,230 @@
+{
+  "level": "중간",
+  "background": "ROS만",
+  "ok": true,
+  "reason": null,
+  "state_hz": 10,
+  "vision_hz": 5,
+  "topics": {
+    "/arm1/state": {
+      "sent": 1249,
+      "received": 1249,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 120.2
+    },
+    "/arm1/vision/items": {
+      "sent": 624,
+      "received": 624,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 218.9
+    },
+    "/arm2/state": {
+      "sent": 1249,
+      "received": 1249,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 120.2
+    },
+    "/arm2/vision/items": {
+      "sent": 624,
+      "received": 624,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 213.9
+    },
+    "/arm3/state": {
+      "sent": 1249,
+      "received": 1249,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 120.2
+    },
+    "/pinky1/state": {
+      "sent": 1249,
+      "received": 1249,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 119.8
+    },
+    "/pinky2/state": {
+      "sent": 1249,
+      "received": 1249,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 118.1
+    },
+    "/pinky3/state": {
+      "sent": 1249,
+      "received": 1249,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "max_gap_ms": 129.8
+    },
+    "/fleet/heartbeat@pinky1": {
+      "sent": 252,
+      "received": 252,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 5,
+      "last_seq": 256,
+      "sent_full": 258,
+      "loss_rate_full": 0.0233,
+      "max_gap_ms": 507.5
+    },
+    "/fleet/heartbeat@pinky2": {
+      "sent": 252,
+      "received": 252,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 5,
+      "last_seq": 256,
+      "sent_full": 258,
+      "loss_rate_full": 0.0233,
+      "max_gap_ms": 507.4
+    },
+    "/fleet/heartbeat@pinky3": {
+      "sent": 252,
+      "received": 252,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 5,
+      "last_seq": 256,
+      "sent_full": 258,
+      "loss_rate_full": 0.0233,
+      "max_gap_ms": 507.8
+    },
+    "/fleet/heartbeat@arm1": {
+      "sent": 252,
+      "received": 252,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 5,
+      "last_seq": 256,
+      "sent_full": 258,
+      "loss_rate_full": 0.0233,
+      "max_gap_ms": 507.6
+    },
+    "/fleet/heartbeat@arm2": {
+      "sent": 252,
+      "received": 252,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 5,
+      "last_seq": 256,
+      "sent_full": 258,
+      "loss_rate_full": 0.0233,
+      "max_gap_ms": 507.6
+    },
+    "/fleet/heartbeat@arm3": {
+      "sent": 252,
+      "received": 252,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 5,
+      "last_seq": 256,
+      "sent_full": 258,
+      "loss_rate_full": 0.0233,
+      "max_gap_ms": 507.7
+    },
+    "/central/events": {
+      "sent": 63,
+      "received": 63,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 1,
+      "last_seq": 63,
+      "sent_full": 64,
+      "loss_rate_full": 0.0156,
+      "max_gap_ms": null
+    },
+    "/fleet/robots": {
+      "sent": 127,
+      "received": 127,
+      "lost": 0,
+      "loss_rate": 0.0,
+      "dup": 0,
+      "longest_gap": 0,
+      "first_seq": 1,
+      "last_seq": 127,
+      "sent_full": 129,
+      "loss_rate_full": 0.0155,
+      "max_gap_ms": null
+    }
+  },
+  "heartbeat": {
+    "pinky1": {
+      "max_gap_ms": 507.5,
+      "over_count": 0,
+      "over_at_s": []
+    },
+    "pinky2": {
+      "max_gap_ms": 507.4,
+      "over_count": 0,
+      "over_at_s": []
+    },
+    "pinky3": {
+      "max_gap_ms": 507.8,
+      "over_count": 0,
+      "over_at_s": []
+    },
+    "arm1": {
+      "max_gap_ms": 507.6,
+      "over_count": 0,
+      "over_at_s": []
+    },
+    "arm2": {
+      "max_gap_ms": 507.6,
+      "over_count": 0,
+      "over_at_s": []
+    },
+    "arm3": {
+      "max_gap_ms": 507.7,
+      "over_count": 0,
+      "over_at_s": []
+    }
+  },
+  "heartbeat_skip": null,
+  "l04_risk": [],
+  "video_mbps": null,
+  "video_early_exit": null,
+  "wifi": {
+    "signal_dbm": -66,
+    "link_quality": "44/70",
+    "iface": "wlan0",
+    "source": "iwconfig",
+    "raw": "@@r2g proc\nInter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n wlan0: 0000   44.  -66.  -256        0      0      0    469      0        0\n@@r2g iface\nwlan0\n@@r2g iwconfig\nwlan0     IEEE 802.11  ESSID:\"AIE_509_5G\"  \n          Mode:Managed  Frequency:5.58 GHz  Access Point: 58:86:94:C2:03:F8   \n          Bit Rate=130 Mb/s   Tx-Power=31 dBm   \n          Retry short limit:7   RTS thr:off   Fragment thr:off\n          Power Management:off\n          Link Quality=44/70  Signal level=-66 dBm  \n          Rx invalid nwid:0  Rx invalid crypt:0  Rx invalid frag:0\n          Tx excessive retries:469  Invalid misc:0   Missed beacon:0\n\n@@r2g iw\nConnected to 58:86:94:c2:03:f8 (on wlan0)\n\tSSID: AIE_509_5G\n\tfreq: 5580.0\n\tRX: 326137413 bytes (368990 packets)\n\tTX: 2877192209 bytes (5152291 packets)\n\tsignal: -65 dBm\n\trx bitrate: 351.0 MBit/s\n\ttx bitrate: 130.0 MBit/s\n\tbss flags: \n\tdtim period: 1\n\tbeacon int: 100\n"
+  },
+  "window_s": 120.0
+}

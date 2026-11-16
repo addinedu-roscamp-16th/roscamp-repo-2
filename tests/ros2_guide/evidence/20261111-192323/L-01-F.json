@@ -1,0 +1,252 @@
+{
+  "id": "L-01-F",
+  "result": "측정",
+  "run_id": "20261111-192323",
+  "started_at": "2026-11-11T19:43:35+0900",
+  "written_at": "2026-11-11T19:48:44+0900",
+  "tool_commit": "68a51e2",
+  "env": {
+    "ROS_DISTRO": "jazzy",
+    "RMW_IMPLEMENTATION": "기본",
+    "ROS_DOMAIN_ID": "99",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
+    "host": "ane-GP75-Leopard-10SEK"
+  },
+  "conditions": {
+    "trials": 50,
+    "profile": "EVENT",
+    "qos": {
+      "reliability": "reliable",
+      "durability": "volatile",
+      "depth": 50
+    },
+    "mode": "stream",
+    "topic": "/r2g/l01/f",
+    "trial_gap_s": 0.5,
+    "settle_s": 2.0,
+    "rate_hz": 10,
+    "stream_seconds": 3
+  },
+  "observations": {
+    "counted": 50,
+    "received": 50,
+    "lost": 0,
+    "loss_rate": 0.0,
+    "lost_trials": [],
+    "trials": 50,
+    "pub_sent_total": 1500,
+    "proc_label": "구독 노드",
+    "sub_ready": true,
+    "bad_messages": 0,
+    "sub_alive": true,
+    "sub_exit_code": null,
+    "sub_summary_present": true,
+    "excluded_trials": [],
+    "excluded_reasons": {},
+    "pub_timed_out_trials": [],
+    "pub_failed_trials": [],
+    "first_receive": {
+      "0": {
+        "first_seq": 1,
+        "time_to_first_ms": 106.1
+      },
+      "1": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.6
+      },
+      "2": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.8
+      },
+      "3": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.6
+      },
+      "4": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.1
+      },
+      "5": {
+        "first_seq": 25,
+        "time_to_first_ms": 2539.6
+      },
+      "6": {
+        "first_seq": 1,
+        "time_to_first_ms": 388.3
+      },
+      "7": {
+        "first_seq": 1,
+        "time_to_first_ms": 104.1
+      },
+      "8": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.6
+      },
+      "9": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.9
+      },
+      "10": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.9
+      },
+      "11": {
+        "first_seq": 1,
+        "time_to_first_ms": 104.3
+      },
+      "12": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.2
+      },
+      "13": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.0
+      },
+      "14": {
+        "first_seq": 15,
+        "time_to_first_ms": 1522.4
+      },
+      "15": {
+        "first_seq": 4,
+        "time_to_first_ms": 407.3
+      },
+      "16": {
+        "first_seq": 13,
+        "time_to_first_ms": 1322.1
+      },
+      "17": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.0
+      },
+      "18": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.0
+      },
+      "19": {
+        "first_seq": 10,
+        "time_to_first_ms": 1016.0
+      },
+      "20": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.3
+      },
+      "21": {
+        "first_seq": 8,
+        "time_to_first_ms": 810.4
+      },
+      "22": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.5
+      },
+      "23": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.1
+      },
+      "24": {
+        "first_seq": 4,
+        "time_to_first_ms": 407.9
+      },
+      "25": {
+        "first_seq": 1,
+        "time_to_first_ms": 106.0
+      },
+      "26": {
+        "first_seq": 3,
+        "time_to_first_ms": 304.9
+      },
+      "27": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.6
+      },
+      "28": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.8
+      },
+      "29": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.5
+      },
+      "30": {
+        "first_seq": 29,
+        "time_to_first_ms": 2941.4
+      },
+      "31": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.5
+      },
+      "32": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.2
+      },
+      "33": {
+        "first_seq": 4,
+        "time_to_first_ms": 407.7
+      },
+      "34": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.5
+      },
+      "35": {
+        "first_seq": 1,
+        "time_to_first_ms": 104.1
+      },
+      "36": {
+        "first_seq": 1,
+        "time_to_first_ms": 104.9
+      },
+      "37": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.3
+      },
+      "38": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.3
+      },
+      "39": {
+        "first_seq": 20,
+        "time_to_first_ms": 2020.0
+      },
+      "40": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.5
+      },
+      "41": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.7
+      },
+      "42": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.0
+      },
+      "43": {
+        "first_seq": 4,
+        "time_to_first_ms": 407.1
+      },
+      "44": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.2
+      },
+      "45": {
+        "first_seq": 15,
+        "time_to_first_ms": 1515.4
+      },
+      "46": {
+        "first_seq": 4,
+        "time_to_first_ms": 409.3
+      },
+      "47": {
+        "first_seq": 1,
+        "time_to_first_ms": 102.4
+      },
+      "48": {
+        "first_seq": 8,
+        "time_to_first_ms": 810.9
+      },
+      "49": {
+        "first_seq": 1,
+        "time_to_first_ms": 103.0
+      }
+    }
+  },
+  "notes": []
+}

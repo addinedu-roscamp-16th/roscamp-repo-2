@@ -1,0 +1,30 @@
+{
+  "reliability": "best_effort",
+  "size": "500KB",
+  "rate_hz": 50,
+  "rep": 1,
+  "ok": false,
+  "reason": "발행 노드 시간 초과",
+  "topic": "/r2g/l02/best_effort_500KB_50Hz_r1",
+  "wifi": {
+    "signal_dbm": -65,
+    "link_quality": "45/70",
+    "iface": "wlan0",
+    "source": "iwconfig",
+    "raw": "@@r2g proc\nInter-| sta-|   Quality        |   Discarded packets               | Missed | WE\n face | tus | link level noise |  nwid  crypt   frag  retry   misc | beacon | 22\n wlan0: 0000   45.  -65.  -256        0      0      0     31      0        0\n@@r2g iface\nwlan0\n@@r2g iwconfig\nwlan0     IEEE 802.11  ESSID:\"AIE_509_5G\"  \n          Mode:Managed  Frequency:5.58 GHz  Access Point: 58:86:94:C2:03:F8   \n          Bit Rate=130 Mb/s   Tx-Power=31 dBm   \n          Retry short limit:7   RTS thr:off   Fragment thr:off\n          Power Management:off\n          Link Quality=45/70  Signal level=-65 dBm  \n          Rx invalid nwid:0  Rx invalid crypt:0  Rx invalid frag:0\n          Tx excessive retries:31  Invalid misc:0   Missed beacon:0\n\n@@r2g iw\nConnected to 58:86:94:c2:03:f8 (on wlan0)\n\tSSID: AIE_509_5G\n\tfreq: 5580.0\n\tRX: 315462879 bytes (331995 packets)\n\tTX: 3082941728 bytes (2376024 packets)\n\tsignal: -65 dBm\n\trx bitrate: 325.0 MBit/s\n\ttx bitrate: 130.0 MBit/s\n\tbss flags: \n\tdtim period: 1\n\tbeacon int: 100\n"
+  },
+  "expected": 1500,
+  "elapsed_s": null,
+  "achieved_hz": null,
+  "error": null,
+  "sent": null,
+  "received": null,
+  "lost": null,
+  "loss_rate": null,
+  "dup": null,
+  "longest_gap": null,
+  "max_interval_ms": null,
+  "pub_stdout_tail": [
+    "PID 45573"
+  ]
+}

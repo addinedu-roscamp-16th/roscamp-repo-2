@@ -1,0 +1,50 @@
+{
+  "id": "L-01-W-C",
+  "result": "통과",
+  "run_id": "20261113-164441",
+  "started_at": "2026-11-13T16:55:15+0900",
+  "written_at": "2026-11-13T17:00:05+0900",
+  "tool_commit": "14ca810",
+  "env": {
+    "ROS_DISTRO": "jazzy",
+    "RMW_IMPLEMENTATION": "기본",
+    "ROS_DOMAIN_ID": "99",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET",
+    "host": "ane-GP75-Leopard-10SEK"
+  },
+  "conditions": {
+    "trials": 50,
+    "profile": "LATCHED",
+    "qos": {
+      "reliability": "reliable",
+      "durability": "transient_local",
+      "depth": 1
+    },
+    "mode": "once",
+    "topic": "/r2g/l01w/c",
+    "trial_gap_s": 0.5,
+    "settle_s": 2.0,
+    "pi_host": "sbt-pod-pi",
+    "devices": "2대"
+  },
+  "observations": {
+    "counted": 50,
+    "received": 50,
+    "lost": 0,
+    "loss_rate": 0.0,
+    "lost_trials": [],
+    "trials": 50,
+    "pub_sent_total": 50,
+    "proc_label": "구독 노드",
+    "sub_ready": true,
+    "bad_messages": 0,
+    "sub_alive": true,
+    "sub_exit_code": null,
+    "sub_summary_present": true,
+    "excluded_trials": [],
+    "excluded_reasons": {},
+    "pub_timed_out_trials": [],
+    "pub_failed_trials": []
+  },
+  "notes": []
+}

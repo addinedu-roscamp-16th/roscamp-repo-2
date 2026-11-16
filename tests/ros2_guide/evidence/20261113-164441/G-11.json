@@ -1,0 +1,251 @@
+{
+  "id": "G-11",
+  "result": "통과",
+  "run_id": "20261113-164441",
+  "started_at": "2026-11-13T18:12:08+0900",
+  "written_at": "2026-11-13T18:15:22+0900",
+  "tool_commit": "14ca810",
+  "env": {
+    "ROS_DISTRO": "jazzy",
+    "RMW_IMPLEMENTATION": "기본",
+    "ROS_DOMAIN_ID": "99",
+    "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET",
+    "host": "ane-GP75-Leopard-10SEK"
+  },
+  "conditions": {
+    "observe_s": 10.0,
+    "other_domain_id": 88,
+    "base_domain_id": "99",
+    "cases": {
+      "대조": {
+        "pc": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+        },
+        "pi": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+        }
+      },
+      "도메인": {
+        "pc": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+        },
+        "pi": {
+          "ROS_DOMAIN_ID": "88",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+        }
+      },
+      "PC_LOCALHOST": {
+        "pc": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+        },
+        "pi": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+        }
+      },
+      "파이_LOCALHOST": {
+        "pc": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+        },
+        "pi": {
+          "ROS_DOMAIN_ID": "99",
+          "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+        }
+      }
+    },
+    "pi_host": "sbt-pod-pi",
+    "devices": "2대",
+    "pi_env": {
+      "ROS_DISTRO": "jazzy",
+      "RMW_IMPLEMENTATION": "기본",
+      "host": "raspi",
+      "arch": "aarch64"
+    }
+  },
+  "observations": {
+    "cases": {
+      "대조": {
+        "PC→파이": {
+          "direction": "PC→파이",
+          "topic": "/r2g/g11/control_pc_to_pi",
+          "ok": true,
+          "reason": null,
+          "received": 49,
+          "sent": 50,
+          "sub_saw_publishers_max": 1,
+          "pub_saw_subscribers_max": 1,
+          "peer_seen_max": 1,
+          "case": "대조",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "notes": []
+        },
+        "파이→PC": {
+          "direction": "파이→PC",
+          "topic": "/r2g/g11/control_pi_to_pc",
+          "ok": true,
+          "reason": null,
+          "received": 50,
+          "sent": 50,
+          "sub_saw_publishers_max": 1,
+          "pub_saw_subscribers_max": 1,
+          "peer_seen_max": 1,
+          "case": "대조",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "notes": []
+        }
+      },
+      "도메인": {
+        "PC→파이": {
+          "direction": "PC→파이",
+          "topic": "/r2g/g11/domain_pc_to_pi",
+          "ok": true,
+          "reason": null,
+          "received": 0,
+          "sent": 50,
+          "sub_saw_publishers_max": 0,
+          "pub_saw_subscribers_max": 0,
+          "peer_seen_max": 0,
+          "case": "도메인",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "88",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "notes": []
+        },
+        "파이→PC": {
+          "direction": "파이→PC",
+          "topic": "/r2g/g11/domain_pi_to_pc",
+          "ok": true,
+          "reason": null,
+          "received": 0,
+          "sent": 50,
+          "sub_saw_publishers_max": 0,
+          "pub_saw_subscribers_max": 0,
+          "peer_seen_max": 0,
+          "case": "도메인",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "88",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "notes": []
+        }
+      },
+      "PC_LOCALHOST": {
+        "PC→파이": {
+          "direction": "PC→파이",
+          "topic": "/r2g/g11/pc_localhost_pc_to_pi",
+          "ok": true,
+          "reason": null,
+          "received": 0,
+          "sent": 50,
+          "sub_saw_publishers_max": 0,
+          "pub_saw_subscribers_max": 0,
+          "peer_seen_max": 0,
+          "case": "PC_LOCALHOST",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "notes": []
+        },
+        "파이→PC": {
+          "direction": "파이→PC",
+          "topic": "/r2g/g11/pc_localhost_pi_to_pc",
+          "ok": true,
+          "reason": null,
+          "received": 0,
+          "sent": 50,
+          "sub_saw_publishers_max": 0,
+          "pub_saw_subscribers_max": 0,
+          "peer_seen_max": 0,
+          "case": "PC_LOCALHOST",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "notes": []
+        }
+      },
+      "파이_LOCALHOST": {
+        "PC→파이": {
+          "direction": "PC→파이",
+          "topic": "/r2g/g11/pi_localhost_pc_to_pi",
+          "ok": true,
+          "reason": null,
+          "received": 0,
+          "sent": 50,
+          "sub_saw_publishers_max": 0,
+          "pub_saw_subscribers_max": 0,
+          "peer_seen_max": 0,
+          "case": "파이_LOCALHOST",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+          },
+          "notes": []
+        },
+        "파이→PC": {
+          "direction": "파이→PC",
+          "topic": "/r2g/g11/pi_localhost_pi_to_pc",
+          "ok": true,
+          "reason": null,
+          "received": 0,
+          "sent": 50,
+          "sub_saw_publishers_max": 0,
+          "pub_saw_subscribers_max": 0,
+          "peer_seen_max": 0,
+          "case": "파이_LOCALHOST",
+          "pc_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "SUBNET"
+          },
+          "pi_env": {
+            "ROS_DOMAIN_ID": "99",
+            "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST"
+          },
+          "notes": []
+        }
+      }
+    }
+  },
+  "notes": []
+}
