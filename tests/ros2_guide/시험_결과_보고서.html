@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ROS 2 통신 시험 결과</title>
+<style>
+  :root {
+    --bg: #fbfaf7; --surface: #ffffff; --text: #1f2328; --muted: #5b6470;
+    --line: #e3e1db; --accent: #2f5d8a;
+    --ok-bg: #e5f3ea; --ok: #1d6b3a; --bad-bg: #fbe7e4; --bad: #a3321f;
+    --info-bg: #eaf0f7; --info: #2f5d8a; --warn-bg: #fbf1dc; --warn: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16181b; --surface: #1e2125; --text: #e7e9ec; --muted: #a2a9b3;
+      --line: #33373d; --accent: #8db6e0;
+      --ok-bg: #1c3626; --ok: #8fd6a7; --bad-bg: #3d211c; --bad: #f2a593;
+      --info-bg: #1f2c3b; --info: #9cc3ea; --warn-bg: #3a2f17; --warn: #f0c977;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181b; --surface: #1e2125; --text: #e7e9ec; --muted: #a2a9b3;
+    --line: #33373d; --accent: #8db6e0;
+    --ok-bg: #1c3626; --ok: #8fd6a7; --bad-bg: #3d211c; --bad: #f2a593;
+    --info-bg: #1f2c3b; --info: #9cc3ea; --warn-bg: #3a2f17; --warn: #f0c977;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: "Pretendard", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+    line-height: 1.75; font-size: 16px; word-break: keep-all;
+  }
+  main { max-width: 860px; margin: 0 auto; padding: 40px 16px 80px; }
+  header { border-bottom: 2px solid var(--text); padding-bottom: 18px; margin-bottom: 28px; }
+  h1 { font-size: 1.75rem; margin: 0 0 6px; line-height: 1.35; }
+  .meta { color: var(--muted); font-size: 0.92rem; margin: 0; }
+  h2 { font-size: 1.3rem; margin: 48px 0 12px; padding-top: 8px; border-top: 1px solid var(--line); }
+  h3 { font-size: 1.08rem; margin: 30px 0 8px; }
+  p { margin: 0 0 12px; }
+  ul { margin: 0 0 14px; padding-left: 1.3em; }
+  li { margin-bottom: 6px; }
+  .summary { background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent);
+    border-radius: 6px; padding: 18px 20px; }
+  .summary ol { margin: 0; padding-left: 1.3em; }
+  .summary li { margin-bottom: 8px; }
+  .table-wrap { overflow-x: auto; margin: 0 0 16px; }
+  table { border-collapse: collapse; width: 100%; background: var(--surface); font-size: 0.95rem; }
+  th, td { border: 1px solid var(--line); padding: 8px 10px; text-align: left; vertical-align: top; }
+  th { background: var(--bg); font-weight: 600; white-space: nowrap; }
+  td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .tag { display: inline-block; padding: 1px 9px; border-radius: 999px; font-size: 0.82rem; font-weight: 600; white-space: nowrap; }
+  .ok { background: var(--ok-bg); color: var(--ok); }
+  .bad { background: var(--bad-bg); color: var(--bad); }
+  .info { background: var(--info-bg); color: var(--info); }
+  .warn { background: var(--warn-bg); color: var(--warn); }
+  .meaning { background: var(--info-bg); border-radius: 6px; padding: 12px 16px; margin: 0 0 16px; }
+  .meaning strong { color: var(--info); }
+  .note { color: var(--muted); font-size: 0.9rem; }
+  code { font-family: ui-monospace, "D2Coding", monospace; font-size: 0.88em; background: var(--bg);
+    border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; }
+  footer { margin-top: 56px; color: var(--muted); font-size: 0.88rem; border-top: 1px solid var(--line); padding-top: 14px; }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>ROS 2 통신 시험 결과 보고서 (1·2단계)</h1>
+  <p class="meta">작성일 2026-11-16 · 대상 독자: 프로젝트 관리자 · 근거: <code>tests/ros2_guide/results/</code>의 실행 기록</p>
+</header>
+
+<section>
+  <h2 style="border-top:none; margin-top:0;">한눈에 보기</h2>
+  <div class="summary">
+    <ol>
+      <li><strong>팀원이 겪은 "한 번 보내면 못 받는" 문제를 재현했습니다.</strong> 프로그램이 켜지자마자 한 번만 보내면, 같은 PC 안에서는 50번 중 50번 모두 받지 못했습니다.</li>
+      <li><strong>해결 방법도 확인했습니다.</strong> "받는 쪽이 준비됐는지 확인하고 보내기"와 "요청-응답 방식(서비스)"은 50번 모두 성공했습니다.</li>
+      <li><strong>Wi-Fi로 보내는 작은 메시지는 거의 잃지 않았습니다.</strong> 문제는 손실보다 큰 메시지를 빠르게 보낼 때 <em>속도가 따라가지 못하는</em> 쪽입니다.</li>
+      <li><strong>로봇 6대 분량의 통신과 영상을 함께 흘려도 문제가 없었습니다.</strong> 관제 신호가 끊긴 시간은 가장 길어도 0.55초로, 로봇이 멈추는 기준(1.5초)보다 짧았습니다.</li>
+      <li><strong>팀끼리 통신이 섞이지 않게 막는 설정이 제대로 동작합니다.</strong></li>
+    </ol>
+  </div>
+  <p class="note" style="margin-top:12px;">이 결과는 장비 2대(PC 1대, 라즈베리파이 1대)와 한 장소의 Wi-Fi에서 짧게 잰 값입니다. 자세한 한계는 4장에 있습니다.</p>
+</section>
+
+<section>
+  <h2>1. 시험 배경과 환경</h2>
+  <p>이전 프로젝트에서 팀원이 메시지를 한 번 보내면 받지 못하고, 여러 번 보내야 겨우 받은 일이 있었습니다.</p>
+  <p>이번 시험의 목적은 두 가지입니다. 첫째, 프로젝트 시작 전에 이런 손실을 막는 통신 규칙을 정합니다. 둘째, 그 규칙에 실제 측정 근거를 붙입니다.</p>
+  <div class="table-wrap"><table>
+    <tr><th>구분</th><th>1단계</th><th>2단계</th></tr>
+    <tr><td>실행일</td><td>2026-11-11</td><td>2026-11-13</td></tr>
+    <tr><td>장비</td><td>PC 1대 (프로그램 두 개를 같은 PC에서 실행)</td><td>PC 1대 + 라즈베리파이 4 1대 (Wi-Fi로 연결)</td></tr>
+    <tr><td>네트워크</td><td>PC 내부</td><td>같은 공유기의 5 GHz Wi-Fi, 신호 세기 약 −65 dBm(보통 수준)</td></tr>
+    <tr><td>소프트웨어</td><td colspan="2">Ubuntu 24.04, ROS 2 Jazzy, 기본 통신 설정</td></tr>
+  </table></div>
+</section>
+
+<section>
+  <h2>2. 시험 항목</h2>
+  <div class="table-wrap"><table>
+    <tr><th>ID</th><th>무엇을 확인했나</th><th>왜 필요한가</th><th>단계</th></tr>
+    <tr><td>L-01</td><td>프로그램이 켜지자마자 메시지를 <strong>한 번만</strong> 보낼 때 받는지. 보내는 방법 8가지를 각각 50번씩 시험</td><td>팀원이 겪은 증상의 가장 유력한 원인</td><td>1단계(PC), 2단계(Wi-Fi)</td></tr>
+    <tr><td>L-02</td><td>Wi-Fi로 메시지를 계속 보낼 때 얼마나 잃는지. 메시지 크기 3가지 × 속도 2가지 × 전달 방식 2가지</td><td>메시지 종류마다 어떤 설정을 쓸지 정하는 기준</td><td>2단계</td></tr>
+    <tr><td>L-03</td><td>받는 쪽 처리가 느릴 때 오래된 데이터를 처리하게 되는지</td><td>처리가 밀리면 로봇이 옛날 정보로 움직일 수 있음</td><td>1단계</td></tr>
+    <tr><td>L-04</td><td>로봇 6대(이동 로봇 3, 로봇 팔 3)와 관제가 함께 통신할 때 손실과 끊김. 보내는 빈도 3단계 × 영상 전송 유무</td><td>실제 통합 운영 설계의 사전 검토</td><td>2단계</td></tr>
+    <tr><td>G-11</td><td>다른 팀이나 다른 장비와 통신이 섞이지 않도록 나누는 설정이 동작하는지</td><td>같은 Wi-Fi를 여러 팀이 쓰기 때문</td><td>2단계</td></tr>
+  </table></div>
+  <p class="note">결과 표시: <span class="tag ok">통과</span> 기준을 만족함 · <span class="tag bad">실패</span> 기준을 만족하지 못함 · <span class="tag info">측정</span> 합격 기준 없이 값만 기록함</p>
+</section>
+
+<section>
+  <h2>3. 시험 결과와 의미</h2>
+
+  <h3>3.1 L-01 켜자마자 한 번 보내기</h3>
+  <p>메시지를 받을 프로그램을 먼저 켜 두고, 보내는 프로그램을 켜서 한 번만 보낸 뒤 종료했습니다. 이것을 방법마다 50번 반복했습니다.</p>
+  <div class="table-wrap"><table>
+    <tr><th>방법</th><th>1단계: 같은 PC<br>(못 받은 횟수)</th><th>2단계: Wi-Fi<br>(못 받은 횟수)</th></tr>
+    <tr><td>A. 일반 방식으로 바로 보냄 (팀원이 겪은 상황)</td><td class="num">50 / 50 <span class="tag info">측정</span></td><td class="num">0 / 50 <span class="tag info">측정</span></td></tr>
+    <tr><td>B. 받는 쪽이 준비됐는지 확인한 뒤 보냄</td><td class="num">0 / 50 <span class="tag ok">통과</span></td><td class="num">0 / 50 <span class="tag ok">통과</span></td></tr>
+    <tr><td>C. 마지막 메시지를 보관하는 방식으로 바로 보냄</td><td class="num">7 / 50 <span class="tag bad">실패</span></td><td class="num">0 / 50 <span class="tag ok">통과</span></td></tr>
+    <tr><td>D. 상태 정보용 방식(재전송 없음)으로 바로 보냄</td><td class="num">47 / 50 <span class="tag info">측정</span></td><td class="num">0 / 50 <span class="tag info">측정</span></td></tr>
+    <tr><td>E-1. 받는 쪽이 1초 늦게 켜짐, 일반 방식</td><td class="num">50 / 50 <span class="tag info">측정</span></td><td class="num">50 / 50 <span class="tag info">측정</span></td></tr>
+    <tr><td>E-2. 받는 쪽이 1초 늦게 켜짐, 보관 방식</td><td class="num">3 / 50 <span class="tag bad">실패</span></td><td class="num">0 / 50 <span class="tag ok">통과</span></td></tr>
+    <tr><td>F. 같은 메시지를 0.1초마다 계속 보냄</td><td class="num">0 / 50 <span class="tag info">측정</span></td><td class="num">0 / 50 <span class="tag info">측정</span></td></tr>
+    <tr><td>S. 요청-응답 방식(서비스)으로 한 번 요청</td><td class="num">0 / 50 <span class="tag ok">통과</span></td><td class="num">0 / 50 <span class="tag ok">통과</span></td></tr>
+  </table></div>
+
+  <div class="meaning">
+    <p><strong>의미</strong></p>
+    <ul>
+      <li>같은 PC 안에서는 켜자마자 한 번 보낸 메시지를 거의 받지 못했습니다(A, D). 팀원이 겪은 증상과 같습니다.</li>
+      <li>원인은 "서로를 찾기 전에 보냈기 때문"으로 보입니다. 프로그램이 켜진 뒤 상대를 찾는 데 시간이 걸립니다.</li>
+      <li>F의 1단계 결과가 이를 보여 줍니다. 50번 모두 결국 받았지만, 15번은 첫 메시지를 놓쳤습니다. 가장 늦은 경우에는 약 3초, 30번째 메시지에서야 처음 받았습니다. "여러 번 보내야 받는다"는 증상이 수치로 확인된 것입니다.</li>
+      <li>"준비 확인 후 보내기"(B)와 "요청-응답"(S)은 두 환경 모두에서 50번 모두 성공했습니다. 팀 규칙으로 권장할 방법입니다.</li>
+      <li>다만 준비를 기다리는 시간이 생깁니다. 같은 PC에서는 보통 0.1초 이내였지만, 50번 중 13~15번은 1초를 넘었고 가장 길게는 약 3.7초였습니다. 기다리는 한도는 5초 이상으로 잡아야 합니다.</li>
+      <li>보관 방식(C, E-2)은 Wi-Fi에서는 모두 성공했지만, 같은 PC에서는 몇 번 실패했습니다. 이 방식만으로는 확실하지 않으므로, 중요한 메시지는 B나 S를 함께 써야 합니다.</li>
+      <li>E-1(50번 모두 못 받음)은 정상 동작입니다. 일반 방식은 나중에 켜진 프로그램에게 지난 메시지를 다시 주지 않습니다.</li>
+    </ul>
+  </div>
+  <p class="note">Wi-Fi(2단계)에서 A와 D까지 모두 받은 이유는 확인하지 못했습니다. 라즈베리파이에서 프로그램이 켜지는 속도가 느려, 보내기 전에 상대를 찾을 시간이 생긴 것으로 추정합니다. 따라서 "Wi-Fi에서는 괜찮다"고 판단하면 안 됩니다. 로봇 안의 프로그램끼리는 같은 장비 안에서 통신하므로 1단계와 같은 문제가 생길 수 있습니다.</p>
+
+  <h3>3.2 L-02 Wi-Fi로 계속 보내기</h3>
+  <p>라즈베리파이가 메시지를 30초 동안 계속 보내고, PC가 받았습니다. 조합마다 3번 반복했습니다. 결과는 모두 <span class="tag info">측정</span>입니다.</p>
+  <p>"재전송 없음"은 빠진 메시지를 다시 보내지 않는 방식입니다. "재전송 있음"은 빠진 메시지를 다시 보내는 방식입니다.</p>
+  <div class="table-wrap"><table>
+    <tr><th>메시지 크기</th><th>목표 속도</th><th>재전송 없음</th><th>재전송 있음</th></tr>
+    <tr><td>1 KB (상태 정보 수준)</td><td>초당 10번, 50번</td><td>목표 달성, 손실 0</td><td>목표 달성, 손실 0</td></tr>
+    <tr><td rowspan="2">64 KB</td><td>초당 10번</td><td>목표 달성, 손실 0</td><td>목표 달성, 손실 0</td></tr>
+    <tr><td>초당 50번</td><td>초당 32~49번만 보냄. 3번 중 1번에서 1,500개 중 3개 손실</td><td>초당 33~37번만 보냄, 손실 0</td></tr>
+    <tr><td rowspan="2">500 KB (사진 1장 수준)</td><td>초당 10번</td><td>초당 5~7번만 보냄, 손실 0</td><td><span class="tag warn">정해진 시간 안에 끝나지 않음</span></td></tr>
+    <tr><td>초당 50번</td><td><span class="tag warn">정해진 시간 안에 끝나지 않음</span></td><td><span class="tag warn">정해진 시간 안에 끝나지 않음</span></td></tr>
+  </table></div>
+  <div class="meaning">
+    <p><strong>의미</strong></p>
+    <ul>
+      <li>Wi-Fi에서 메시지를 잃는 일은 매우 드물었습니다. 전체 시험에서 손실은 단 3개였습니다.</li>
+      <li>진짜 한계는 <strong>속도</strong>입니다. 메시지가 크고 자주 보낼수록 라즈베리파이 4가 목표 속도를 따라가지 못했습니다.</li>
+      <li>"끝나지 않음"은 정해진 시간(약 70초) 안에 보내야 할 개수를 다 보내지 못했다는 뜻입니다. 이 장비와 Wi-Fi로는 그 조합을 감당할 수 없다는 측정 결과입니다.</li>
+      <li>권장 기준: 자주 보내는 메시지는 작게 유지합니다. 64 KB 이하, 초당 10번 이하면 안정적이었습니다.</li>
+      <li>사진처럼 큰 데이터를 ROS 2 메시지로 자주 보내는 설계는 피해야 합니다. 영상은 지금 계획대로 별도 전송(GStreamer)을 쓰는 것이 맞습니다.</li>
+    </ul>
+  </div>
+
+  <h3>3.3 L-03 받는 쪽 처리가 느릴 때</h3>
+  <p>초당 50개를 보내고, 받는 쪽은 한 개 처리에 0.1초가 걸리게 했습니다. 즉 받는 속도보다 처리 속도가 5배 느린 상황입니다. 이때 처리하는 데이터가 얼마나 오래된 것인지 쟀습니다.</p>
+  <div class="table-wrap"><table>
+    <tr><th>방식</th><th>처리한 데이터의 나이 (보통 / 최대)</th><th>결과</th></tr>
+    <tr><td>최신 데이터만 남기고 처리 (권장 규칙)</td><td class="num">약 0.01초 / 0.07초</td><td><span class="tag ok">통과</span> (기준 0.15초 이하, 5번 반복 모두)</td></tr>
+    <tr><td>대기열 1칸</td><td class="num">약 0.01초 / 0.33초</td><td><span class="tag info">측정</span></td></tr>
+    <tr><td>대기열 5칸</td><td class="num">약 0.09초 / 0.10초</td><td><span class="tag info">측정</span></td></tr>
+    <tr><td>대기열 50칸</td><td class="num">약 0.99초 / 1.0초</td><td><span class="tag info">측정</span></td></tr>
+  </table></div>
+  <div class="meaning">
+    <p><strong>의미</strong></p>
+    <ul>
+      <li>대기열을 크게 잡으면 메시지를 덜 버리는 대신, 약 1초 전의 옛날 정보를 처리하게 됩니다. 로봇 위치나 상태처럼 최신 값이 중요한 정보에는 위험합니다.</li>
+      <li>"최신 데이터만 처리" 규칙을 쓰면 늘 0.1초 이내의 최신 정보를 처리했습니다. 상태 정보에는 이 규칙을 권장합니다.</li>
+    </ul>
+  </div>
+
+  <h3>3.4 L-04 로봇 6대 통합 운영 모의 시험</h3>
+  <p>라즈베리파이 1대가 로봇 6대 분량의 메시지를 보내고, PC가 관제 역할을 했습니다. 조합마다 2분씩 실행했습니다.</p>
+  <p>"영상 동시"는 같은 Wi-Fi로 시험 영상(초당 약 2 Mb)을 함께 보낸 경우입니다.</p>
+  <div class="table-wrap"><table>
+    <tr><th>보내는 빈도</th><th>배경</th><th>손실</th><th>관제 신호 최대 끊김</th><th>로봇 상태 최대 간격</th><th>결과</th></tr>
+    <tr><td rowspan="2">낮음 (상태 초당 5번)</td><td>ROS 2만</td><td class="num">0</td><td class="num">0.53초</td><td class="num">0.28초</td><td><span class="tag ok">이상 없음</span></td></tr>
+    <tr><td>영상 동시</td><td class="num">0</td><td class="num">0.54초</td><td class="num">0.29초</td><td><span class="tag ok">이상 없음</span></td></tr>
+    <tr><td rowspan="2">중간 (상태 초당 10번)</td><td>ROS 2만</td><td class="num">0</td><td class="num">0.51초</td><td class="num">0.13초</td><td><span class="tag ok">이상 없음</span></td></tr>
+    <tr><td>영상 동시</td><td class="num">0</td><td class="num">0.51초</td><td class="num">0.12초</td><td><span class="tag ok">이상 없음</span></td></tr>
+    <tr><td rowspan="2">높음 (상태 초당 20번)</td><td>ROS 2만</td><td class="num">0</td><td class="num">0.55초</td><td class="num">0.07초</td><td><span class="tag ok">이상 없음</span></td></tr>
+    <tr><td>영상 동시</td><td class="num">0</td><td class="num">0.51초</td><td class="num">0.07초</td><td><span class="tag ok">이상 없음</span></td></tr>
+  </table></div>
+  <div class="meaning">
+    <p><strong>의미</strong></p>
+    <ul>
+      <li>모든 조합에서 잃은 메시지가 없었습니다.</li>
+      <li>관제 신호는 원래 0.5초마다 보냅니다. 가장 긴 끊김도 0.55초로, 거의 제때 도착했습니다. 이동 로봇이 스스로 멈추는 기준(1.5초)에 한 번도 가까워지지 않았습니다.</li>
+      <li>영상을 함께 보내도 결과가 달라지지 않았습니다.</li>
+      <li>가장 높은 빈도(상태 초당 20번, 비전 결과 초당 10번)도 문제없었습니다. 따라서 상태 보고 빈도는 기능에 필요한 만큼 정하면 됩니다. 통신 부담 때문에 낮출 필요는 이 시험 범위에서는 없었습니다.</li>
+    </ul>
+  </div>
+
+  <h3>3.5 G-11 통신 구역 나누기</h3>
+  <div class="table-wrap"><table>
+    <tr><th>경우</th><th>PC → 라즈베리파이</th><th>라즈베리파이 → PC</th><th>결과</th></tr>
+    <tr><td>같은 구역 (대조군: 서로 보여야 함)</td><td class="num">49 / 50 받음</td><td class="num">50 / 50 받음</td><td><span class="tag ok">통과</span></td></tr>
+    <tr><td>구역 번호를 다르게 설정</td><td class="num">0 / 50</td><td class="num">0 / 50</td><td><span class="tag ok">통과</span></td></tr>
+    <tr><td>PC만 "자기 장비 안에서만" 설정</td><td class="num">0 / 50</td><td class="num">0 / 50</td><td><span class="tag ok">통과</span></td></tr>
+    <tr><td>라즈베리파이만 "자기 장비 안에서만" 설정</td><td class="num">0 / 50</td><td class="num">0 / 50</td><td><span class="tag ok">통과</span></td></tr>
+  </table></div>
+  <div class="meaning">
+    <p><strong>의미</strong></p>
+    <ul>
+      <li>구역 번호(ROS_DOMAIN_ID)를 팀마다 다르게 주면 통신이 섞이지 않습니다. 같은 Wi-Fi를 다른 팀과 함께 써도 서로 방해하지 않게 할 수 있습니다.</li>
+      <li>반대로 이 설정이 한쪽만 다르면 메시지가 전혀 오가지 않습니다. 장비를 추가할 때 이 설정을 맞추는 절차가 필요합니다.</li>
+    </ul>
+  </div>
+</section>
+
+<section>
+  <h2>4. 시험의 제약 사항 (한계)</h2>
+  <h3>장비와 환경</h3>
+  <ul>
+    <li><strong>로봇 6대를 라즈베리파이 1대로 흉내 냈습니다.</strong> 실제로 6대가 공유기를 나눠 쓰면 더 혼잡합니다. L-04 결과는 "최소한 이 정도의 문제는 생긴다"는 하한으로 봐야 합니다.</li>
+    <li><strong>한 장소, 한 공유기, 한 시간대에서만 쟀습니다.</strong> 장소나 사람 수, 다른 Wi-Fi가 바뀌면 결과가 달라질 수 있습니다.</li>
+    <li><strong>라즈베리파이 기종에 따라 결과가 다릅니다.</strong> 공식 측정은 라즈베리파이 4로 했습니다. 다른 라즈베리파이로 짧게 돌렸을 때는 큰 메시지(500 KB)를 더 빨리 보냈습니다. 실제 로봇 컴퓨터로 다시 재야 정확합니다.</li>
+    <li>ROS 2 Jazzy와 기본 통신 설정만 시험했습니다. 다른 버전이나 설정은 확인하지 않았습니다.</li>
+  </ul>
+  <h3>시험 시간과 조건</h3>
+  <ul>
+    <li><strong>시험 시간이 짧습니다.</strong> 조합마다 30초~2분입니다. 몇 시간씩 운영할 때의 안정성은 확인하지 않았습니다.</li>
+    <li><strong>영상은 시험용 영상 1개(초당 약 2 Mb)였습니다.</strong> 팀의 실제 카메라 설정(해상도, 대수)이 정해지면 다시 재야 합니다.</li>
+    <li>로봇 상태와 비전 결과 메시지의 크기는 가정값입니다. 실제 메시지 형식이 정해지면 다시 재야 합니다.</li>
+    <li>두 장비의 시계가 정확히 맞지 않아, 메시지가 도착하는 데 걸린 시간(지연)은 재지 않았습니다. 도착 간격과 손실만 쟀습니다.</li>
+  </ul>
+  <h3>확인하지 못한 점</h3>
+  <ul>
+    <li>Wi-Fi(2단계)에서 "켜자마자 한 번 보내기"가 성공한 이유를 확인하지 못했습니다(3.1 참고).</li>
+    <li>보관 방식(C, E-2)이 같은 PC에서 가끔 실패한 원인을 확인하지 못했습니다.</li>
+    <li>L-03에서 보내는 속도가 계획(초당 50번)보다 빨랐을 가능성이 있습니다. 이 경우 시험 조건이 계획보다 더 혹독했다는 뜻이므로, 규칙이 통과한 결론은 유지됩니다. 다만 대조군 수치는 다시 확인이 필요합니다.</li>
+    <li>2단계 결과 기록에 남은 시험 도구 버전은 영상 시험 수정 전 버전(<code>14ca810</code>)입니다. 실제 측정에는 수정 내용이 들어 있었고, 이후 <code>d83cb43</code>으로 반영했습니다.</li>
+  </ul>
+  <h3>아직 하지 않은 시험</h3>
+  <ul>
+    <li>안내 문서 예제 실행 검사(EX), 사례 재현 시험(G-02~G-10), 공식 문서 대조(DOC)는 3단계에서 진행합니다.</li>
+  </ul>
+</section>
+
+<section>
+  <h2>5. 결론과 다음 단계</h2>
+  <h3>팀 통신 규칙으로 제안할 내용</h3>
+  <ul>
+    <li><strong>한 번만 보내는 중요한 메시지</strong>(명령, 작업 지시 등)는 받는 쪽이 준비됐는지 확인한 뒤 보내거나, 요청-응답 방식으로 보냅니다. 준비를 기다리는 한도는 5초 이상으로 둡니다.</li>
+    <li><strong>계속 보내는 상태 정보</strong>는 작게(64 KB 이하) 유지하고, 받는 쪽은 최신 값만 처리합니다.</li>
+    <li><strong>큰 데이터</strong>(사진, 영상)는 ROS 2 메시지로 자주 보내지 않고, 별도 전송을 씁니다.</li>
+    <li><strong>통신 구역 번호</strong>는 팀 전체가 같은 값으로 맞추고, 다른 팀과는 다르게 둡니다.</li>
+  </ul>
+  <h3>다음 단계</h3>
+  <ul>
+    <li>공식 측정 결과를 근거 폴더(<code>evidence/</code>)로 옮깁니다.</li>
+    <li>메시지 종류별 설정 선택표와 통신 규칙 초안을 작성해 팀에 공유합니다.</li>
+    <li>3단계 시험(예제 검사, 사례 재현, 공식 문서 대조)을 진행합니다.</li>
+    <li>실제 로봇 장비와 카메라 설정이 정해지면 L-02, L-04를 다시 측정합니다.</li>
+  </ul>
+</section>
+
+<footer>
+  실행 기록: 1단계 <code>20261111-192323</code>, 2단계 <code>20261113-164441</code> (L-04 영상 확인 <code>pi-l04video3</code>). 시험 계획: <code>tests/ROS2_통신_안내_시험_계획서.md</code>.
+</footer>
+
+</main>
+</body>
+</html>
