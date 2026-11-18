@@ -9,7 +9,7 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 |---|---|---|---|---|
 | HW 아키텍처 | [architecture/hw_architecture.drawio](architecture/hw_architecture.drawio) | v1.18 | 2026-11-17 | hw_architecture_r18.drawio |
 | SW 아키텍처 | [architecture/sw_architecture.drawio](architecture/sw_architecture.drawio) | v1.15 | 2026-11-17 | sw_architecture_r15.drawio |
-| 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.3 | 2026-11-18 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
+| 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.4 | 2026-11-18 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
 | 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.1 | 2026-11-17 | 비상정지_순서도_r1.drawio |
 
 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 적습니다.
@@ -81,11 +81,25 @@ git push origin submit/2026-11-24-scenario
 | 2026-11-17 | 비상정지_순서도_r1-1. 비상정지 발생.drawio.png | 〃 · 1. 비상정지 발생 | v1.1 |
 | 2026-11-17 | 비상정지_순서도_r1-2. 현장 정리.drawio.png | 〃 · 2. 현장 정리 | v1.1 |
 | 2026-11-17 | 비상정지_순서도_r1-3. 해제 · 재개.drawio.png | 〃 · 3. 해제 · 재개 | v1.1 |
+| 2026-11-18 | Scenario_2nd/2팀_StateDiagram_01-0. 상태표.png | diagrams/IFP_다이어그램.drawio · 0. 상태표 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_StateDiagram_01-2. 주문.png | 〃 · 2. 주문 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_StateDiagram_01-3. Pode.png | 〃 · 3. Pode | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_StateDiagram_01-4. Phody (가이드).png | 〃 · 4. Phody (가이드) | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_StateDiagram_01-5. Phony.png | 〃 · 5. Phony | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-1-1. 시퀀스_ 주문.png | 〃 · 6-1-1. 시퀀스: 주문 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-1-2. 시퀀스_ 상품 담기.png | 〃 · 6-1-2. 시퀀스: 상품 담기 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-1-3. 시퀀스_ 출고.png | 〃 · 6-1-3. 시퀀스: 출고 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-2. 시퀀스_ 결품.png | 〃 · 6-2. 시퀀스: 결품 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-4. 시퀀스_ 주문 취소.png | 〃 · 6-4. 시퀀스: 주문 취소 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-5. 시퀀스_ Pode 장애.png | 〃 · 6-5. 시퀀스: Pode 장애 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-6. 시퀀스_ Phody 장애.png | 〃 · 6-6. 시퀀스: Phody 장애 | v2.4 |
+| 2026-11-18 | Scenario_2nd/2팀_SequenceDiagram_01-6-7. 시퀀스_ Phony 장애.png | 〃 · 6-7. 시퀀스: Phony 장애 | v2.4 |
 
 - 상태 다이어그램의 "1. 순서도" 탭은 제출하지 않았습니다.
+- 2026-11-18 제출본(`exports/Scenario_2nd/`)은 Confluence Scenario 페이지 첨부와 같은 이름입니다.
 - 비상정지 순서도 PNG는 Confluence 첨부와 같은 이름으로 두었습니다.
 
 ## draw.io 버전 라벨 고치기
 
-각 탭 왼쪽 위의 회색 글자(`v2.3 · 2026-11-18`)가 버전 라벨입니다. 탭마다 하나씩 있으니, 버전을 올릴 때 모든 탭의 라벨을 함께 고칩니다.
-draw.io에서 편집 → 찾기/바꾸기(Ctrl+F)로 `v2.3 · 2026-11-18`을 찾아 "모두 바꾸기"를 하면 한 번에 고칠 수 있습니다.
+각 탭 왼쪽 위의 회색 글자(`v2.4 · 2026-11-18`)가 버전 라벨입니다. 탭마다 하나씩 있으니, 버전을 올릴 때 모든 탭의 라벨을 함께 고칩니다.
+draw.io에서 편집 → 찾기/바꾸기(Ctrl+F)로 `v2.4 · 2026-11-18`을 찾아 "모두 바꾸기"를 하면 한 번에 고칠 수 있습니다.
