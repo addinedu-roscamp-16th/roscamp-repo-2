@@ -9,7 +9,7 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 |---|---|---|---|---|
 | HW 아키텍처 | [architecture/hw_architecture.drawio](architecture/hw_architecture.drawio) | v1.18 | 2026-11-17 | hw_architecture_r18.drawio |
 | SW 아키텍처 | [architecture/sw_architecture.drawio](architecture/sw_architecture.drawio) | v1.15 | 2026-11-17 | sw_architecture_r15.drawio |
-| 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.1 | 2026-11-17 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
+| 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.3 | 2026-11-18 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
 | 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.1 | 2026-11-17 | 비상정지_순서도_r1.drawio |
 
 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 적습니다.
@@ -87,5 +87,5 @@ git push origin submit/2026-11-24-scenario
 
 ## draw.io 버전 라벨 고치기
 
-각 탭 왼쪽 위의 회색 글자(`v2.1 · 2026-11-17`)가 버전 라벨입니다. 탭마다 하나씩 있으니, 버전을 올릴 때 모든 탭의 라벨을 함께 고칩니다.
-draw.io에서 편집 → 찾기/바꾸기(Ctrl+F)로 `v2.1 · 2026-11-17`을 찾아 "모두 바꾸기"를 하면 한 번에 고칠 수 있습니다.
+각 탭 왼쪽 위의 회색 글자(`v2.3 · 2026-11-18`)가 버전 라벨입니다. 탭마다 하나씩 있으니, 버전을 올릴 때 모든 탭의 라벨을 함께 고칩니다.
+draw.io에서 편집 → 찾기/바꾸기(Ctrl+F)로 `v2.3 · 2026-11-18`을 찾아 "모두 바꾸기"를 하면 한 번에 고칠 수 있습니다.
