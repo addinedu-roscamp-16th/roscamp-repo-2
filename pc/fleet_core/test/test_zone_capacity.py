@@ -1,0 +1,23 @@
+"""넓은 구역 정원의 합이 로봇 수보다 작으면 시작할 때 한 번 알린다."""
+from fleet_core.fleet_map import KNOWN_LAYOUTS
+from zone_harness import Harness
+
+
+def warnings(world):
+    return [(e.level, e.robot, e.detail) for e in world.events if e.code == "ZONE_CAPACITY_LOW"]
+
+
+def test_fewer_shared_places_than_robots_is_warned_once_at_start():
+    world = Harness(starts={"pode1": "P-1", "pode2": "P-2", "pode3": "P-3", "pode4": "W_Q"})
+    world.step()
+    assert warnings(world) == [("WARN", "", "shared zones hold 3 robots in all (HALL 3) but "
+                                            "4 robots run: they can wait on each other for good")]
+    world.run(5.0)
+    assert len(warnings(world)) == 1
+
+
+def test_enough_shared_places_say_nothing():
+    for layout in KNOWN_LAYOUTS:
+        world = Harness(layout=layout)
+        world.run(1.0)
+        assert warnings(world) == [], layout

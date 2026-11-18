@@ -1,0 +1,198 @@
+"""Nav2 goal 흉내의 바닥과 길 찾기: keepout, 키운 벽, 돌아가기, 길 없음."""
+import copy
+import math
+from itertools import pairwise
+
+import pytest
+from fake_robots.world.free_space import FreeSpace
+from fake_robots.world.geom import length, path_gap
+from fake_robots.world.nav_goal import plan_around
+from fake_robots.world.planner import plan
+from fleet_core.fleet_map import FleetMap, load_fleet_map
+
+R = 0.08
+
+# pc/fleet_core/test/test_fleet_map.py의 SMALL과 같은 작은 지도
+SMALL = {
+    "name": "small",
+    "bounds": [0.0, 0.0, 2.0, 1.0],
+    "shelves": [[0.5, 0.75, 1.5, 0.8]],
+    "zones": {
+        "HALL": {"kind": "shared", "capacity": 2,
+                 "rects": [[0.0, 0.0, 2.0, 0.75], [0.0, 0.75, 0.5, 0.8], [1.5, 0.75, 2.0, 0.8]]},
+        "DOCK_W": {"kind": "dock", "rects": [[0.0, 0.8, 0.3, 1.0]]},
+        "J_W": {"kind": "dock", "rects": [[0.3, 0.8, 0.5, 1.0]]},
+        "EXPRESS": {"kind": "lane", "rects": [[0.5, 0.8, 1.5, 1.0]]},
+        "J_E": {"kind": "dock", "rects": [[1.5, 0.8, 1.7, 1.0]]},
+        "DOCK_E": {"kind": "dock", "rects": [[1.7, 0.8, 2.0, 1.0]]},
+    },
+    "nodes": {
+        "W": {"x": 0.2, "y": 0.9, "kind": "dock", "yaw_deg": 180},
+        "O": {"x": 1.8, "y": 0.9, "kind": "dock", "yaw_deg": 0},
+        "X_W": {"x": 0.4, "y": 0.9, "kind": "pass"},
+        "X_E": {"x": 1.6, "y": 0.9, "kind": "pass"},
+        "N_W": {"x": 0.4, "y": 0.6, "kind": "fork"},
+        "N_E": {"x": 1.6, "y": 0.6, "kind": "fork"},
+        "W_Q": {"x": 0.2, "y": 0.5, "kind": "wait"},
+        "O_Q": {"x": 1.8, "y": 0.5, "kind": "wait"},
+        "P-1": {"x": 0.2, "y": 0.15, "kind": "parking", "yaw_deg": 90},
+        "P-2": {"x": 1.8, "y": 0.15, "kind": "parking"},
+    },
+    "paths": {
+        "work_in": {"points": ["N_W", "X_W", "W"]},
+        "work_out": {"points": ["W", "X_W"], "reverse": True},
+        "out_in": {"points": ["N_E", "X_E", "O"]},
+        "out_out": {"points": ["O", "X_E"], "reverse": True},
+        "express": {"points": ["X_W", "X_E"], "two_way": True},
+        "j_w_down": {"points": ["X_W", "N_W"]},
+        "j_e_down": {"points": ["X_E", "N_E"]},
+    },
+    "nav": [{"nodes": ["N_W", "N_E", "W_Q", "O_Q", "P-1", "P-2"]}],
+    "stations": {
+        "WORK": {"dock": "W", "queue": ["W_Q"], "server": "workcell", "arms": ["arm1", "arm2"],
+                 "action": "fill"},
+        "OUTBOUND": {"dock": "O", "queue": ["O_Q"], "server": "arm3", "arms": ["arm3"],
+                     "action": "swap"},
+    },
+    "parking": ["P-1", "P-2"],
+}
+
+
+def test_an_opening_only_skips_its_own_docks_keepout():
+    """W에서 나가는 열린 상자 안이어도 갈림목(J_W) 구역 곁은 반지름만큼 막혀 있다."""
+    data = copy.deepcopy(SMALL)
+    data["nav"].append({"nodes": ["W", "N_W"], "leave_dock": True})
+    site = FleetMap(data)
+    space = FreeSpace(site, R)
+    assert space.free(space.static, 0.2, 0.9)
+    assert not space.free(space.static, 0.34, 0.80)
+
+
+@pytest.fixture(scope="module")
+def d2():
+    site = load_fleet_map("d2")
+    return site, FreeSpace(site, R)
+
+
+def test_keepout_zones_walls_and_shelves_are_not_floor(d2):
+    site, space = d2
+    cells = space.static
+    assert space.free(cells, *site.node_pose("N_W"))
+    assert space.free(cells, *site.node_pose("P-1"))
+    assert not space.free(cells, *site.node_pose("X_W"))  # 갈림목(dock 구역)
+    assert not space.free(cells, 1.0, 0.89)  # 급행(lane)
+    assert not space.free(cells, 1.0, 0.72)  # 진열대와 급행에서 반지름 안
+    assert not space.free(cells, 0.05, 0.40)  # 서쪽 벽에서 반지름 안
+    assert space.free(cells, 1.0, 0.68)
+
+
+def test_a_clear_straight_line_is_the_plan(d2):
+    site, space = d2
+    way = plan(space, space.static, site.node_pose("N_W"), site.node_pose("N_E"))
+    assert way == [site.node_pose("N_W"), site.node_pose("N_E")]
+
+
+def test_the_plan_goes_around_a_standing_robot_and_keeps_its_distance(d2):
+    site, space = d2
+    reach = 2 * R + 0.03
+    cells = space.with_discs([(1.0, 0.65, reach)])
+    start, goal = site.node_pose("N_W"), site.node_pose("N_E")
+    way = plan(space, cells, start, goal)
+    assert way[0] == start and way[-1] == goal
+    assert path_gap((1.0, 0.65), way) >= 2 * R
+    assert length(way) > math.dist(start, goal)
+
+
+def test_no_way_when_the_goal_is_in_a_keepout_zone_or_walled_off(d2):
+    site, space = d2
+    assert plan(space, space.static, site.node_pose("N_W"), site.node_pose("X_W")) is None
+    wall = space.with_discs([(1.0, y / 100, 0.05) for y in range(0, 80, 2)])
+    assert plan(space, wall, site.node_pose("N_W"), site.node_pose("N_E")) is None
+
+
+def test_a_goal_inside_the_grown_wall_ends_at_the_nearest_free_cell(d2):
+    _, space = d2
+    goal = (0.06, 0.40)
+    way = plan(space, space.static, (0.40, 0.40), goal)
+    assert way[-1] != goal and math.dist(way[-1], goal) <= 0.05
+    assert space.free(space.static, *way[-1])
+
+
+@pytest.mark.parametrize("layout", ["d2"])
+def test_every_node_of_a_shared_zone_is_floor(layout):
+    site = load_fleet_map(layout)
+    space = FreeSpace(site, R)
+    for node in site.nodes.values():
+        if site.zones[node.zone].kind == "shared":
+            assert space.free(space.static, node.x, node.y), node.id
+
+
+def test_v7_a_robot_at_work_plans_its_way_out_to_the_hall():
+    """v7의 W는 WORK_DOCK 안이다. 그 도크를 Nav2 goal로 떠나는 이음(W -> M_E)의
+    곧은 선 둘레는 바닥으로 열고, 도크의 나머지는 그대로 막는다(fleet_core keepout_openings)."""
+    site = load_fleet_map("v7")
+    space = FreeSpace(site, R)
+    assert space.free(space.static, *site.node_pose("W"))
+    assert plan(space, space.static, site.node_pose("W"), site.node_pose("M_E")) is not None
+    assert not space.free(space.static, 1.88, 0.40), "the south end of the dock stays closed"
+    assert not space.free(space.static, 1.80, 0.66), "so does the strip below J_E"
+
+
+def test_v7_keepout_extra_is_not_floor():
+    """Nav2 마스크는 keepout_extra 사각형을 덧대지 않고 막는다(fleet_core keepout.mask). 머리 없는
+    세계도 그 안으로 길을 내지 않는다: 칸막이 1, 2 위 끝 둘레. 남쪽 진열대 사이 틈은 지름길이라
+    막지 않는다(팀 결정 2026-11-17): 머리 없는 세계에서도 바닥이다. 칸막이 3과 그 둘레는
+    없다: 그 자리도 바닥이다."""
+    site = load_fleet_map("v7")
+    space = FreeSpace(site, R)
+    assert space.free(space.static, 1.12, 0.385), "the gap between the south shelves is floor"
+    # 칸막이 2 위 끝 모서리(0.52, 0.10)에서 0.105라 몸 반경 0.08로는 막히지 않는다: keepout 때문이다
+    assert not space.free(space.static, 0.565, 0.195), "around the top of divider 2"
+    assert space.free(space.static, 0.84, 0.19), "divider 3 and its keepout are gone"
+    assert space.free(space.static, 1.12, 0.25), "the south corridor below the gap stays floor"
+
+
+def test_v7_keepout_extra_closes_every_cell_it_touches_like_the_mask():
+    """마스크(fleet_core keepout.filled)는 사각형과 겹치는 칸을 모두 막는다. 칸 중심이
+    사각형 밖이어도 같은 격자에서 겹치면 머리 없는 세계도 막는다(예: 중심
+    (1.11, 0.41) 칸)."""
+    from fleet_core.fleet_map.keepout import filled
+    site = load_fleet_map("v7")
+    space = FreeSpace(site, R)
+    closed = filled(site.keepout_extra, space.w, space.h, space.res, (space.x0, space.y0))
+    leaks = [space.centre(ix, iy) for iy in range(space.h) for ix in range(space.w)
+             if closed[iy][ix] and space.static[iy * space.w + ix] == 0]
+    assert leaks == []
+    assert space.free(space.static, 1.11, 0.41), "the open gap leaks nothing either"
+
+
+V7_SOUTH_SHELF_Y = 0.365
+
+
+def _parked_plan(spots):
+    site = load_fleet_map("v7")
+    space = FreeSpace(site, R)
+    parked = [(*site.node_pose(spot), R) for spot in spots]
+    return plan_around(space, R, site.node_pose("E-1"), site.node_pose("Q2"), parked), parked
+
+
+def test_v7_a_robot_passes_a_robot_parked_in_a_west_bay_along_the_south_corridor():
+    """주차 자리 y 0.10. P-1, P-2 위에는 진열대가 없어 넓다: E-1에서 Q2로 가는
+    로봇은 그 앞을 몸 둘 + 여유를 두고 남쪽 통로로 지난다."""
+    way, parked = _parked_plan(["P-2"])
+    assert way is not None and max(y for _, y in way) < V7_SOUTH_SHELF_Y, way
+    assert all(path_gap((x, y), way) >= 2 * R for x, y, _ in parked)
+
+
+def test_v7_a_robot_parked_at_p3_sends_others_through_the_crossing_gap():
+    """P-3에 주차한 로봇(y 0.10)과 남쪽 진열대 서쪽 끝 사이에는 머리 없는 세계의 계획 여유(반지름
+    둘 + 0.03)가 들어가지 않는다. 남쪽 진열대 서쪽 끝을 돌아 북쪽으로 올라갔다가, 열린 건넘 틈
+    (팀 결정 2026-11-17, 지름길)으로 다시 남쪽 통로에 내려온다. 동쪽 통로까지 돌지 않는다."""
+    way, _ = _parked_plan(["P-3"])
+    assert way is not None, "a way is left"
+    assert max(y for _, y in way) > 0.405 + R, way
+    along = [(ax + (bx - ax) * i / 50, ay + (by - ay) * i / 50)
+             for (ax, ay), (bx, by) in pairwise(way) for i in range(51)]
+    # 진열대 줄을 건너는 점(서쪽 끝 x < 0.68 말고): 모두 틈 안이고 몸 반지름만큼 모서리에서 떨어진다
+    crossing = [x for x, y in along if V7_SOUTH_SHELF_Y <= y <= 0.405 and x > 0.68]
+    assert crossing and all(0.99 + R <= x <= 1.25 - R for x in crossing), way

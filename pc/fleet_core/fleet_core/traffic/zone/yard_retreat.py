@@ -1,0 +1,115 @@
+# ---- 물러나기와 다른 로봇에게 양보 믹스인 ----
+from __future__ import annotations
+
+import math
+from itertools import pairwise
+
+from fleet_core.fleet_map import FOLLOW_PATH, PASS, SHARED
+from fleet_core.fleet_map.geometry import point_segment_distance
+from fleet_core.traffic.mission import BLOCKED
+
+
+# ---- PASS 노드에서 SHARED 구역 쪽 물러날 지점 찾기 ----
+def yard_retreat(site, link) -> tuple[str, str]:
+    a = link.a
+    if not a or site.nodes[a].kind != PASS:
+        return a, ""
+    for down in site.links():
+        if (down.a == a and down.via == FOLLOW_PATH and down.b != link.b
+                and site.zones[site.nodes[down.b].zone].kind == SHARED):
+            return down.b, a
+    return a, ""
+
+
+# ---- 뒤가 비기를 기다리기와 물러날 목표 정하기 ----
+class YardRetreat:
+    def _waits_behind(self, m) -> bool:
+        now = self._clock()
+        if m.avoid.behind_since is None:
+            m.avoid.behind_since = now
+            self._event("INFO", "RETREAT_WAIT", "something is behind it, backs out when it is "
+                        "gone", m.name)
+        if now - m.avoid.behind_since >= self.params.blocked_timeout_s:
+            return False
+        m.retry_at = now + self.params.move_retry_wait_s
+        return True
+
+    def _set_retreat(self, m, link, now: float) -> None:
+        m.avoid.retreat_to, m.avoid.retreat_via = yard_retreat(self.site, link)
+        m.avoid.retreat_since = now
+
+    # ---- 꺾인 물러나기 길 뒤에 있는 로봇 확인 ----
+    def _behind_on_the_bent_way(self, m, target: str, via: str) -> str:
+        site = self.site
+        here, corner, end = (m.x, m.y), site.node_pose(via), site.node_pose(target)
+        down = site.link(via, target)
+        way_pts = (here, corner, *(down.points[1:-1] if down is not None else ()), end)
+        return self._behind_along(m, way_pts)
+
+    # ---- 물러나는 길 뒤에 있는 로봇 찾기 ----
+    def _behind_along(self, m, way_pts) -> str:
+        here, ahead = way_pts[0], way_pts[1]
+        way = (ahead[0] - here[0], ahead[1] - here[1])
+        for other in self._robots.values():
+            if other is m or not other.placed:
+                continue
+            spot = (other.x, other.y)
+            toward = (spot[0] - here[0]) * way[0] + (spot[1] - here[1]) * way[1] > 0.0
+            gap = min(point_segment_distance(spot, a, b) for a, b in pairwise(way_pts))
+            if toward and gap < self.params.retreat_clear_m:
+                return other.name
+        return ""
+
+    def _retreat_held_up(self, m) -> bool:
+        behind = (self._behind_on_the_bent_way(m, m.avoid.retreat_to, m.avoid.retreat_via)
+                  if m.avoid.retreat_via else "")
+        if behind and behind != m.avoid.retreat_behind:
+            self._event("INFO", "RETREAT_WAIT", f"{behind} is behind it, backs out after it",
+                        m.name)
+        m.avoid.retreat_behind = behind
+        return bool(behind)
+
+    # ---- 물러나기를 너무 오래 못 하면 실패 처리 ----
+    def _watch_retreat_wait(self, m, now: float) -> None:
+        if (not m.avoid.retreat_to or m.goal is not None or m.avoid.retreat_since is None
+                or now - m.avoid.retreat_since < self.params.blocked_timeout_s):
+            return
+        self._event("ERROR", "GOAL_FAILED", f"could not back out to {m.avoid.retreat_to} for "
+                    f"{now - m.avoid.retreat_since:.0f} s", m.name)
+        m.avoid.retreat_since = None
+        self._fail(m, BLOCKED)
+
+    # ---- 다른 로봇에게 길 양보 ----
+    def _yield_to_robot(self, m, other, now: float) -> bool:
+        link = m.trip.links[m.trip.done]
+        zone = self.site.zone_at(m.x, m.y)
+        in_lane = link.a and zone is not None and self.site.zones[zone].kind != SHARED
+        sent_off = (not in_lane and other.available and other.goal is None
+                    and self._in_yard(other)
+                    and self._to_parking(other, "INFO", "HALL_YIELD",
+                                         f"out of the way of {m.name}, goes to", clear_of=m))
+        if not in_lane and not sent_off and self._parked(other):
+            return False
+        m.watch.blocked.since = None
+        m.avoid.robot_yield_at = now
+        if in_lane:
+            self._cancel_goal(m)
+            self._set_retreat(m, link, now)
+            self._drop_trip(m)
+            self._event("INFO", "HALL_YIELD", f"backs out to {m.avoid.retreat_to} for "
+                        f"{other.name}, nothing marked", m.name)
+            return True
+        if sent_off:
+            self._event("INFO", "HALL_YIELD", f"waits for {other.name} to clear the way, "
+                        "nothing marked", m.name)
+            return True
+        self._cancel_goal(m)
+        self._stand_aside(m, other, now)
+        return True
+
+    # ---- 주차 자리에 서서 비킬 곳이 없는 로봇 ----
+    def _parked(self, other) -> bool:
+        site = self.site
+        return (other.goal is None and other.node in site.parking
+                and math.dist((other.x, other.y), site.node_pose(other.node))
+                <= self.params.arrival_tolerance_m)
