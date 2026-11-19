@@ -5,10 +5,10 @@ import sys
 import xml.etree.ElementTree as ET
 
 TAB_NAMES = ['0. 화면 구성', '1. 평상시 현황', '2. 결품 · 담기 일시 중지', '3. Pode 장애', '4. Phody 장애',
-             '5. Phony 장애', '6. 서비스 일시 정지 · 재시작', '7. 재고 · 이력', '8. 비상정지']
-VERSION = 'v1.2 · 2026-11-19'
+             '5. Phony 장애', '6. 재고 · 이력', '7. 마감', '8. 서비스 일시 정지 · 재시작', '9. 비상정지']
+VERSION = 'v1.3 · 2026-11-19'
 COVER = ['SCR-01', 'SCR-06', 'SCR-07', 'SCR-08', 'SCR-10', 'SCR-11', 'SCR-12', 'SCR-16', 'SCR-18', 'SCR-19',
-         'OMS-08', 'OMS-09', 'OMS-16', 'COM-02', 'SCR-20', 'OMS-03', 'OMS-18', 'SCR-21']
+         'OMS-08', 'OMS-09', 'OMS-16', 'COM-02', 'SCR-20', 'OMS-03', 'OMS-18', 'SCR-21', 'OMS-19']
 FAILS = []
 
 
@@ -114,7 +114,7 @@ def check_text_fit(root):
 
 
 def check_estop_order(root):
-    tab = [d for d in root.findall('diagram') if d.get('name') == '8. 비상정지']
+    tab = [d for d in root.findall('diagram') if d.get('name') == '9. 비상정지']
     if not tab:
         return
     descs = {}
@@ -146,9 +146,10 @@ REQUIRED_TEXT = {'0. 화면 구성': ['확인 창', '알림 칸에서 빠짐', '
                  '2. 결품 · 담기 일시 중지': ['로봇으로', '락 해제', '락 잠금', '수시 조정', '☐ 현장 담당자', 'Phody 왼팔  → 락 풀림', '입고 먼저', '두 버튼 모두 꺼짐'],
                  '3. Pode 장애': ['로봇으로', '락 해제', '락 잠금', '위치를 다시 설정', '☐ 현장 담당자', '다른 로봇은 계속 운행 중'],
                  '4. Phody 장애': ['로봇으로', 'R-06', 'R-10', 'PHD-10'], '5. Phony 장애': ['로봇으로', 'R-07', 'R-10'],
-                 '6. 서비스 일시 정지 · 재시작': ['R-09'], '8. 비상정지': ['[비상정지 해제]'],
-                 '7. 재고 · 이력': ['반출', '사유', '주문 거절', '입고 · 반출 기록', '마감 취소', '마감 확정', '수시 조정', '남은 주문', 'R-01', 'R-08', '입력한 수량은 버려짐', '기록 종류: 수시 조정', '입력 오류 · 기타', '수동 해결은 없음']}
-FORBIDDEN_TEXT = ['입고 · 수정', '재고 수정', '조치 버튼을 누르면 자동 해결', '① 해결', '현장에 사람이 있나요']
+                 '8. 서비스 일시 정지 · 재시작': ['R-09'], '9. 비상정지': ['[비상정지 해제]'],
+                 '6. 재고 · 이력': ['반출', '사유', '주문 거절', '입고 · 반출 기록', '수시 조정', 'R-01', 'R-08', '기록 종류: 수시 조정', '입력 오류 · 기타', '수동 해결은 없음', '추가 입고', '7번 탭'],
+                 '7. 마감': ['마감 취소', '마감 확정', '남은 운반 건', '배정 보류 반영됨', '추가 입고', '실사', '입력한 수량은 재고에 반영되지 않음', '아직 안 셈', 'R-17', 'R-19']}
+FORBIDDEN_TEXT = ['입고 · 수정', '재고 수정', '입력한 수량은 버려짐', '마감 이전 날짜', '조치 버튼을 누르면 자동 해결', '① 해결', '현장에 사람이 있나요']
 ALERT_OK = {'주문 관리로', '로봇으로', '재고로', '확인', '간편 처리'}
 PANEL_KEY = 'shadow=1;'
 PANEL_FORBIDDEN = {'락 해제', '락 잠금', '마감', '재시작', '비상정지 해제'}
@@ -236,7 +237,7 @@ def check_review_fixes(root):
         nums = [n for _, _, n in sorted(sc)]
         if nums != sorted(nums):
             fail(f'{name}: 장면 번호가 배치 순서와 다름 {nums}')
-    tab8 = [d for d in root.findall('diagram') if d.get('name') == '8. 비상정지']
+    tab8 = [d for d in root.findall('diagram') if d.get('name') == '9. 비상정지']
     if tab8:
         descs = {}
         for c in tab8[0].iter('mxCell'):
@@ -246,10 +247,10 @@ def check_review_fixes(root):
         rel = next((n for n in sorted(descs) if '[비상정지 해제]' in descs[n].split('\n')[0]), None)
         for n in sorted(descs):
             if rel and n < rel and '접수됨' in descs[n].split('\n')[1]:
-                fail(f'8번 탭 장면 {n}: 해제 전에 주문을 접수됨으로 되돌림')
+                fail(f'9번 탭 장면 {n}: 해제 전에 주문을 접수됨으로 되돌림')
         dis = [c for c in tab8[0].iter('mxCell') if plain(c.get('value')).startswith('비상정지 해제 (체크리스트')]
         if not dis:
-            fail('8번 탭: 해제 버튼 꺼짐 표시 없음')
+            fail('9번 탭: 해제 버튼 꺼짐 표시 없음')
 
 
 def main(path):

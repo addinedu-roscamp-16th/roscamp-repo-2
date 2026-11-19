@@ -11,7 +11,7 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 | SW 아키텍처 | [architecture/sw_architecture.drawio](architecture/sw_architecture.drawio) | v1.15 | 2026-11-17 | sw_architecture_r15.drawio |
 | 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.4 | 2026-11-18 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
 | 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.1 | 2026-11-17 | 비상정지_순서도_r1.drawio |
-| 관리자 페이지 스토리보드 | [diagrams/관리자_스토리보드.drawio](diagrams/관리자_스토리보드.drawio) | v1.2 | 2026-11-19 | - |
+| 관리자 페이지 스토리보드 | [diagrams/관리자_스토리보드.drawio](diagrams/관리자_스토리보드.drawio) | v1.3 | 2026-11-19 | - |
 | 사용자 주문 페이지 스토리보드 | [diagrams/사용자_스토리보드.drawio](diagrams/사용자_스토리보드.drawio) | v1.0 | 2026-11-19 | - |
 | 다이어그램 수정 요청 | [다이어그램_수정_요청.md](다이어그램_수정_요청.md) | - | 2026-11-19 | - |
 
