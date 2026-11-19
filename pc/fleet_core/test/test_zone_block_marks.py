@@ -108,7 +108,7 @@ def test_v7_a_robot_at_work_leaves_through_the_hall_while_the_express_is_marked(
     assert not world.problems
 
 
-def test_without_a_position_the_driven_link_is_marked_as_before():
+def test_without_a_position_the_driven_edge_is_marked_as_before():
     world, call = from_work_to_outbound(world_type=Harness)
     world.obstacles.append((1.0, 0.89, 0.15))
     assert world.run_until(lambda: "ZONE_MARKED_BLOCKED" in world.codes("pode1"), 120.0)
