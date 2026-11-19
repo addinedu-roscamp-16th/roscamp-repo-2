@@ -91,7 +91,9 @@ def test_close_allows_ship_and_close_adjust(conn, acc):
     open_counting(conn, close_id)
     cid = conn.execute("insert into stock_count (close_id, product_id, account_id, counted_qty, book_qty, reason) "
                        "values (%s, %s, %s, 7, 8, 'LOST') returning count_id", (close_id, pid, acc)).fetchone()[0]
-    ledger(conn, pid, "CLOSE_ADJUST", -1, count_id=cid)
+    with conn.transaction():
+        conn.execute("select pg_advisory_xact_lock(7001)")
+        ledger(conn, pid, "CLOSE_ADJUST", -1, count_id=cid)
     assert stock(conn, pid) == 7
 
 
@@ -167,7 +169,9 @@ def test_adjust_from_cancelled_close_rejected(conn, acc):
                        "values (%s, %s, %s, 9, 10, 'LOST') returning count_id", (close_id, pid, acc)).fetchone()[0]
     conn.execute("update stock_close set status = 'CANCELLED', finished_at = now() where close_id = %s", (close_id,))
     with raises_msg("취소된 마감의 실사로 조정할 수 없음"):
-        ledger(conn, pid, "CLOSE_ADJUST", -1, count_id=cid)
+        with conn.transaction():
+            conn.execute("select pg_advisory_xact_lock(7001)")
+            ledger(conn, pid, "CLOSE_ADJUST", -1, count_id=cid)
 
 
 def test_close_start_waits_for_ledger_txn(conn, conn_factory):

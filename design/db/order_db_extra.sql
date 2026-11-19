@@ -163,6 +163,15 @@ BEGIN
     RAISE EXCEPTION '담은 수를 모르는 운반 건이 있어 수시 조정할 수 없음' USING ERRCODE = 'check_violation';
   END IF;
 
+  -- 마감 조정은 확정 트랜잭션 안에서만: 배타 잠금을 먼저 잡아야 한다 (설계 문서 5절 "마감" 4).
+  -- 잠금이 앞서야 조정과 확정 사이에 다른 원장 기록(늦은 출고 등)이 끼지 못하고, 교착도 생기지 않는다.
+  IF NEW.entry_type = 'CLOSE_ADJUST' AND NOT EXISTS (
+       SELECT 1 FROM pg_locks
+       WHERE locktype = 'advisory' AND pid = pg_backend_pid() AND mode = 'ExclusiveLock'
+         AND granted AND classid = 0 AND objid = 7001 AND objsubid = 1) THEN
+    RAISE EXCEPTION '마감 확정은 배타 잠금을 먼저 잡아야 함' USING ERRCODE = 'check_violation';
+  END IF;
+
   -- 조정: 실사 행과 맞는지
   IF NEW.entry_type IN ('CLOSE_ADJUST', 'SPOT_ADJUST') THEN
     SELECT * INTO cnt FROM stock_count WHERE count_id = NEW.count_id;
@@ -248,6 +257,16 @@ BEGIN
     RETURN NEW;
   END IF;
 
+  -- 끝난 마감은 central 재개 반영 시각(release_acked_at)만 적을 수 있다.
+  IF OLD.status <> 'IN_PROGRESS' AND
+     (NEW.status, NEW.started_at, NEW.started_by, NEW.close_kind, NEW.hold_acked_at, NEW.counting_started_at,
+      NEW.finished_at, NEW.finished_by, NEW.note)
+     IS DISTINCT FROM
+     (OLD.status, OLD.started_at, OLD.started_by, OLD.close_kind, OLD.hold_acked_at, OLD.counting_started_at,
+      OLD.finished_at, OLD.finished_by, OLD.note) THEN
+    RAISE EXCEPTION '끝난 마감은 바꿀 수 없음' USING ERRCODE = 'check_violation';
+  END IF;
+
   IF OLD.counting_started_at IS NULL AND NEW.counting_started_at IS NOT NULL THEN
     IF NEW.hold_acked_at IS NULL THEN
       RAISE EXCEPTION '배정 보류 반영 전' USING ERRCODE = 'check_violation';
@@ -276,6 +295,11 @@ BEGIN
     END IF;
     IF EXISTS (SELECT 1 FROM stock_count WHERE close_id = NEW.close_id AND diff_qty <> 0 AND reason IS NULL) THEN
       RAISE EXCEPTION '사유 없는 차이가 있음' USING ERRCODE = 'check_violation';
+    END IF;
+    -- 조정을 모두 넣었고, 그 뒤 재고가 바뀌지 않았는지: 확정 순간의 재고 = 센 수량
+    IF EXISTS (SELECT 1 FROM stock_count c JOIN product p ON p.product_id = c.product_id
+               WHERE c.close_id = NEW.close_id AND p.stock_qty <> c.counted_qty) THEN
+      RAISE EXCEPTION '재고가 실사 수량과 맞지 않음' USING ERRCODE = 'check_violation';
     END IF;
   END IF;
   RETURN NEW;

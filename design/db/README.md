@@ -53,6 +53,7 @@ docker compose -f design/db/compose.yaml down
 - 재고(`product.stock_qty`)는 `stock_ledger`에 기록을 넣을 때만 바뀝니다. 직접 UPDATE하면 거절합니다. 원장 기록은 고치거나 지울 수 없고 반대 기록으로 바로잡습니다.
 - 마감 중에는 반출 · 수시 조정을 받지 않고, 입고는 실사를 연 뒤부터 받지 않습니다.
 - 실사는 central 배정 보류 반영 + 진행 중 운반 건 0일 때만 열고, 확정은 모든 상품 실사 · 차이 사유가 있어야 됩니다.
+- **마감 확정은 한 트랜잭션에서 `SELECT pg_advisory_xact_lock(7001)`을 먼저 잡고** `book_qty` 기록 → 차이만 `CLOSE_ADJUST` → `status = 'CONFIRMED'` 순으로 합니다. 잠금 없이 넣은 `CLOSE_ADJUST`는 거절되고, 확정 순간 재고가 센 수량과 다르면 확정이 거절됩니다. 끝난 마감은 `release_acked_at`만 적을 수 있습니다.
 - `fn_recheck_rejects()`는 마감 뒤 재고를 다시 확인해 거절할 주문을 돌려줍니다 (취소 기록은 웹 서비스가).
 - 주문 · 운반 건 · 알림 · 마감이 바뀌면 `ifp_events` 채널로 알립니다.
 - 주문 요약 상태 계산, 운반 건 나누기, 재고 부족 알림 열기 · 닫기는 웹 서비스가 합니다.

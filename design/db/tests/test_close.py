@@ -111,8 +111,10 @@ def test_confirm_flow_adjusts_stock(conn, acc):
     open_counting(conn, cid)
     _count(conn, cid, p1, acc, 9, 10, "COUNT_DIFF")
     count_id = conn.execute("select count_id from stock_count where close_id = %s", (cid,)).fetchone()[0]
-    ledger(conn, p1, "CLOSE_ADJUST", -1, count_id=count_id)
-    _confirm(conn, cid, acc)
+    with conn.transaction():
+        conn.execute("select pg_advisory_xact_lock(7001)")
+        ledger(conn, p1, "CLOSE_ADJUST", -1, count_id=count_id)
+        _confirm(conn, cid, acc)
     assert conn.execute("select stock_qty from product").fetchone()[0] == 9
 
 
@@ -157,3 +159,77 @@ def test_recheck_ignores_started_orders(conn, acc):
     _, (t1, _t2) = make_order(conn, acc, [{cider: 4}, {cider: 1}], order_id="S", created_at=_t(1))
     set_trip_status(conn, t1, "SHIPPED")
     assert _rejects(conn) == []
+
+
+# --- 최종 검토 I-1 · I-2 · I-3 ---
+
+def _counting_close(conn, acc):
+    cid = start_close(conn, acc)
+    open_counting(conn, cid)
+    return cid
+
+
+def test_confirm_rejects_unapplied_diff(conn, acc):
+    p1 = make_product(conn, "cider", 10)
+    cid = _counting_close(conn, acc)
+    _count(conn, cid, p1, acc, 7, 10, "LOST")
+    with raises_msg("재고가 실사 수량과 맞지 않음"):
+        _confirm(conn, cid, acc)
+
+
+def test_confirm_rejects_stock_changed_after_count(conn, acc):
+    p1 = make_product(conn, "cider", 10)
+    _, (tid,) = make_order(conn, acc, [{p1: 2}])
+    cid = _counting_close(conn, acc)
+    _count(conn, cid, p1, acc, 9, 10, "LOST")
+    ledger(conn, p1, "SHIP", -2, trip_id=tid)            # 늦게 온 출고 보고
+    count_id = conn.execute("select count_id from stock_count where close_id = %s", (cid,)).fetchone()[0]
+    with raises_msg("재고가 실사 수량과 맞지 않음"):
+        with conn.transaction():
+            conn.execute("select pg_advisory_xact_lock(7001)")
+            ledger(conn, p1, "CLOSE_ADJUST", -1, count_id=count_id)
+            _confirm(conn, cid, acc)
+
+
+def test_close_adjust_requires_exclusive_lock(conn, acc):
+    p1 = make_product(conn, "cider", 10)
+    cid = _counting_close(conn, acc)
+    _count(conn, cid, p1, acc, 9, 10, "LOST")
+    count_id = conn.execute("select count_id from stock_count where close_id = %s", (cid,)).fetchone()[0]
+    with raises_msg("마감 확정은 배타 잠금을 먼저 잡아야 함"):
+        ledger(conn, p1, "CLOSE_ADJUST", -1, count_id=count_id)
+
+
+def test_confirm_txn_blocks_concurrent_ship(conn, conn_factory, acc):
+    p1 = make_product(conn, "cider", 10)
+    _, (tid,) = make_order(conn, acc, [{p1: 2}])
+    a = conn_factory(autocommit=False)
+    b = conn_factory(autocommit=False)
+    a.execute("select pg_advisory_xact_lock(7001)")       # 확정 트랜잭션 시작
+    b.execute("set lock_timeout = '500ms'")
+    with pytest.raises(psycopg.errors.LockNotAvailable):
+        ledger(b, p1, "SHIP", -2, trip_id=tid)
+    b.rollback()
+    a.rollback()
+
+
+def test_finished_close_frozen(conn, acc):
+    other = make_account(conn)
+    make_product(conn, "cider", 5)
+    cid = start_close(conn, acc)
+    confirm_close(conn, cid, acc)
+    with raises_msg("끝난 마감은 바꿀 수 없음"):
+        conn.execute("update stock_close set finished_by = %s, finished_at = now() where close_id = %s", (other, cid))
+    with raises_msg("끝난 마감은 바꿀 수 없음"):
+        conn.execute("update stock_close set status = 'IN_PROGRESS', finished_at = null where close_id = %s", (cid,))
+    conn.execute("update stock_close set release_acked_at = now() where close_id = %s", (cid,))
+
+
+def test_cancelled_close_cannot_be_confirmed(conn, acc):
+    make_product(conn, "cider", 5)
+    cid = _counting_close(conn, acc)
+    conn.execute("insert into stock_count (close_id, product_id, account_id, counted_qty, book_qty) "
+                 "select %s, product_id, %s, stock_qty, stock_qty from product", (cid, acc))
+    conn.execute("update stock_close set status = 'CANCELLED', finished_at = now() where close_id = %s", (cid,))
+    with raises_msg("끝난 마감은 바꿀 수 없음"):
+        _confirm(conn, cid, acc)
