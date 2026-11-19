@@ -172,6 +172,17 @@ def reinstate_response(response, accepted: bool, reason: str = ""):
     return response
 
 
+# 강제 출고 요청과 응답. 인터페이스 타입은 주문 담당이 정의하므로 필드만 읽고 쓴다
+def force_ship_args(request) -> str:
+    return request.order_id
+
+
+def force_ship_response(response, accepted: bool, reason: str = ""):
+    response.accepted = bool(accepted)
+    response.reason = "" if accepted else str(reason)
+    return response
+
+
 # ---- 주문 보드 메시지 변환 ----
 def order_board_mode(msg: OrderBoard) -> str:
     return msg.run_mode
@@ -273,6 +284,7 @@ def report_request(cmd) -> ReportOrder.Request:
         order_id=cmd.order_id,
         robot_id=cmd.robot,
         status=cmd.status,
+        hold_reason=cmd.hold_reason,
         placed=to_order_items(cmd.placed),
         missing=to_order_items(cmd.missing),
         detail=cmd.detail,

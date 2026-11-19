@@ -7,6 +7,8 @@ FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르
 """
 from __future__ import annotations
 
+from fleet_core.common.commands import FORCE_NOT_IMPLEMENTED
+
 # ---- 다른 모듈이 가져다 쓰는 상태 이름 ----
 FILLING = "FILLING"
 SWAPPING = "SWAPPING"
@@ -58,9 +60,19 @@ class OrderOrchestrator:
     def on_arm_report(self, report) -> None:
         """팔 작업 층(ArmJobs)의 보고가 올 때 불린다.
 
-        report: ArmFillResult, ArmSwapResult, ArmDeclined, ArmLost, ArmLate 가운데 하나.
+        report: ArmFillResult, ArmSwapResult, ArmDeclined, ArmLost, ArmLate, ArmFault 가운데 하나.
         낼 수 있는 출력: ArmFailedCmd, ArmResetCmd, ReportOrderCmd, ReleaseCmd, EventOut.
         """
+
+    # ---- 운영자 조작 ----
+    def on_force_ship(self, order_id) -> tuple[bool, str]:
+        """운영자가 /fleet/force_ship으로 보류된 주문의 강제 출고를 부를 때 불린다.
+
+        order_id: 주문 id(문자열).
+        돌려주는 값: (받아들였는지, 거절 사유). 거절 사유는 commands의 FORCE_* 가운데 하나.
+        낼 수 있는 출력: ReportOrderCmd, DispatchCmd, ArmResetCmd, ReleaseCmd, EventOut.
+        """
+        return False, FORCE_NOT_IMPLEMENTED
 
     # ---- 고장 입력 ----
     def on_robot_removed(self, robot) -> None:
