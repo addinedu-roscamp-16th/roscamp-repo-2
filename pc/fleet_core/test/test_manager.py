@@ -5,7 +5,9 @@ D2 배치와 구역 교통 층(ZoneTraffic)에서 돈다. 로봇 흉내는 drive
 """
 from core_helpers import cmds
 from fleet_core.common.commands import (
+    FILL,
     ArmFailedCmd,
+    ArmFault,
     ArmFillCmd,
     CancelDispatchCmd,
     DispatchCmd,
@@ -146,8 +148,10 @@ def test_goal_ids_of_moves_and_arm_jobs_share_one_sequence():
 
 
 
-def test_a_robot_faulted_by_the_arm_stops_being_available_to_traffic():
+def test_an_arm_past_its_retries_is_an_arm_fault_and_the_robot_stays_available():
     core, now = make({"r1": "P-1"})
+    reports = []
+    core.orchestrator.on_arm_report = reports.append
     call(core, 1000)
     drive(core, "r1", lambda: core.robot_view("r1")["phase"] == "FILLING")
     goal = cmds(ask_fill(core), "FillCmd")[0].goal_id
@@ -159,8 +163,21 @@ def test_a_robot_faulted_by_the_arm_stops_being_available_to_traffic():
         fills = cmds(ask_fill(core), "FillCmd")
         if fills:
             goal = fills[0].goal_id
-    assert core.robot_view("r1")["state"] == "ERROR"
-    assert not core.traffic.available("r1")
+    faults = [r for r in reports if isinstance(r, ArmFault)]
+    assert [(f.robot, f.kind, f.reason) for f in faults] == [("r1", FILL, "workcell: GRIPPER")]
+    assert core.robot_view("r1")["state"] != "ERROR"
+    assert core.traffic.available("r1")
+
+
+def test_force_ship_goes_to_the_orders_side_and_returns_its_answer():
+    core, _ = make({"r1": "P-1"})
+    assert core.force_ship("O-001") == (False, "NOT_IMPLEMENTED")
+    refused = [e for e in cmds(core.tick(), "EventOut") if e.code == "INPUT_REJECTED"]
+    assert len(refused) == 1 and "O-001" in refused[0].detail
+    asked = []
+    core.orchestrator.on_force_ship = lambda order_id: asked.append(order_id) or (True, "")
+    assert core.force_ship("O-002") == (True, "") and asked == ["O-002"]
+    assert not [e for e in cmds(core.tick(), "EventOut") if e.code == "INPUT_REJECTED"]
 
 
 

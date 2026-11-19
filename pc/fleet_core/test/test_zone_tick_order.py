@@ -12,6 +12,7 @@ import pytest
 import zone_harness
 from fleet_core.common.commands import (
     FILL,
+    ArmFault,
     ArmFillCmd,
     ArmLost,
     RobotFaultCmd,
@@ -148,24 +149,25 @@ def _items(world: Harness, kind) -> list:
     return [entry for entry in world.manager.seen if isinstance(entry[2], kind)]
 
 
-def test_in_production_an_arm_timeout_isolates_the_robot_inside_the_same_tick():
+def test_in_production_an_arm_timeout_is_an_arm_fault_inside_the_same_tick():
     world = _filling_world()
     limit = world.params.fill_timeout_s + world.params.arm_cancel_wait_s + 120.0
     # 하네스는 팔에 답하지 않으므로 채우기는 끝내 시간이 다 된다
-    assert world.run_until(lambda: _seen(world, RobotIsolated), limit), "\n".join(world.log[-20:])
+    assert world.run_until(lambda: _seen(world, ArmFault), limit), "\n".join(world.log[-20:])
     [(_, asked_n, asked)] = _items(world, ArmFillCmd)
     [(lost_phase, lost_n, lost)] = _items(world, ArmLost)
-    [(fault_phase, fault_n, fault)] = _items(world, RobotFaultCmd)
-    [(isolated_phase, isolated_n, isolated)] = _items(world, RobotIsolated)
+    [(fault_phase, fault_n, fault)] = _items(world, ArmFault)
     robot = asked.robot
     # 앞서 이 로봇에 채우기 팔 작업이 있었고, 그 작업이 답 없이 끝났다
     assert asked_n < fault_n
     assert lost.robot == robot and lost.kind == FILL
-    assert fault.robot == robot and isolated.robot == robot
-    assert fault.reason == f"{lost.server} goal {lost.goal_id} never reported"
+    assert fault == ArmFault(robot, FILL, lost.server,
+                             f"{lost.server} goal {lost.goal_id} never reported")
     assert any(e.code == "ARM_NO_RESULT" and e.robot == robot for e in world.events)
-    # arm.check_timeouts의 고장이 같은 틱의 _pump로 교통에 들어가 그 틱 안에 격리된다
-    assert lost_phase == fault_phase == isolated_phase == "tick"
-    assert lost_n == fault_n == isolated_n
+    # arm.check_timeouts의 보고가 같은 틱의 _pump로 주문 쪽에 간다
+    assert lost_phase == fault_phase == "tick"
+    assert lost_n == fault_n
     assert fault_n - asked_n > 1
-    assert not world.traffic.available(robot)
+    # 팔 고장은 Pode 고장이 아니다
+    assert not _seen(world, RobotFaultCmd) and not _seen(world, RobotIsolated)
+    assert world.traffic.available(robot)

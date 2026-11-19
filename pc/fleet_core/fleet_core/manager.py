@@ -199,6 +199,15 @@ class FleetManager(ManagerRoute, ManagerViews, ManagerRecord):
         self._pump()
         return True
 
+    # ---- 운영자 조작: 팔 고장으로 보류된 주문의 강제 출고 ----
+    def force_ship(self, order_id) -> tuple[bool, str]:
+        self._input("force_ship", order_id)
+        accepted, reason = self.orchestrator.on_force_ship(text(order_id))
+        if not accepted:
+            self._reject(f"force_ship refused: {text(order_id)} {reason}")
+        self._pump()
+        return accepted, reason
+
     # ---- 주기 처리: 코어를 순서대로 진행하고 나온 출력 반환 ----
     def tick(self) -> list:
         self._input("tick")

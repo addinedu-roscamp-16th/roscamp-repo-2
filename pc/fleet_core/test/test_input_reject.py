@@ -501,6 +501,17 @@ def test_a_board_of_the_wrong_shape_plays_back_the_same(tmp_path, orders):
     assert result.compared and result.same, result
 
 
+def test_a_force_ship_input_is_recorded_and_plays_back(tmp_path):
+    core, now, lines = _recorded()
+    assert core.force_ship("O-001") == (False, "NOT_IMPLEMENTED")
+    assert core.force_ship(None) == (False, "NOT_IMPLEMENTED")
+    now[0] += 0.1
+    assert len(rejected(core.tick())) == 2
+    assert any('"in": "force_ship"' in line for line in lines)
+    result = _play(tmp_path, lines)
+    assert result.compared and result.same, result
+
+
 def test_a_robot_id_that_is_not_a_string_plays_back_the_same(tmp_path):
     core, now, lines = _recorded()
     x, y = core.site.node_pose("P-1")

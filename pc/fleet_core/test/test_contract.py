@@ -70,3 +70,32 @@ def test_entry_with_undefined_qos_profile_is_rejected(tmp_path):
     )
     with pytest.raises(ContractError):
         load_contract(bad)
+
+
+# ---- 계약 0.6: ReportOrder 보류 사유와 CANCELED ----
+REPORT_ORDER_0_6 = """string STATUS_SHIPPED="SHIPPED"
+string STATUS_PARTIAL="PARTIAL"
+string STATUS_HELD="HELD"
+string STATUS_CANCELED="CANCELED"
+string HOLD_ROBOT_FAULT="ROBOT_FAULT"
+string HOLD_ARM_FAULT="ARM_FAULT"
+string order_id
+string robot_id
+string status
+string hold_reason
+OrderItem[] placed
+OrderItem[] missing
+string detail
+---
+bool accepted
+"""
+
+
+def test_report_order_matches_the_contract_0_6_text():
+    srv = CONTRACT.parent / "srv" / "ReportOrder.srv"
+    assert srv.read_text(encoding="utf-8") == REPORT_ORDER_0_6
+
+
+def test_the_contract_is_version_0_6():
+    import yaml
+    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.6

@@ -47,6 +47,26 @@ from fleet_manager.goal_tracker import GoalTracker, ReportOutbox
 from fleet_manager.order_goals import FeedbackFilter, apply_overrides
 
 
+# ---- 강제 출고 인터페이스: 주문 담당이 정의한다 ----
+# 아래 셋이 들어오면 서버가 열린다. 기대하는 모양(의사코드):
+#   srv/ForceShip.srv
+#     요청: string order_id
+#     응답: bool accepted, string reason
+#     거절 사유 상수: NOT_HELD, ROBOT_FAULT, UNKNOWN_ORDER, NOT_IMPLEMENTED
+#   contract.yaml services: {key: force_ship, name: "/fleet/force_ship",
+#                            type: fleet_interfaces/srv/ForceShip}
+#   CMakeLists.txt: "srv/ForceShip.srv"
+def force_ship_type(contract):
+    """계약 키와 빌드된 타입이 둘 다 있으면 ForceShip 타입, 아니면 None."""
+    if "force_ship" not in contract.entries:
+        return None
+    try:
+        from fleet_interfaces.srv import ForceShip
+    except ImportError:
+        return None
+    return ForceShip
+
+
 # ---- FleetManagerNode 생성과 인터페이스 설정 ----
 class FleetManagerNode(Node):
     def __init__(self, record=None):
@@ -143,6 +163,9 @@ class FleetManagerNode(Node):
         self._report_client = self.create_client(ReportOrder, name("report_order"))
         self.create_service(ConfirmClear, name("confirm_clear"), self._on_confirm_clear)
         self.create_service(Reinstate, name("reinstate"), self._on_reinstate)
+        force_ship = force_ship_type(self.contract)
+        if force_ship is not None:
+            self.create_service(force_ship, name("force_ship"), self._on_force_ship)
 
     # ---- 토픽과 서비스 수신 콜백 ----
     def _on_robot_state(self, robot, msg: RobotState) -> None:
@@ -168,6 +191,10 @@ class FleetManagerNode(Node):
     def _on_reinstate(self, request, response):
         accepted = self.core.reinstate(*adapters.reinstate_args(request))
         return adapters.reinstate_response(response, accepted, self.core.last_reinstate_reason)
+
+    def _on_force_ship(self, request, response):
+        accepted, reason = self.core.force_ship(adapters.force_ship_args(request))
+        return adapters.force_ship_response(response, accepted, reason)
 
     # ---- 주기 틱: 명령 내보내기, 취소 재시도, 주문 보고, 상태 발행 ----
     def _on_tick(self) -> None:
