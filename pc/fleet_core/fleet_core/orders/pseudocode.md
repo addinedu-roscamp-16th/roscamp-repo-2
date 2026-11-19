@@ -5,7 +5,14 @@
 주문 코어는 입력 함수로만 듣고 `take_output()`으로만 말한다. 명령은 모두 `common/commands.py`에 있다.
 
 동작 기준은 설계 v2.4(주문 보류, 2026-11-19)다. 보고 상태 가운데 끝은 SHIPPED, PARTIAL, CANCELED 셋이다.
-HELD는 끝이 아니다. 보류된 주문은 다시 배정하지 않고, 운영자의 강제 출고나 치움을 기다린다.
+HELD는 끝이 아니다. 보류된 주문은 주문판에 남아 있는 동안 다시 배정하지 않는다.
+- `ARM_FAULT` 보류: 주문이 로봇에 묶인 채로 운영자의 강제 출고나 치움을 기다린다.
+- `ROBOT_FAULT` 보류: 주문은 로봇에서 이미 떨어졌고 강제 출고도 거절한다. 주문판에서 그 id가 빠질 때까지 보류로 남는다.
+- 주문판에서 빠졌다가 같은 id로 다시 들어오면 보류 기록이 지워진 뒤라 새 주문처럼 배정될 수 있다.
+
+이 문서는 v2.4의 목표 동작이다. 지금 팀 main의 주문 코어는 뼈대다.
+- `on_force_ship`은 늘 `(False, NOT_IMPLEMENTED)`를 돌려주고, manager는 그 답을 그대로 넘긴다.
+- `/fleet/force_ship` 서버는 `ForceShip.srv`와 contract의 `force_ship` 항목이 둘 다 있어야 열린다. 지금은 둘 다 없다(주문 담당 몫).
 
 ## 1. 바꾸면 안 되는 접점
 
@@ -54,8 +61,9 @@ HELD는 끝이 아니다. 보류된 주문은 다시 배정하지 않고, 운영
    - `on_order_board(run_mode, orders)`: 주문판을 통째로 바꾼다.
      - 최종 보고 집합, 보류 목록, 용량 초과 집합은 새 주문판에 있는 id만 남긴다.
      - held 로봇의 주문이 주문판에서 빠지면 로봇의 주문만 비운다. 로봇은 계속 붙잡혀 있고 운영자의 치움으로 풀린다.
-     - 품목 수 합이 `basket_capacity`(4)보다 큰 주문은 배정하지 않는다. 주문마다 한 번
-       `EventOut(WARN, ORDER_OVER_CAPACITY, "O-xxx: N items exceed the basket capacity of 4")`를 내고, ReportOrder는 보내지 않는다.
+     - 품목 수 합이 `basket_capacity`(4)보다 큰 주문은 배정하지 않는다. ReportOrder는 보내지 않는다.
+       처음 넘을 때 `EventOut(WARN, ORDER_OVER_CAPACITY, "O-xxx: N items exceed the basket capacity of 4")`를 한 번 낸다.
+       그 id가 주문판에서 빠지거나 용량 안으로 줄면 기록을 지운다. 그 뒤 다시 넘으면 다시 낸다.
    - 대기 주문 = 주문판 순서대로, 아직 묶이지 않았고, 최종 보고도 보류도 아니고, 용량 안인 주문. 목록 순서가 곧 우선순위다.
    - 열린 호출 맞추기: 열린 호출 수가 대기 주문 수보다 적으면 로봇 이름 없는 `DispatchCmd(id, WORK)`를 더 내고,
      많으면 가장 나중에 연 것부터 `CancelDispatchCmd(id)`를 낸다.
@@ -65,6 +73,7 @@ HELD는 끝이 아니다. 보류된 주문은 다시 배정하지 않고, 운영
        stage를 `FILLING`으로 두고 `EventOut(INFO, ORDER_BOUND, 주문 id, robot)`을 낸다.
      - 성공이든 실패든 열린 호출을 다시 맞춘다. 실패한 호출은 새 호출로 다시 열린다.
    - 로봇 하나에는 주문 하나만 묶인다. 주문판에서 빠진 주문도 이미 묶였으면 끝까지 진행한다.
+     예외: held 로봇의 주문은 주문판에서 빠지면 로봇에서 떼어 낸다(위 `on_order_board`).
 3. WORK로 이동
    - 로봇 고르기, 이동, 도킹은 교통 층이 한다. 주문 코어는 결과만 기다린다.
    - `on_dispatch_feedback`의 phase가 `NO_ROBOT`이면 `EventOut(WARN, NO_ROBOT_AVAILABLE, "[대기 주문 id] wait and no robot can take them")`.
@@ -123,17 +132,23 @@ HELD는 끝이 아니다. 보류된 주문은 다시 배정하지 않고, 운영
   4. held, stage `""`, outbound_goal과 OUTBOUND 실패 기록을 지우고 열린 호출을 다시 맞춘다. basket은 그대로 둔다.
 - 격리 `on_robot_isolated(robot, reason)` (교통 층이 주행 고장이나 무응답으로 격리하면 온다. 팔 고장으로는 오지 않는다):
   1. isolated에 이유를 적는다.
-  2. 결과를 잃은 팔 작업(ARM_NO_RESULT)이 이 로봇의 지금 묶음에 남아 있으면 그 늦은 결과나 치움을 기다린다.
+  2. asked가 비어 있고, 결과를 잃은 팔 작업(ARM_NO_RESULT)이 남아 있으면 그 늦은 결과나 치움을 기다린다.
+     남은 작업으로 치는 것: 이 로봇의 작업이고, 치움으로 버린 것이 아니고, 주문 id와 bound가 지금도 같은 것.
   3. 교환을 묻는 중이고 주문이 있으면 `ArmStopCmd(robot)`만 내고 교환 답을 기다린다.
   4. 채우기를 묻는 중이면 채우기 결과를 기다린다.
-  5. 그 밖에 asked가 있으면 `ArmDropCmd(robot, True, 주문 id, bound)`를 내고 바로 "격리 뒤 판단"을 한다.
-- 격리 뒤 판단(기다릴 팔 결과가 더 없을 때):
+  5. 그 밖에 asked가 있으면 `ArmDropCmd(robot, True, 주문 id, bound)`를 낸다.
+  6. 3, 4번으로 기다리지 않으면 바로 "격리 뒤 판단"을 한다(asked가 없고 남은 작업도 없을 때 포함).
+- 격리 뒤 판단:
+  - 들어오는 곳과 조건
+    - 격리 중에 4단계 채우기 결과나 6단계 교환 결과가 오면 곧바로 한다.
+    - ArmFault나 늦은 결과 뒤에는 asked가 없고 위 2번의 남은 작업도 없을 때만 한다. 남아 있으면 계속 기다린다.
+      예: 답이 없어 ArmLost 다음 ArmFault가 오면, 그 늦은 결과나 치움을 기다린다.
   - 주문이 있고 담은 것이 있으면 HELD(`ROBOT_FAULT`, "robot isolated: 이유") 보고를 하고 로봇의 주문을 비운다. 되돌리지 않는다.
   - 주문이 있고 담은 것이 없으면 ORDER_REQUEUED를 내고 놓는다(예전과 같음).
   - 그다음 held를 지우고 basket `NONE`, stage `""`, OUTBOUND 기록을 지우고 열린 호출을 다시 맞춘다.
 - 팔 고장 ArmFault(robot, kind, server, reason) (ArmJobs가 재시도 한도를 넘거나 답이 없을 때 보낸다):
   - 교통 층에는 알리지 않는다. 그래서 Pode는 격리되지 않고 사용 가능 상태로 작업대 구역을 잡고 있다.
-  - asked를 비운다. 이미 격리된 로봇이면 "격리 뒤 판단"으로 간다.
+  - asked를 비운다. 이미 격리된 로봇이면 "격리 뒤 판단"의 조건을 따진다(남은 작업이 있으면 기다린다).
   - 아니면 held = `ARM_FAULT`. 주문이 있으면 HELD(`ARM_FAULT`, reason) 보고를 한다. 주문은 로봇에 묶인 채로 둔다.
   - 출고 보고 뒤 빈 바구니를 넣다가 고장 나면 주문이 없으므로 Pode만 붙잡는다.
 - 강제 출고 `on_force_ship(order_id) -> (accepted, reason)` (운영자가 `/fleet/force_ship`을 부르면 manager를 거쳐 온다):
@@ -153,7 +168,7 @@ HELD는 끝이 아니다. 보류된 주문은 다시 배정하지 않고, 운영
      치움에서 온 작업이고 팔이 아무것도 안 했으면 조용히 끝낸다.
   3. 아니면 `EventOut(WARN, ARM_LATE_RESULT, ...)`. 주문 id와 bound가 지금도 같으면
      채우기는 placed에 더하고 missing을 다시 계산한다. 교환은 took_full이고 basket이 `FULL`일 때 basket을 `EMPTY`(빈 바구니도 놓음) 또는 `NONE`으로 두고 7단계 보고를 한다.
-     격리된 로봇이면 그 뒤 "격리 뒤 판단"을 한다.
+     격리된 로봇이면 그 뒤 "격리 뒤 판단"의 조건을 따진다(asked가 없고 남은 작업도 없을 때만 판단).
   4. 늦은 결과로는 `ReleaseCmd`를 내지 않는다. 주문이 이미 다른 로봇으로 돌아갔으면 두 번 채우거나 내보낼 수 있다는 경고만 낸다.
 
 ## 6. 구현 확인
