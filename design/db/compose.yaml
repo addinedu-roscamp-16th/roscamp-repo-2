@@ -1,0 +1,10 @@
+# 주문 DB 시험용 PostgreSQL 16. 데이터는 tmpfs라 내리면 사라진다.
+services:
+  pg:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: ifp_test
+    ports:
+      - "55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
