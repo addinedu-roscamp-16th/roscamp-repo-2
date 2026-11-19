@@ -186,5 +186,5 @@ Table app_setting {
   value integer [not null, note: 'CHECK > 0']
   updated_at timestamptz [not null]
   updated_by bigint [ref: > account.account_id]
-  Note: '운영 설정 (D-6, R-15). basket_capacity 처음 값 4'
+  Note: '운영 설정 (D-6, R-15). 처음 값: basket_capacity 4, max_order_items 8'
 }

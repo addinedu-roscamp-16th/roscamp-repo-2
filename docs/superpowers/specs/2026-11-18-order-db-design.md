@@ -1,7 +1,7 @@
 # 주문 관리 DB 설계 (ERD)
 
 - 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영)
-- 상태: 검토 중
+- 상태: 승인 (2026-11-19) · 구현 계획 `docs/superpowers/plans/2026-11-19-order-db.md` · 구현 `design/db/`
 - 산출물: `design/db/order_db.dbml` (원본), 여기서 만드는 ERD PNG(제출용)와 PostgreSQL DDL
 - 관련 문서: `docs/fleet-v1_HELD_검토.md`(5장 논의 결과), `2026-11-19-close-db-discussion.md`(마감 토의 기록), `design/다이어그램_수정_요청.md`(R-15 ~ R-20)
 
@@ -390,7 +390,7 @@ action 값:
 | updated_at | timestamptz | NOT NULL |
 | updated_by | bigint | FK → account |
 
-- `basket_capacity`의 처음 값은 4 (fleet-v1 `basket_capacity`와 같게).
+- `basket_capacity`의 처음 값은 4 (fleet-v1 `basket_capacity`와 같게). `max_order_items`의 처음 값은 8 (바구니 2개, 11-19 사용자 결정).
 - 바꾸면 `admin_action` `SETTING_CHANGE`에 이전 · 새 값을 남긴다. 마감 중에도 바꿀 수 있다 (재고와 관계없음).
 - 관제(fleet-v1)도 `basket_capacity`를 갖고 있으므로 두 값을 맞추는 방법은 인터페이스 작업으로 넘긴다 (6절).
 

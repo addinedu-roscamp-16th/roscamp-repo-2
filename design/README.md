@@ -13,6 +13,7 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 | 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.1 | 2026-11-17 | 비상정지_순서도_r1.drawio |
 | 관리자 페이지 스토리보드 | [diagrams/관리자_스토리보드.drawio](diagrams/관리자_스토리보드.drawio) | v1.3 | 2026-11-19 | - |
 | 사용자 주문 페이지 스토리보드 | [diagrams/사용자_스토리보드.drawio](diagrams/사용자_스토리보드.drawio) | v1.0 | 2026-11-19 | - |
+| 주문 DB (ERD) | [db/order_db.dbml](db/order_db.dbml) | v1.0 | 2026-11-19 | - |
 | 다이어그램 수정 요청 | [다이어그램_수정_요청.md](다이어그램_수정_요청.md) | - | 2026-11-19 | - |
 
 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 적습니다.
@@ -27,6 +28,7 @@ design/
 ├─ architecture/    HW · SW 아키텍처
 ├─ diagrams/        상태 · 순서도 · 시퀀스, 비상정지 순서도, 관리자 · 사용자 스토리보드
 ├─ storyboard_tools/ 스토리보드 생성 · 검사 스크립트 (README 참고)
+├─ db/             주문 DB 원본(DBML) · DDL · 시험 (README 참고)
 └─ exports/         제출용 PNG · zip (제출할 때만 갱신)
 ```
 

@@ -307,7 +307,7 @@ COMMENT ON COLUMN "stock_count"."account_id" IS '마지막으로 입력한 관�
 
 COMMENT ON COLUMN "stock_count"."note" IS '사유 OTHER면 필수';
 
-COMMENT ON TABLE "app_setting" IS '운영 설정 (D-6, R-15). basket_capacity 처음 값 4';
+COMMENT ON TABLE "app_setting" IS '운영 설정 (D-6, R-15). 처음 값: basket_capacity 4, max_order_items 8';
 
 COMMENT ON COLUMN "app_setting"."key" IS 'CHECK IN (''max_order_items'',''basket_capacity'')';
 
