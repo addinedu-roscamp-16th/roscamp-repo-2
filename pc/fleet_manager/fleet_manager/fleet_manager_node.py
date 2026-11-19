@@ -5,6 +5,7 @@ import argparse
 import time
 from functools import partial
 
+import fleet_interfaces.srv
 import rclpy
 from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.commands import (
@@ -60,11 +61,8 @@ def force_ship_type(contract):
     """계약 키와 빌드된 타입이 둘 다 있으면 ForceShip 타입, 아니면 None."""
     if "force_ship" not in contract.entries:
         return None
-    try:
-        from fleet_interfaces.srv import ForceShip
-    except ImportError:
-        return None
-    return ForceShip
+    # 생성된 srv 모듈은 모든 타입을 미리 불러 둔다. 없으면 아직 정의되지 않은 것
+    return getattr(fleet_interfaces.srv, "ForceShip", None)
 
 
 # ---- FleetManagerNode 생성과 인터페이스 설정 ----

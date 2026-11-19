@@ -50,9 +50,68 @@ def test_the_force_ship_server_waits_for_the_contract_key():
     assert node.force_ship_type(SimpleNamespace(entries={})) is None
 
 
-def test_with_the_contract_key_the_server_uses_the_interface_once_it_is_built():
-    try:
-        from fleet_interfaces.srv import ForceShip as built
-    except ImportError:
-        built = None
+def test_with_the_contract_key_but_no_built_type_the_server_stays_closed(monkeypatch):
+    import fleet_interfaces.srv as srv
+    monkeypatch.delattr(srv, "ForceShip", raising=False)
+    assert node.force_ship_type(SimpleNamespace(entries={"force_ship": object()})) is None
+
+
+def test_with_the_contract_key_and_the_built_type_the_server_uses_it(monkeypatch):
+    import fleet_interfaces.srv as srv
+    built = object()
+    monkeypatch.setattr(srv, "ForceShip", built, raising=False)
     assert node.force_ship_type(SimpleNamespace(entries={"force_ship": object()})) is built
+    assert node.force_ship_type(SimpleNamespace(entries={})) is None
+
+
+# 노드 없이 인터페이스 설정만 돌려 어떤 서비스를 여는지 본다
+class _Interfaces:
+    def __init__(self, entries):
+        self.contract = SimpleNamespace(name=lambda key, **_: f"/fleet/{key}", entries=entries)
+        self.site = SimpleNamespace(stations={})
+        self.services = []
+        self._on_order_board = self._on_confirm_clear = self._on_reinstate = object()
+        self._on_force_ship = object()
+
+    def _qos(self, key):
+        return None
+
+    def create_publisher(self, *args):
+        return None
+
+    def create_subscription(self, *args):
+        return None
+
+    def create_client(self, *args):
+        return None
+
+    def create_service(self, kind, name, callback):
+        self.services.append((kind, name, callback))
+
+
+def test_without_the_interface_only_the_existing_services_open(monkeypatch):
+    import fleet_interfaces.srv as srv
+    monkeypatch.delattr(srv, "ForceShip", raising=False)
+    fake = _Interfaces({"force_ship": object()})
+    node.FleetManagerNode._create_interfaces(fake, [])
+    assert [name for _, name, _ in fake.services] == ["/fleet/confirm_clear", "/fleet/reinstate"]
+
+
+def test_with_the_interface_force_ship_opens_on_its_callback(monkeypatch):
+    import fleet_interfaces.srv as srv
+    built = object()
+    monkeypatch.setattr(srv, "ForceShip", built, raising=False)
+    fake = _Interfaces({"force_ship": object()})
+    node.FleetManagerNode._create_interfaces(fake, [])
+    assert fake.services[-1] == (built, "/fleet/force_ship", fake._on_force_ship)
+
+
+def test_the_force_ship_callback_asks_the_core_and_fills_the_response():
+    asked = []
+    core = SimpleNamespace(force_ship=lambda order_id: asked.append(order_id)
+                           or (False, "NOT_IMPLEMENTED"))
+    response = node.FleetManagerNode._on_force_ship(
+        SimpleNamespace(core=core), SimpleNamespace(order_id="O-007"),
+        SimpleNamespace(accepted=None, reason=None))
+    assert asked == ["O-007"]
+    assert (response.accepted, response.reason) == (False, "NOT_IMPLEMENTED")

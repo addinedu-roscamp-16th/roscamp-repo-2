@@ -164,7 +164,7 @@ def test_in_production_an_arm_timeout_is_an_arm_fault_inside_the_same_tick():
     assert fault == ArmFault(robot, FILL, lost.server,
                              f"{lost.server} goal {lost.goal_id} never reported")
     assert any(e.code == "ARM_NO_RESULT" and e.robot == robot for e in world.events)
-    # arm.check_timeouts의 보고가 같은 틱의 _pump로 주문 쪽에 간다
+    # arm.check_timeouts의 ArmFault가 ArmLost와 같은 틱에 나온다(주문 쪽 전달은 test_manager가 본다)
     assert lost_phase == fault_phase == "tick"
     assert lost_n == fault_n
     assert fault_n - asked_n > 1
