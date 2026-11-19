@@ -1,12 +1,16 @@
 # 팀이 담당자를 정하면 <...>를 GitHub 계정으로 바꾼다.
-# *                          <central>
-# /pc/central/               <central>
-# /pc/fms_core/              <fms-core>
-# /pc/fms_pinky/             <fleet>
-# /sim/                      <fleet>
-# /pinky/pinky_fsm/          <pinky-control>
-# /pinky/pinky_dock/         <pinky-control>
-# /pinky/pinky_nav_config/   <slam-nav2>
-# /arm/arm_control/          <arm-control>   (/workcell/fill_basket, /arm3/swap_basket 서버)
-# /arm/arm_vision/           <arm-vision>
-# /interfaces/               <fleet> <pinky-control> <central>
+# *                                   <central>
+# /pc/central/                        <central>
+# /pc/fleet_core/fleet_core/orders/   <fms-core>   (주문 처리)
+# /pc/fleet_core/                     <fleet>
+# /pc/fleet_manager/                  <fleet>
+# /sim/                               <fleet>
+# /pode/pode_fsm/                     <pinky-control>
+# /pode/pode_dock/                    <pinky-control>
+# /pode/pode_avoidance/               <pinky-control>
+# /pode/pode_peer_obstacles/          <fleet>
+# /pode/pode_nav_config/              <slam-nav2>
+# /pode/pode_scan_filter/             <slam-nav2>
+# /arm/arm_control/                   <arm-control>   (/workcell/fill_basket, /arm3/swap_basket 서버)
+# /arm/arm_vision/                    <arm-vision>
+# /interfaces/                        <fleet> <pinky-control> <central>

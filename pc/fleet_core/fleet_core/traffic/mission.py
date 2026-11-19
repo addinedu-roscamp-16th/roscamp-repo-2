@@ -1,0 +1,42 @@
+# ---- 로봇 단계, 상태, 목표 종류 상수 ----
+from __future__ import annotations
+
+from fleet_core.fleet_map.model import FILL as FILL
+from fleet_core.fleet_map.model import SWAP as SWAP
+
+# ---- 관제 단계와 고장 상태 ----
+IDLE = "IDLE"
+PARKED = "PARKED"
+TO_PARK = "TO_PARK"
+TO_WORK = "TO_WORK"
+TO_OUTBOUND = "TO_OUTBOUND"
+DOCKING = "DOCKING"
+AT_STATION = "AT_STATION"
+ERROR = "ERROR"
+OUT_OF_SERVICE = "OUT_OF_SERVICE"
+COMM_LOST = "COMM_LOST"
+RECOVERING = "RECOVERING"
+PLACEMENT_CONFLICT = "PLACEMENT_CONFLICT"
+NO_FAULT = "NONE"
+# ---- 로봇이 보고하는 주행 상태와 묶음 ----
+SELF_RECOVERING = "RECOVERING"
+ON_A_GOAL = ("MOVING", "DOCKING", SELF_RECOVERING)
+BLOCKED = "BLOCKED"
+LOCALIZING = "LOCALIZING"
+NOT_PLACEABLE = ON_A_GOAL + (BLOCKED, LOCALIZING)
+# ---- 통신 끊김과 목표 실패 사유 ----
+HEARTBEAT_LOST = "HEARTBEAT_LOST"
+_COMM_REASON = {COMM_LOST: "NO_STATE", RECOVERING: "CHECKING_POSE"}
+STALLED = "STALLED"
+NOT_AT_TARGET = "NOT_AT_TARGET"
+PATH_NOT_CONNECTED = "PATH_NOT_CONNECTED"
+NAV_ABORTED = "NAV_ABORTED"
+
+# ---- 운행 모드 ----
+RUN = "RUN"
+STOP = "STOP"
+
+# ---- 목표 종류 ----
+MOVE = "move"
+DOCK = "dock"
+RETREAT = "retreat"
