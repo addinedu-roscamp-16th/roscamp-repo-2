@@ -37,7 +37,8 @@ ROW_SQL = {
     "stock_count.reason": (
         "insert into stock_count (product_id, account_id, counted_qty, book_qty, reason) "
         "values (%(pid)s, %(acc)s, 1, 2, %(v)s)", None),
-    "app_setting.key": ("insert into app_setting (key, value) values (%(v)s, 3)", None),
+    "app_setting.key": ("insert into app_setting (key, value) values (%(v)s, 3) "
+                        "on conflict (key) do update set value = excluded.value", None),
 }
 
 GOOD = {

@@ -340,3 +340,29 @@ BEGIN
 END $$;
 
 -- == Task 6: NOTIFY · 처음 설정 값 ==
+
+-- 화면 전달 (OMS-05): 주문 · 운반 건 · 알림은 새로 생기거나 상태가 바뀔 때, 마감은 바뀔 때마다 알린다.
+-- 채널 ifp_events, 내용 {"t": 테이블, "id": 키, "status": 새 상태}. 트리거 인자 = 키 칼럼 이름.
+CREATE FUNCTION fn_notify_change() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'UPDATE' AND TG_TABLE_NAME <> 'stock_close' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NULL;
+  END IF;
+  PERFORM pg_notify('ifp_events', json_build_object(
+    't', TG_TABLE_NAME,
+    'id', to_jsonb(NEW) ->> TG_ARGV[0],
+    'status', NEW.status)::text);
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER tg_orders_notify AFTER INSERT OR UPDATE ON orders
+  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('order_id');
+CREATE TRIGGER tg_trip_notify AFTER INSERT OR UPDATE ON trip
+  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('trip_id');
+CREATE TRIGGER tg_alert_notify AFTER INSERT OR UPDATE ON alert
+  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('alert_id');
+CREATE TRIGGER tg_stock_close_notify AFTER INSERT OR UPDATE ON stock_close
+  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('close_id');
+
+-- 운영 설정 처음 값 (D-6): 바구니 하나 4개 (fleet-v1과 같게), 주문 한 건 8개 (바구니 2개, 11-19 사용자 결정)
+INSERT INTO app_setting (key, value) VALUES ('basket_capacity', 4), ('max_order_items', 8);
