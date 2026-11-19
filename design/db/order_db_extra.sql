@@ -236,4 +236,107 @@ CREATE TRIGGER tg_product_stock_guard BEFORE INSERT OR UPDATE OF stock_qty ON pr
 
 -- == Task 5: 마감 검사 · 대기 주문 재확인 ==
 
+-- 마감 (설계 문서 5절 "마감"): 시작은 배타 잠금, 실사는 보류 반영 + 진행 중 운반 건 0일 때만 열고,
+-- 확정은 모든 상품 실사 · 차이 사유 · 진행 중 운반 건 0을 검사한다.
+CREATE FUNCTION fn_close_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.status <> 'IN_PROGRESS' THEN
+      RAISE EXCEPTION '마감은 진행 중으로만 시작함' USING ERRCODE = 'check_violation';
+    END IF;
+    PERFORM pg_advisory_xact_lock(7001);
+    RETURN NEW;
+  END IF;
+
+  IF OLD.counting_started_at IS NULL AND NEW.counting_started_at IS NOT NULL THEN
+    IF NEW.hold_acked_at IS NULL THEN
+      RAISE EXCEPTION '배정 보류 반영 전' USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM v_in_flight) THEN
+      RAISE EXCEPTION '진행 중 운반 건이 남음' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  IF NEW.status = 'CONFIRMED' AND OLD.status <> 'CONFIRMED' THEN
+    PERFORM pg_advisory_xact_lock(7001);
+    IF NEW.counting_started_at IS NULL THEN
+      RAISE EXCEPTION '실사를 열지 않은 마감' USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM v_in_flight) THEN
+      RAISE EXCEPTION '진행 중 운반 건이 남음' USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (
+         SELECT 1 FROM product p
+         LEFT JOIN stock_count c ON c.close_id = NEW.close_id AND c.product_id = p.product_id
+         WHERE c.count_id IS NULL OR c.counted_qty IS NULL) THEN
+      RAISE EXCEPTION '실사하지 않은 상품이 있음' USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM stock_count WHERE close_id = NEW.close_id AND book_qty IS NULL) THEN
+      RAISE EXCEPTION '장부 수량이 없는 행이 있음' USING ERRCODE = 'check_violation';
+    END IF;
+    IF EXISTS (SELECT 1 FROM stock_count WHERE close_id = NEW.close_id AND diff_qty <> 0 AND reason IS NULL) THEN
+      RAISE EXCEPTION '사유 없는 차이가 있음' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER tg_stock_close_guard BEFORE INSERT OR UPDATE ON stock_close
+  FOR EACH ROW EXECUTE FUNCTION fn_close_guard();
+
+-- 실사 행: 마감 행은 실사를 연 진행 중 마감에만, "시험 영향"은 운영 재개 마감에서만
+CREATE FUNCTION fn_count_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  c stock_close%ROWTYPE;
+BEGIN
+  IF NEW.close_id IS NULL THEN
+    IF NEW.reason = 'TEST_RUN' THEN
+      RAISE EXCEPTION '시험 영향은 운영 재개 마감에서만' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+  END IF;
+  SELECT * INTO c FROM stock_close WHERE close_id = NEW.close_id;
+  IF c.status <> 'IN_PROGRESS' OR c.counting_started_at IS NULL THEN
+    RAISE EXCEPTION '실사를 열지 않은 마감' USING ERRCODE = 'check_violation';
+  END IF;
+  IF NEW.reason = 'TEST_RUN' AND c.close_kind <> 'OPS_RESUME' THEN
+    RAISE EXCEPTION '시험 영향은 운영 재개 마감에서만' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER tg_stock_count_guard BEFORE INSERT OR UPDATE ON stock_count
+  FOR EACH ROW EXECUTE FUNCTION fn_count_guard();
+
+-- 대기 주문 재확인 (D-2 가): 시작하지 않은 주문을 접수 순으로 쌓아 비교, 넘는 주문은 주문 전체 거절하고 건너뜀.
+-- 읽기만 한다. 거절(취소됨 + STOCK_RECHECK)은 웹 서비스가 같은 트랜잭션에서 쓴다.
+CREATE FUNCTION fn_recheck_rejects() RETURNS TABLE (order_id text) LANGUAGE plpgsql AS $$
+DECLARE
+  o record;
+  short boolean;
+BEGIN
+  CREATE TEMP TABLE IF NOT EXISTS _recheck_left (product_id bigint PRIMARY KEY, left_qty integer) ON COMMIT DROP;
+  DELETE FROM _recheck_left;
+  INSERT INTO _recheck_left SELECT p.product_id, p.stock_qty FROM product p;
+
+  FOR o IN
+    SELECT od.order_id FROM orders od
+    WHERE NOT EXISTS (SELECT 1 FROM trip t WHERE t.order_id = od.order_id AND t.status <> 'RECEIVED')
+      AND EXISTS (SELECT 1 FROM trip t WHERE t.order_id = od.order_id)
+    ORDER BY od.created_at, od.order_id
+  LOOP
+    SELECT EXISTS (
+      SELECT 1 FROM order_item oi JOIN _recheck_left l ON l.product_id = oi.product_id
+      WHERE oi.order_id = o.order_id AND oi.qty_ordered > l.left_qty) INTO short;
+    IF short THEN
+      order_id := o.order_id;
+      RETURN NEXT;
+    ELSE
+      UPDATE _recheck_left l SET left_qty = l.left_qty - oi.qty_ordered
+        FROM order_item oi WHERE oi.order_id = o.order_id AND oi.product_id = l.product_id;
+    END IF;
+  END LOOP;
+  DROP TABLE _recheck_left;
+END $$;
+
 -- == Task 6: NOTIFY · 처음 설정 값 ==

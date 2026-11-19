@@ -44,7 +44,7 @@ GOOD = {
     "account": "DEV", "orders": "FILLING_PAUSE", "trip": "HELD", "status_history.reason": "RETURNED_TO_SHELF",
     "status_history.actor": "ADMIN", "alert.level": "WARN", "alert.status": "RESOLVED",
     "admin_action.action": "CHARGE_END", "admin_action.result": "REJECTED",
-    "stock_close.close_kind": "TEST_ENTRY", "stock_count.reason": "TEST_RUN", "app_setting.key": "max_order_items",
+    "stock_close.close_kind": "TEST_ENTRY", "stock_count.reason": "LOST", "app_setting.key": "max_order_items",
 }
 UNKNOWN = {
     "account": "ROOT", "orders": "REJECTED", "trip": "DONE", "status_history.reason": "OTHER",
