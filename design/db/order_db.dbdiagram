@@ -1,0 +1,97 @@
+{
+  "version": "4.0.0",
+  "darkMode": true,
+  "gridEnabling": false,
+  "currentViewName": null,
+  "defaultView": {
+    "detailLevel": "All",
+    "relationshipMode": "All",
+    "tablePositions": [
+      {
+        "name": "account",
+        "schemaName": "public",
+        "x": 24.171630859375,
+        "y": 19.003555291186416
+      },
+      {
+        "name": "product",
+        "schemaName": "public",
+        "x": 12,
+        "y": 282
+      },
+      {
+        "name": "stock_ledger",
+        "schemaName": "public",
+        "x": 1809.80712890625,
+        "y": 115
+      },
+      {
+        "name": "orders",
+        "schemaName": "public",
+        "x": 559.169921875,
+        "y": 442
+      },
+      {
+        "name": "order_item",
+        "schemaName": "public",
+        "x": 1206.98046875,
+        "y": 440
+      },
+      {
+        "name": "trip",
+        "schemaName": "public",
+        "x": 1206.98046875,
+        "y": 74
+      },
+      {
+        "name": "trip_item",
+        "schemaName": "public",
+        "x": 1809.80712890625,
+        "y": 577
+      },
+      {
+        "name": "status_history",
+        "schemaName": "public",
+        "x": 1809.80712890625,
+        "y": 815
+      },
+      {
+        "name": "alert",
+        "schemaName": "public",
+        "x": 1809.80712890625,
+        "y": 1245
+      },
+      {
+        "name": "admin_action",
+        "schemaName": "public",
+        "x": 2358.81416015625,
+        "y": 12
+      },
+      {
+        "name": "stock_close",
+        "schemaName": "public",
+        "x": 639.2105537742731,
+        "y": -355.18639883791565
+      },
+      {
+        "name": "stock_count",
+        "schemaName": "public",
+        "x": 1206.98046875,
+        "y": 614
+      },
+      {
+        "name": "app_setting",
+        "schemaName": "public",
+        "x": 559.169921875,
+        "y": 712
+      }
+    ],
+    "tableGroupCollapseStates": [],
+    "stickyNoteLayouts": [],
+    "referencePaths": [],
+    "elementPositions": [],
+    "groupCollapseStates": [],
+    "linkPaths": []
+  },
+  "views": {}
+}
