@@ -115,6 +115,17 @@ CREATE TRIGGER tg_app_setting_updated_at BEFORE UPDATE ON app_setting FOR EACH R
 
 -- == Task 3: v_in_flight ==
 
+-- 진행 중 운반 건 (설계 문서 4.12): 결품 사전 확인 · 실사 여는 조건 · 수시 조정 막기가 같이 쓴다.
+-- 시작됨 = 접수됨 · 취소됨이 아닌 운반 건이 같은 주문에 있음 (시작된 나뉜 주문의 남은 운반 건 포함)
+CREATE VIEW v_in_flight AS
+SELECT t.trip_id, t.order_id, t.status, t.robot_id, t.placed_at
+FROM trip t
+WHERE t.status IN ('ASSIGNED', 'FILLING', 'FILLING_PAUSE', 'TRANSPORTING', 'HELD')
+   OR (t.status = 'RECEIVED' AND EXISTS (
+        SELECT 1 FROM trip s
+        WHERE s.order_id = t.order_id AND s.trip_id <> t.trip_id
+          AND s.status NOT IN ('RECEIVED', 'CANCELLED')));
+
 -- == Task 4: 재고 원장 트리거 ==
 
 -- == Task 5: 마감 검사 · 대기 주문 재확인 ==
