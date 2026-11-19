@@ -64,3 +64,29 @@ def set_trip_status(conn, trip_id, status, placed=None):
                 "update trip_item set qty_placed = %s where trip_id = %s and product_id = %s", (q, trip_id, pid)
             )
         conn.execute("update trip set placed_at = now() where trip_id = %s", (trip_id,))
+
+
+def start_close(conn, account_id, kind="MANUAL") -> int:
+    starter = None if kind == "OPS_RESUME" else account_id
+    return conn.execute(
+        "insert into stock_close (started_by, close_kind) values (%s, %s) returning close_id", (starter, kind)
+    ).fetchone()[0]
+
+
+def open_counting(conn, close_id):
+    conn.execute("update stock_close set hold_acked_at = now() where close_id = %s", (close_id,))
+    conn.execute("update stock_close set counting_started_at = now() where close_id = %s", (close_id,))
+
+
+def confirm_close(conn, close_id, account_id):
+    """차이 없는 마감을 바른 순서로 확정한다."""
+    open_counting(conn, close_id)
+    conn.execute(
+        "insert into stock_count (close_id, product_id, counted_qty, book_qty, account_id) "
+        "select %s, product_id, stock_qty, stock_qty, %s from product",
+        (close_id, account_id),
+    )
+    conn.execute(
+        "update stock_close set status = 'CONFIRMED', finished_at = now(), finished_by = %s where close_id = %s",
+        (account_id, close_id),
+    )

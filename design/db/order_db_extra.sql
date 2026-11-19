@@ -128,6 +128,112 @@ WHERE t.status IN ('ASSIGNED', 'FILLING', 'FILLING_PAUSE', 'TRANSPORTING', 'HELD
 
 -- == Task 4: 재고 원장 트리거 ==
 
+-- 재고는 원장 한 길로만 바뀐다 (설계 문서 5절 "재고 기록", OMS-08).
+-- 잠금 키 7001: 원장 기록은 공유 잠금, 마감 시작 · 확정은 배타 잠금.
+
+-- 같은 실사 행으로 두 번 조정하지 않는다.
+CREATE UNIQUE INDEX ux_stock_ledger_count ON stock_ledger (count_id) WHERE count_id IS NOT NULL;
+
+CREATE FUNCTION fn_ledger_before_insert() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  open_close stock_close%ROWTYPE;
+  cnt stock_count%ROWTYPE;
+  cnt_close_status text;
+  orig stock_ledger%ROWTYPE;
+  last_confirmed timestamptz;
+BEGIN
+  PERFORM pg_advisory_xact_lock_shared(7001);
+
+  -- 마감 중 막기: 반출 · 수시 조정은 마감 시작부터, 입고는 실사를 연 뒤부터
+  SELECT * INTO open_close FROM stock_close WHERE status = 'IN_PROGRESS';
+  IF FOUND THEN
+    IF NEW.entry_type = 'OUTBOUND' THEN
+      RAISE EXCEPTION '마감 중에는 반출할 수 없음' USING ERRCODE = 'check_violation';
+    ELSIF NEW.entry_type = 'SPOT_ADJUST' THEN
+      RAISE EXCEPTION '마감 중에는 수시 조정할 수 없음' USING ERRCODE = 'check_violation';
+    ELSIF NEW.entry_type = 'INBOUND' AND open_close.counting_started_at IS NOT NULL THEN
+      RAISE EXCEPTION '실사를 연 뒤에는 입고할 수 없음' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  -- 수시 조정: 그 상품을 담는 진행 중 운반 건의 담은 수를 모르면 막음 (D-4 가)
+  IF NEW.entry_type = 'SPOT_ADJUST' AND EXISTS (
+       SELECT 1 FROM v_in_flight f JOIN trip_item ti ON ti.trip_id = f.trip_id
+       WHERE ti.product_id = NEW.product_id AND f.placed_at IS NULL) THEN
+    RAISE EXCEPTION '담은 수를 모르는 운반 건이 있어 수시 조정할 수 없음' USING ERRCODE = 'check_violation';
+  END IF;
+
+  -- 조정: 실사 행과 맞는지
+  IF NEW.entry_type IN ('CLOSE_ADJUST', 'SPOT_ADJUST') THEN
+    SELECT * INTO cnt FROM stock_count WHERE count_id = NEW.count_id;
+    IF cnt.product_id <> NEW.product_id
+       OR (NEW.entry_type = 'CLOSE_ADJUST') <> (cnt.close_id IS NOT NULL) THEN
+      RAISE EXCEPTION '실사 행과 맞지 않음' USING ERRCODE = 'check_violation';
+    END IF;
+    IF cnt.close_id IS NOT NULL THEN
+      SELECT status INTO cnt_close_status FROM stock_close WHERE close_id = cnt.close_id;
+      IF cnt_close_status = 'CANCELLED' THEN
+        RAISE EXCEPTION '취소된 마감의 실사로 조정할 수 없음' USING ERRCODE = 'check_violation';
+      ELSIF cnt_close_status = 'CONFIRMED' THEN
+        RAISE EXCEPTION '확정된 마감의 실사로 다시 조정할 수 없음' USING ERRCODE = 'check_violation';
+      END IF;
+    END IF;
+    IF cnt.diff_qty IS DISTINCT FROM NEW.change_qty THEN
+      RAISE EXCEPTION '실사 차이와 맞지 않음' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  -- 입력 오류 바로잡기: 원래 종류의 반대 기록 (D-1 가)
+  IF NEW.reason = 'INPUT_ERROR' THEN
+    SELECT * INTO orig FROM stock_ledger WHERE ledger_id = NEW.corrects_ledger_id;
+    IF orig.product_id <> NEW.product_id
+       OR orig.entry_type NOT IN ('INBOUND', 'OUTBOUND')
+       OR orig.entry_type = NEW.entry_type
+       OR orig.change_qty <> -NEW.change_qty THEN
+      RAISE EXCEPTION '바로잡을 기록과 맞지 않음' USING ERRCODE = 'check_violation';
+    END IF;
+    SELECT max(finished_at) INTO last_confirmed FROM stock_close WHERE status = 'CONFIRMED';
+    IF last_confirmed IS NOT NULL AND orig.created_at < last_confirmed THEN
+      RAISE EXCEPTION '마감 이전 기록은 고칠 수 없음' USING ERRCODE = 'check_violation';
+    END IF;
+  END IF;
+
+  -- 재고 반영
+  PERFORM set_config('ifp.via_ledger', 'on', true);
+  UPDATE product SET stock_qty = stock_qty + NEW.change_qty
+   WHERE product_id = NEW.product_id
+   RETURNING stock_qty INTO NEW.qty_after;
+  PERFORM set_config('ifp.via_ledger', 'off', true);
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER tg_stock_ledger_apply BEFORE INSERT ON stock_ledger
+  FOR EACH ROW EXECUTE FUNCTION fn_ledger_before_insert();
+
+CREATE FUNCTION fn_ledger_immutable() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  RAISE EXCEPTION '원장 기록은 고치거나 지울 수 없음 (반대 기록으로 바로잡음)' USING ERRCODE = 'check_violation';
+END $$;
+
+CREATE TRIGGER tg_stock_ledger_immutable BEFORE UPDATE OR DELETE ON stock_ledger
+  FOR EACH ROW EXECUTE FUNCTION fn_ledger_immutable();
+
+CREATE FUNCTION fn_product_stock_guard() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.stock_qty <> 0 THEN
+      RAISE EXCEPTION '재고는 원장으로만 바꿈' USING ERRCODE = 'check_violation';
+    END IF;
+  ELSIF NEW.stock_qty IS DISTINCT FROM OLD.stock_qty
+        AND current_setting('ifp.via_ledger', true) IS DISTINCT FROM 'on' THEN
+    RAISE EXCEPTION '재고는 원장으로만 바꿈' USING ERRCODE = 'check_violation';
+  END IF;
+  RETURN NEW;
+END $$;
+
+CREATE TRIGGER tg_product_stock_guard BEFORE INSERT OR UPDATE OF stock_qty ON product
+  FOR EACH ROW EXECUTE FUNCTION fn_product_stock_guard();
+
 -- == Task 5: 마감 검사 · 대기 주문 재확인 ==
 
 -- == Task 6: NOTIFY · 처음 설정 값 ==
