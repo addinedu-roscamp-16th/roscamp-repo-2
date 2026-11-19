@@ -23,6 +23,7 @@ python3 design/storyboard_tools/render.py design/diagrams/사용자_스토리보
 
 ## 주의
 
+- 관리자 스토리보드의 2 · 3 · 4번 탭은 draw.io에서 손으로 고친 배치가 있어, `admin_build.py`가 기본으로 기존 파일의 탭을 그대로 가져오고 버전 라벨만 바꿉니다. 새로 그리려면 `--fresh`.
 - **다시 만들면 draw.io에서 손으로 고친 내용이 덮어써집니다.** 장면을 고칠 때는 `*_scenes.py`를 고치고 다시 만드는 것을 기본으로 합니다. draw.io에서 직접 고쳤다면 그 내용을 장면 명세에도 옮긴 뒤 다시 만드세요.
 - 화면 안 문구 규칙(고객 화면의 상태 말 7개, [취소]는 접수됨 줄에만, 내부 말 금지)은 `user_check.py`가 막습니다. 규칙을 바꾸면 설계 문서(`docs/superpowers/specs/2026-11-19-user-storyboard-design.md`)도 함께 고칩니다.
 - 버전 라벨은 `*_build.py`의 `VER`, 검사기의 `VERSION`을 함께 올립니다.

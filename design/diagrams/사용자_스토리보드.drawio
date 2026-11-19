@@ -1,16 +1,16 @@
-<mxfile host="app.diagrams.net" pages="6">
+<mxfile host="app.diagrams.net" pages="7">
   <diagram id="ub0" name="0. 화면 구성">
     <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1100" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="version-label" value="v1.0 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ub0_c1" value="0. 고객 주문 페이지 화면 구성 (PC 웹 한 화면)" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="10" width="1400" height="36" as="geometry" />
         </mxCell>
-        <mxCell id="ub0_c2" value="왼쪽 상품 · 오른쪽 내 주문. 내 주문의 상태는 서버가 보내는 대로 저절로 바뀝니다 (새로고침 없음). 알림은 위쪽 한 줄. 시나리오는 1 ~ 5번 탭." style="text;html=1;fontSize=12;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+        <mxCell id="ub0_c2" value="왼쪽 상품 · 오른쪽 내 주문. 내 주문의 상태는 서버가 보내는 대로 저절로 바뀝니다 (새로고침 없음). 알림은 위쪽 한 줄. 시나리오는 1 ~ 6번 탭." style="text;html=1;fontSize=12;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
           <mxGeometry x="40" y="46" width="1700" height="40" as="geometry" />
         </mxCell>
         <mxCell id="sc1" value="주문 화면 (로그인 뒤 첫 화면)" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
@@ -274,27 +274,27 @@
         <mxCell id="desc3" value="고객: 내 주문의 번호를 누르면 상세 창이 내 주문 자리를 덮고 열림. [×]로 닫음. 접수됨이면 상세에도 [취소]&lt;br&gt;시스템: 주문 상품 · 지금 상태 · 시간별 진행. 진행은 고객 상태 말이 바뀐 시각만 보이고 아직 안 온 단계는 회색. 열려 있어도 WS로 저절로 더해짐&lt;br&gt;근거: SCR-04 진행 상태 · 주문 DB 설계 4.6 order_status_history" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
           <mxGeometry x="1310" y="386" width="520" height="91" as="geometry" />
         </mxCell>
-        <mxCell id="ub0_note84" value="&lt;b&gt;상태 대응표 (내부 상태 → 고객 화면)&lt;/b&gt;&lt;br&gt;접수됨 (마감 중 배정 보류 포함) → &lt;b&gt;접수됨&lt;/b&gt; · [취소] 있음&lt;br&gt;배정됨 · 담는 중 · 담기 일시 중지 · 주문 처리 보류 → &lt;b&gt;준비 중&lt;/b&gt;&lt;br&gt;운반 중 → &lt;b&gt;출고 중&lt;/b&gt;&lt;br&gt;출고됨 → &lt;b&gt;출고 완료&lt;/b&gt;&lt;br&gt;일부 출고됨 → &lt;b&gt;일부 출고&lt;/b&gt; + 위쪽 알림 (못 담은 상품 · 수량)&lt;br&gt;취소됨 (고객이 취소) → &lt;b&gt;취소됨&lt;/b&gt;&lt;br&gt;취소됨 (담을 상품 없음, D-14) → &lt;b&gt;취소됨&lt;/b&gt; + 위쪽 알림&lt;br&gt;거절 (마감 뒤 재고 다시 확인, R-08) → &lt;b&gt;거절됨&lt;/b&gt; + 위쪽 알림&lt;br&gt;[취소]는 접수됨 줄에만 (OMS-10). 준비 중부터는 버튼이 없음" style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
+        <mxCell id="ub0_note84" value="&lt;b&gt;상태 대응표 (내부 상태 → 고객 화면)&lt;/b&gt;&lt;br&gt;접수됨 (마감 중 배정 보류 포함) → &lt;b&gt;접수됨&lt;/b&gt; · [취소] 있음&lt;br&gt;배정됨 · 담는 중 · 담기 일시 중지 · 주문 처리 보류 → &lt;b&gt;준비 중&lt;/b&gt;&lt;br&gt;운반 중 → &lt;b&gt;출고 중&lt;/b&gt;&lt;br&gt;출고됨 → &lt;b&gt;출고 완료&lt;/b&gt;&lt;br&gt;일부 출고됨 → &lt;b&gt;일부 출고&lt;/b&gt; + 위쪽 알림 (못 담은 상품 · 수량)&lt;br&gt;취소됨 (고객이 취소) → &lt;b&gt;취소됨&lt;/b&gt;&lt;br&gt;취소됨 (담을 상품 없음, D-14) → &lt;b&gt;취소됨&lt;/b&gt; + 위쪽 알림&lt;br&gt;취소됨 (마감 뒤 재고 다시 확인, R-19) → &lt;b&gt;거절됨&lt;/b&gt; + 위쪽 알림&lt;br&gt;[취소]는 접수됨 줄에만 (OMS-10). 준비 중부터는 버튼이 없음" style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
           <mxGeometry x="40" y="576" width="520" height="166" as="geometry" />
         </mxCell>
-        <mxCell id="ub0_note85" value="&lt;b&gt;화면 규칙&lt;/b&gt;&lt;br&gt;상품 줄: 상품 이미지 · 이름 · 재고(품절) · 수량 버튼. 상품은 미니멘토스 레인보우 · 과즙팡 비타민 마이구미 · 자유시간 Mini&lt;br&gt;수량 버튼은 재고와 한 주문 최대 4개(바구니 용량) 안에서만 올라감. 주문이 접수되면 고른 수량은 0으로 돌아감&lt;br&gt;재고 숫자는 주문 때 줄지 않고, 출고(출고 완료 · 일부 출고)될 때 줄어듦 (재고 예약 OMS-07 없음, 6-1-3 #33)&lt;br&gt;알림이 여러 개면 쌓아 두고 하나씩 &quot;(1/2)&quot;로 보여 줌. [확인]을 누르면 다음 알림&lt;br&gt;알림이 가리키는 주문 줄은 노랑으로 강조. 내 주문은 최근 주문부터&lt;br&gt;주문 상세: 번호를 누르면 오른쪽에서 열림. 상품 · 상태 · 시간별 진행. 단계는 상태 말 7개뿐이고, 같은 말 안의 내부 변화(담기 일시 중지 등)는 단계로 안 보임" style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="580" y="576" width="470" height="211" as="geometry" />
+        <mxCell id="ub0_note85" value="&lt;b&gt;화면 규칙&lt;/b&gt;&lt;br&gt;상품 줄: 상품 이미지 · 이름 · 재고(품절) · 수량 버튼. 상품은 미니멘토스 레인보우 · 과즙팡 비타민 마이구미 · 자유시간 Mini&lt;br&gt;수량 버튼은 재고와 한 주문 최대 8개(운영 설정, OMS-20) 안에서만 올라감. 주문이 접수되면 고른 수량은 0으로 돌아감&lt;br&gt;바구니(4개)보다 많은 주문은 나뉘어 처리됨(OMS-19). 내 주문에는 한 줄이고 상태는 주문 하나로: 첫 바구니가 시작되면 끝날 때까지 준비 중(남은 바구니가 모두 출고 중이면 출고 중), 접수됨으로 돌아가지 않음. 바구니별 진행 &quot;바구니 1/2 출고&quot;는 상세에만 (1번 탭 장면 8)&lt;br&gt;재고 숫자는 주문 때 줄지 않고, 출고(출고 완료 · 일부 출고)될 때 줄어듦 (재고 예약 OMS-07 없음, 6-1-3 #33)&lt;br&gt;알림이 여러 개면 쌓아 두고 하나씩 &quot;(1/2)&quot;로 보여 줌. [확인]을 누르면 다음 알림&lt;br&gt;알림이 가리키는 주문 줄은 노랑으로 강조. 내 주문은 최근 주문부터&lt;br&gt;주문 상세: 번호를 누르면 오른쪽에서 열림. 상품 · 상태 · 시간별 진행. 단계는 상태 말 7개뿐이고, 같은 말 안의 내부 변화(담기 일시 중지 등)는 단계로 안 보임" style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="580" y="576" width="470" height="271" as="geometry" />
         </mxCell>
-        <mxCell id="ub0_note86" value="&lt;b&gt;고객에게 보이지 않는 것 (11-19 결정)&lt;/b&gt;&lt;br&gt;결품 처리 중 · 로봇 장애 · 서비스 일시 정지 · 마감 같은 내부 사정은 이유를 보이지 않고 &quot;준비 중&quot;(또는 &quot;접수됨&quot;)으로만 둡니다.&lt;br&gt;오래 멈춰도 지연 안내를 띄우지 않습니다. 처리는 관리자 화면에서 합니다.&lt;br&gt;모바일 화면 · 브라우저 푸시 · 소리 알림은 없습니다 (PC 웹만)." style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="1070" y="576" width="470" height="91" as="geometry" />
+        <mxCell id="ub0_note86" value="&lt;b&gt;고객에게 보이지 않는 것 (11-19 결정)&lt;/b&gt;&lt;br&gt;결품 처리 중 · 로봇 장애 · 서비스 일시 정지 · 마감 같은 내부 사정은 이유를 보이지 않고 &quot;준비 중&quot;(또는 &quot;접수됨&quot;)으로만 둡니다.&lt;br&gt;오래 멈춰도 지연 안내를 띄우지 않습니다. 처리는 관리자 화면에서 합니다.&lt;br&gt;모바일 화면 · 브라우저 푸시 · 소리 알림은 없습니다 (PC 웹만).&lt;br&gt;서비스가 시험 모드인 동안은 &quot;점검 중&quot; 화면만 보입니다 (6번 탭). 고객 화면에는 &quot;시험&quot;이라는 말을 쓰지 않습니다." style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="576" width="470" height="121" as="geometry" />
         </mxCell>
         <mxCell id="ub0_note87" value="&lt;b&gt;범례&lt;/b&gt;&lt;br&gt;파란 굵은 테두리 ① = 고객이 누르는 곳 (장면마다 하나)&lt;br&gt;노랑 줄 = 위쪽 알림 · 노랑 주문 줄 = 지금 보는 주문&lt;br&gt;회색 버튼 = 꺼짐&lt;br&gt;화살표 라벨 [ ] = 그때의 내부 상태 (다이어그램 2. 주문의 말, 고객에게는 안 보임). 아직 다이어그램에 없는 것은 R-xx(다이어그램 수정 요청)&lt;br&gt;주황 점선 노트 = 미결" style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
-          <mxGeometry x="40" y="807" width="470" height="121" as="geometry" />
+          <mxGeometry x="40" y="867" width="470" height="121" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>
   </diagram>
   <diagram id="ub1" name="1. 평상시 주문">
-    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1443" math="0" shadow="0">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1488" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="version-label" value="v1.0 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ub1_c1" value="1. 평상시 주문: 주문하면 처리되어 출고 완료까지" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
@@ -381,7 +381,7 @@
         <mxCell id="ub1_items25" value="자유시간 Mini 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
           <mxGeometry x="948" y="208" width="244" height="16" as="geometry" />
         </mxCell>
-        <mxCell id="desc2" value="고객: 이름으로 찾고 ① [- 2 +]로 미니멘토스 레인보우 2개, 과즙팡 비타민 마이구미 1개를 고름&lt;br&gt;시스템: 상품 목록 · 이름 검색 · 재고 수량. 수량은 재고와 한 주문 최대 4개(바구니) 안에서만 올라감&lt;br&gt;근거: SCR-02 · OMS-02 · 주문 DB 설계 4.5 (바구니 4개)" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+        <mxCell id="desc2" value="고객: 이름으로 찾고 ① [- 2 +]로 미니멘토스 레인보우 2개, 과즙팡 비타민 마이구미 1개를 고름&lt;br&gt;시스템: 상품 목록 · 이름 검색 · 재고 수량. 수량은 재고와 한 주문 최대 8개(운영 설정) 안에서만 올라감&lt;br&gt;근거: SCR-02 · OMS-02 · OMS-20 (한 주문 최대, 운영 설정)" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
           <mxGeometry x="680" y="386" width="520" height="91" as="geometry" />
         </mxCell>
         <mxCell id="sc3" value="장면 3 · 주문하기 → 접수됨" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
@@ -921,13 +921,136 @@
         <mxCell id="desc7" value="고객: 출고 구역에서 상품을 받고 ① [×]로 상세를 닫음&lt;br&gt;시스템: 출고됨이 기록되며 재고가 담은 만큼 줄어듦 (미니멘토스 레인보우 12 → 10, 과즙팡 비타민 마이구미 5 → 4)&lt;br&gt;근거: SCR-04 · OMS-06 · 6-1-3 #33 · #34" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
           <mxGeometry x="1310" y="1293" width="520" height="76" as="geometry" />
         </mxCell>
-        <mxCell id="ub1_e195" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc1" target="sc2">
+        <mxCell id="sc8" value="장면 8 · (따로) 나뉜 주문: 내 주문에는 한 줄" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1007" width="540" height="421" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c195" value="" style="rounded=0;html=1;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1035" width="520" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c196" value="&lt;b&gt;IFP 주문&lt;/b&gt;" style="rounded=0;html=1;fillColor=#e8e8e8;strokeColor=#999999;align=left;spacingLeft=6;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1035" width="520" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c197" value="고객1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="420" y="1037" width="50" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c198" value="로그아웃" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="514" y="1044" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c199" value="상품 검색 [__________]" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="56" y="1075" width="250" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c200" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="56" y="1095" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_img201" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1099" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_prod202" value="미니멘토스 레인보우&lt;br&gt;재고 6" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="94" y="1098" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_qty203" value="- 0 +" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="248" y="1106" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c204" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="56" y="1135" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_img205" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1139" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_prod206" value="자유시간 Mini&lt;br&gt;품절" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="94" y="1138" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_qty207" value="- 0 +" style="rounded=1;html=1;fillColor=#eeeeee;strokeColor=#bbbbbb;fontColor=#999999;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="248" y="1146" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c208" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="56" y="1175" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_img209" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="1179" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_prod210" value="과즙팡 비타민 마이구미&lt;br&gt;재고 4" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="94" y="1178" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_qty211" value="- 0 +" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="248" y="1186" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c212" value="주문하기" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="257" y="1217" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c213" value="&lt;b&gt;내 주문&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="316" y="1075" width="248" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c214" value="" style="rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#5c4700;" vertex="1" parent="1">
+          <mxGeometry x="316" y="1095" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_ord215" value="&lt;b&gt;1102&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="1097" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_st216" value="준비 중" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="444" y="1097" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_items217" value="미니멘토스 레인보우 4 · 과즙팡 비타민 마이구미 2" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="1115" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c218" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="316" y="1135" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_ord219" value="&lt;b&gt;1101&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="1137" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_st220" value="출고 완료" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="444" y="1137" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_items221" value="미니멘토스 레인보우 2 · 과즙팡 비타민 마이구미 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="1155" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c222" value="" style="rounded=0;html=1;shadow=1;fillColor=#ffffff;strokeColor=#1f5fbf;strokeWidth=2;" vertex="1" parent="1">
+          <mxGeometry x="310" y="1075" width="254" height="206" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_dno223" value="&lt;b&gt;주문 1102 상세&lt;/b&gt;" style="rounded=0;html=1;fillColor=#dae8fc;strokeColor=#1f5fbf;fontSize=9;fontStyle=1;align=left;spacingLeft=4;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="310" y="1075" width="254" height="18" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c224" value="×" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="540" y="1076" width="20" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_ditems225" value="미니멘토스 레인보우 4&lt;br&gt;과즙팡 비타민 마이구미 2" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1097" width="246" height="26" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c226" value="상태" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1127" width="30" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_pst227" value="준비 중" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="346" y="1127" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_basket228" value="바구니 1/2 출고" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="346" y="1143" width="214" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_c229" value="&lt;b&gt;진행&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1161" width="60" height="14" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_tl230" value="10:20  접수됨" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1177" width="246" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_tl231" value="10:21  준비 중" style="rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#5c4700;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1194" width="246" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_tl232" value="--:--  출고 중" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#dddddd;fontSize=9;align=left;verticalAlign=top;spacingLeft=4;whiteSpace=wrap;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1211" width="246" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_tl233" value="--:--  출고 완료" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#dddddd;fontSize=9;align=left;verticalAlign=top;spacingLeft=4;whiteSpace=wrap;fontColor=#888888;" vertex="1" parent="1">
+          <mxGeometry x="314" y="1228" width="246" height="15" as="geometry" />
+        </mxCell>
+        <mxCell id="desc8" value="고객: 바구니(4개)보다 많은 6개를 한 번에 주문하고 상세를 봄 (누를 것 없음). 내 주문에는 한 줄&lt;br&gt;시스템: 접수 때 바구니 둘(4 + 2)로 나눠 처리. 첫 바구니가 시작되면 모두 끝날 때까지 준비 중(남은 바구니가 모두 출고 중일 때만 출고 중), 바구니 1이 먼저 출고돼도 접수됨으로 돌아가지 않음. 바구니별 진행은 상세에만. 재고는 출고된 바구니만큼 줄어듦 (미니멘토스 레인보우 10 → 6)&lt;br&gt;근거: OMS-19 · OMS-20 · SCR-04 · 주문 DB 설계 4.4 (주문 요약 규칙)" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1293" width="520" height="121" as="geometry" />
+        </mxCell>
+        <mxCell id="ub1_e234" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc1" target="sc2">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ub1_e196" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc2" target="sc3">
+        <mxCell id="ub1_e235" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc2" target="sc3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ub1_e197" value="[배정됨]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sc3" target="sc4">
+        <mxCell id="ub1_e236" value="[배정됨]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sc3" target="sc4">
           <mxGeometry relative="1" as="geometry">
             <Array as="points">
               <mxPoint x="1570.0" y="526.0" />
@@ -935,13 +1058,13 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ub1_e198" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc4" target="sc5">
+        <mxCell id="ub1_e237" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc4" target="sc5">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ub1_e199" value="[담는 중 → 운반 중]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc5" target="sc6">
+        <mxCell id="ub1_e238" value="[담는 중 → 운반 중]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc5" target="sc6">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ub1_e200" value="[출고됨]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sc6" target="sc7">
+        <mxCell id="ub1_e239" value="[출고됨]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sc6" target="sc7">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>
@@ -952,7 +1075,7 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="version-label" value="v1.0 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ub2_c1" value="2. 재고 초과 거절: 화면을 보는 사이 재고가 줄어 주문이 거절됨" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
@@ -962,7 +1085,7 @@
           <mxGeometry x="40" y="46" width="1700" height="40" as="geometry" />
         </mxCell>
         <mxCell id="sc1" value="장면 1 · 품절 · 재고까지만 고름" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="40" y="100" width="540" height="391" as="geometry" />
+          <mxGeometry x="40" y="100" width="540" height="376" as="geometry" />
         </mxCell>
         <mxCell id="ub2_c3" value="" style="rounded=0;html=1;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
           <mxGeometry x="50" y="128" width="520" height="250" as="geometry" />
@@ -1033,8 +1156,8 @@
         <mxCell id="ub2_items25" value="자유시간 Mini 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
           <mxGeometry x="318" y="208" width="244" height="16" as="geometry" />
         </mxCell>
-        <mxCell id="desc1" value="고객: 미니멘토스 레인보우를 ① [- 4 +]로 4개 고름. 자유시간 Mini는 품절이라 수량 버튼이 꺼져 있음&lt;br&gt;시스템: 재고 0이면 품절. 수량은 재고와 한 주문 최대 4개(바구니) 안에서만 올라감 (설계자 판단)&lt;br&gt;근거: SCR-02 · OMS-02 · 주문 DB 설계 4.5" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
-          <mxGeometry x="50" y="386" width="520" height="91" as="geometry" />
+        <mxCell id="desc1" value="고객: 미니멘토스 레인보우를 ① [- 4 +]로 4개 고름. 자유시간 Mini는 품절이라 수량 버튼이 꺼져 있음&lt;br&gt;시스템: 재고 0이면 품절. 수량은 재고와 한 주문 최대 8개(운영 설정) 안에서만 올라감&lt;br&gt;근거: SCR-02 · OMS-02 · OMS-20" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+          <mxGeometry x="50" y="386" width="520" height="76" as="geometry" />
         </mxCell>
         <mxCell id="sc2" value="장면 2 · 주문하기 → 거절 안내" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
           <mxGeometry x="670" y="100" width="540" height="391" as="geometry" />
@@ -1218,7 +1341,7 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="version-label" value="v1.0 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ub3_c1" value="3. 주문 취소: 접수됨일 때만" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
@@ -1619,7 +1742,7 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="version-label" value="v1.0 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ub4_c1" value="4. 결품: 상품이 모자라 일부만 출고되거나 취소됨" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
@@ -2133,7 +2256,7 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="version-label" value="v1.0 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
           <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
         </mxCell>
         <mxCell id="ub5_c1" value="5. 마감 뒤 거절: 오래 접수됨이던 주문이 거절됨" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
@@ -2340,7 +2463,7 @@
         <mxCell id="ub5_items63" value="미니멘토스 레인보우 4" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
           <mxGeometry x="1578" y="232" width="244" height="16" as="geometry" />
         </mxCell>
-        <mxCell id="desc3" value="고객: 알림을 읽고 ① [확인]. 필요하면 수량을 줄여 다시 주문&lt;br&gt;시스템: 마감으로 실제 재고가 2개로 맞춰져, 대기 주문을 다시 확인하니 재고보다 많음 → 거절. 관리자에게도 알림(R-01)&lt;br&gt;근거: CEN-13 · OMS-03 · OMS-13 · R-08 (사용자 거절 안내 포함)" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+        <mxCell id="desc3" value="고객: 알림을 읽고 ① [확인]. 필요하면 수량을 줄여 다시 주문&lt;br&gt;시스템: 마감으로 실제 재고가 2개로 맞춰져, 대기 주문을 다시 확인하니 재고보다 많음 → 거절. 관리자에게도 알림(R-01)&lt;br&gt;근거: CEN-13 · OMS-03 · OMS-13 · R-08 (사용자 거절 안내 포함) · R-19" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
           <mxGeometry x="1310" y="386" width="520" height="76" as="geometry" />
         </mxCell>
         <mxCell id="sc4" value="장면 4 · 재고가 충분하면 준비 중" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
@@ -2409,7 +2532,7 @@
         <mxCell id="ub5_e83" value="[접수됨 유지 · 배정 보류 (R-08)]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc1" target="sc2">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="ub5_e84" value="[거절 (R-08)]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc2" target="sc3">
+        <mxCell id="ub5_e84" value="[취소됨 · 마감 뒤 재고 다시 확인 (R-19)]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc2" target="sc3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="ub5_e85" value="[배정됨 (R-08 마감 뒤)]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sc2" target="sc4">
@@ -2420,8 +2543,280 @@
             </Array>
           </mxGeometry>
         </mxCell>
-        <mxCell id="ub5_note86" value="&lt;b&gt;미결: 다이어그램 수정 요청 R-08&lt;/b&gt;&lt;br&gt;마감 뒤 거절되는 대기 주문의 상태 이름(접수됨 → 거절 전이)과 고객 거절 안내(WS)는 R-08에서 정해집니다. 고객 화면 말은 &quot;거절됨&quot;으로 둡니다.&lt;br&gt;거절 알림 문구는 팀 확인 필요" style="shape=note;size=14;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
+        <mxCell id="ub5_note86" value="&lt;b&gt;미결: 다이어그램 수정 요청 R-08 · R-19&lt;/b&gt;&lt;br&gt;마감 뒤 거절은 새 상태를 만들지 않고 접수됨 → 취소됨(사유: 마감 뒤 재고 다시 확인)으로 기록합니다 (R-19). 고객 화면 말은 &quot;거절됨&quot;으로 구분합니다.&lt;br&gt;거절 알림 문구는 팀 확인 필요" style="shape=note;size=14;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
           <mxGeometry x="40" y="992" width="520" height="76" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="ub6" name="6. 점검 중">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1900" pageHeight="1218" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="version-label" value="v1.1 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="-26" width="200" height="24" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c1" value="6. 점검 중: 서비스가 시험 모드인 동안 고객 페이지는 &quot;점검 중&quot;만 보임" style="text;html=1;fontSize=18;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="1400" height="36" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c2" value="표시: 파란 굵은 테두리 ① = 누르는 곳 · 노랑 = 위쪽 알림 · 지금 보는 주문 · 화살표 라벨 = 내부 상태 (2. 주문의 말, 아직 없는 것은 R-xx) · 자세한 범례는 0번 탭. 고객에게는 &quot;점검&quot;으로만 보이고 &quot;시험&quot;이라는 말은 보이지 않음" style="text;html=1;fontSize=12;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="40" y="46" width="1700" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="sc1" value="장면 1 · 연결이 끊김 → 연결 중…" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="540" height="376" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c3" value="" style="rounded=0;html=1;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="50" y="128" width="520" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c4" value="&lt;b&gt;IFP 주문&lt;/b&gt;" style="rounded=0;html=1;fillColor=#e8e8e8;strokeColor=#999999;align=left;spacingLeft=6;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="128" width="520" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c5" value="고객1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="420" y="130" width="50" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c6" value="로그아웃" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="514" y="137" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c7" value="상품 검색 [__________]" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="56" y="168" width="250" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c8" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="56" y="188" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_img9" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="192" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_prod10" value="미니멘토스 레인보우&lt;br&gt;재고 12" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="94" y="191" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_qty11" value="- 0 +" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="248" y="199" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c12" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="56" y="228" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_img13" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="232" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_prod14" value="자유시간 Mini&lt;br&gt;품절" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="94" y="231" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_qty15" value="- 0 +" style="rounded=1;html=1;fillColor=#eeeeee;strokeColor=#bbbbbb;fontColor=#999999;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="248" y="239" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c16" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="56" y="268" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_img17" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="60" y="272" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_prod18" value="과즙팡 비타민 마이구미&lt;br&gt;재고 5" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="94" y="271" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_qty19" value="- 0 +" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="248" y="279" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c20" value="주문하기" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="257" y="310" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c21" value="&lt;b&gt;내 주문&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="316" y="168" width="248" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c22" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="316" y="188" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_ord23" value="&lt;b&gt;1602&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="190" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_st24" value="접수됨" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="444" y="190" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_cancel25" value="취소" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="532" y="190" width="29" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_items26" value="과즙팡 비타민 마이구미 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="208" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c27" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="316" y="228" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_ord28" value="&lt;b&gt;1601&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="230" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_st29" value="접수됨" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="444" y="230" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_cancel30" value="취소" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="532" y="230" width="29" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_items31" value="미니멘토스 레인보우 3" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="248" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c32" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="316" y="268" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_ord33" value="&lt;b&gt;1600&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="270" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_st34" value="출고 완료" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="444" y="270" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_items35" value="자유시간 Mini 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="318" y="288" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c36" value="" style="rounded=0;html=1;fillColor=#000000;opacity=25;strokeColor=none;" vertex="1" parent="1">
+          <mxGeometry x="50" y="128" width="520" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c37" value="&lt;b&gt;연결 중…&lt;/b&gt;&lt;br&gt;연결이 끊겨 다시 연결하고 있습니다" style="rounded=1;arcSize=6;html=1;fillColor=#ffffff;strokeColor=#333333;fontSize=10;align=center;verticalAlign=top;spacingTop=6;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="170" y="198" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="desc1" value="고객: 주문 화면을 보던 중. 기다림 (누를 것 없음)&lt;br&gt;시스템: 관리자가 운영 모드를 시험 모드로 바꾸면 서비스가 다시 켜져 WS가 끊김. 페이지는 &quot;연결 중…&quot;을 보이며 다시 연결을 시도&lt;br&gt;근거: COM-06 · R-20 · SCR-04 (WS)" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+          <mxGeometry x="50" y="386" width="520" height="76" as="geometry" />
+        </mxCell>
+        <mxCell id="sc2" value="장면 2 · 다시 연결 → 점검 중" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="670" y="100" width="540" height="391" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c38" value="" style="rounded=0;html=1;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="680" y="128" width="520" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c39" value="&lt;b&gt;IFP 주문&lt;/b&gt;" style="rounded=0;html=1;fillColor=#e8e8e8;strokeColor=#999999;align=left;spacingLeft=6;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="128" width="520" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_maint40" value="지금은 시스템 점검 중입니다.&lt;br&gt;점검이 끝나면 다시 주문할 수 있습니다." style="rounded=1;arcSize=6;html=1;fillColor=#ffffff;strokeColor=#999999;fontSize=12;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="760" y="223" width="360" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="desc2" value="고객: 안내를 읽음. 상품 · 내 주문 · [주문하기]가 없어 누를 것 없음&lt;br&gt;시스템: 다시 연결된 서버가 시험 모드라 점검 중 화면만 보냄 (시험 모드의 주문 · 재고는 시험 DB라 실제 주문을 받지 않음). 끝나는 시각은 알 수 없어 적지 않음. 위쪽 알림 줄은 쓰지 않음&lt;br&gt;근거: COM-06 · R-20" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+          <mxGeometry x="680" y="386" width="520" height="91" as="geometry" />
+        </mxCell>
+        <mxCell id="sc3" value="장면 3 · 점검 중에 처음 들어옴 (로그인 전)" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1300" y="100" width="540" height="361" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c41" value="" style="rounded=0;html=1;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="128" width="520" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c42" value="&lt;b&gt;IFP 주문&lt;/b&gt;" style="rounded=0;html=1;fillColor=#e8e8e8;strokeColor=#999999;align=left;spacingLeft=6;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="128" width="520" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_maint43" value="지금은 시스템 점검 중입니다.&lt;br&gt;점검이 끝나면 다시 주문할 수 있습니다." style="rounded=1;arcSize=6;html=1;fillColor=#ffffff;strokeColor=#999999;fontSize=12;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="1390" y="223" width="360" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="desc3" value="고객: 페이지에 들어옴. 로그인 창 없이 같은 점검 중 화면&lt;br&gt;시스템: 시험 모드 동안은 로그인 전 · 뒤 모두 같은 한 화면. 로그인 · 주문을 받지 않음&lt;br&gt;근거: COM-06 · R-20" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+          <mxGeometry x="1310" y="386" width="520" height="61" as="geometry" />
+        </mxCell>
+        <mxCell id="sc4" value="장면 4 · 점검 끝 → 평소 화면 (점검 전 주문 그대로)" style="rounded=1;arcSize=2;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;verticalAlign=top;align=left;spacingLeft=8;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="670" y="561" width="540" height="391" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c44" value="" style="rounded=0;html=1;fillColor=#fafafa;strokeColor=#999999;" vertex="1" parent="1">
+          <mxGeometry x="680" y="589" width="520" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c45" value="&lt;b&gt;IFP 주문&lt;/b&gt;" style="rounded=0;html=1;fillColor=#e8e8e8;strokeColor=#999999;align=left;spacingLeft=6;fontSize=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="680" y="589" width="520" height="34" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c46" value="고객1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="591" width="50" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c47" value="로그아웃" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1144" y="598" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_notice48" value="⚠ 주문 1601이 거절됐습니다: 미니멘토스 레인보우 재고가 2개뿐입니다. 수량을 줄여 다시 주문해 주세요" style="rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;align=left;verticalAlign=middle;spacingLeft=4;whiteSpace=wrap;fontColor=#5c4700;" vertex="1" parent="1">
+          <mxGeometry x="686" y="629" width="508" height="20" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c49" value="① 확인" style="rounded=1;html=1;fillColor=#dae8fc;strokeColor=#1f5fbf;strokeWidth=2;fontSize=9;fontStyle=1;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="1141" y="631" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c50" value="상품 검색 [__________]" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="686" y="653" width="250" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c51" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="686" y="673" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_img52" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="690" y="677" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_prod53" value="미니멘토스 레인보우&lt;br&gt;재고 2" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="724" y="676" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_qty54" value="- 0 +" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="878" y="684" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c55" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="686" y="713" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_img56" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="690" y="717" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_prod57" value="자유시간 Mini&lt;br&gt;품절" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="724" y="716" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_qty58" value="- 0 +" style="rounded=1;html=1;fillColor=#eeeeee;strokeColor=#bbbbbb;fontColor=#999999;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="878" y="724" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c59" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="686" y="753" width="250" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_img60" value="이미지" style="rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="690" y="757" width="30" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_prod61" value="과즙팡 비타민 마이구미&lt;br&gt;재고 5" style="text;html=1;fontSize=9;align=left;verticalAlign=top;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="724" y="756" width="136" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_qty62" value="- 0 +" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="878" y="764" width="54" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c63" value="주문하기" style="rounded=1;html=1;fillColor=#ffffff;strokeColor=#666666;fontSize=9;whiteSpace=wrap;" vertex="1" parent="1">
+          <mxGeometry x="887" y="795" width="46" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c64" value="&lt;b&gt;내 주문&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="946" y="653" width="248" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c65" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="946" y="673" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_ord66" value="&lt;b&gt;1602&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="948" y="675" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_st67" value="준비 중" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1074" y="675" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_items68" value="과즙팡 비타민 마이구미 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="948" y="693" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c69" value="" style="rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#5c4700;" vertex="1" parent="1">
+          <mxGeometry x="946" y="713" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_ord70" value="&lt;b&gt;1601&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="948" y="715" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_st71" value="거절됨" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1074" y="715" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_items72" value="미니멘토스 레인보우 3" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="948" y="733" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_c73" value="" style="rounded=0;html=1;fillColor=#ffffff;strokeColor=#cccccc;fontSize=9;align=left;spacingLeft=4;whiteSpace=wrap;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="946" y="753" width="248" height="38" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_ord74" value="&lt;b&gt;1600&lt;/b&gt;" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="948" y="755" width="60" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_st75" value="출고 완료" style="text;html=1;fontSize=9;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1074" y="755" width="64" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_items76" value="자유시간 Mini 1" style="text;html=1;fontSize=9;align=left;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;spacingLeft=2;" vertex="1" parent="1">
+          <mxGeometry x="948" y="773" width="244" height="16" as="geometry" />
+        </mxCell>
+        <mxCell id="desc4" value="고객: 알림을 읽고 ① [확인]. 점검 전에 넣은 주문이 내 주문에 그대로 보임&lt;br&gt;시스템: 정상 운영으로 다시 켜져 연결되면 평소 화면. 점검 전 주문은 운영 DB에 그대로. 접수됨이던 주문은 운영 재개 마감 확정 때 재고를 다시 확인 (그동안은 접수됨): 모자란 1601은 거절됨 + 알림(5번 탭과 같음), 1602는 배정되어 준비 중&lt;br&gt;근거: COM-06 · R-20 · CEN-13 · R-19 · OMS-13" style="text;html=1;fontSize=11;align=left;verticalAlign=top;whiteSpace=wrap;spacingLeft=8;spacingTop=4;fontColor=#222222;fillColor=#f5f5f5;strokeColor=#dddddd;" vertex="1" parent="1">
+          <mxGeometry x="680" y="847" width="520" height="91" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_e77" value="[서비스 다시 켜짐 · 시험 모드 (R-20)]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;" edge="1" parent="1" source="sc1" target="sc2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_e78" value="[정상 운영 · 운영 재개 마감 뒤 1601 취소됨 (R-19)]" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;strokeWidth=2;strokeColor=#555555;fontSize=11;labelBackgroundColor=#ffffff;fontStyle=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="sc2" target="sc4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ub6_note79" value="&lt;b&gt;점검 중 화면 규칙 (설계 8절)&lt;/b&gt;&lt;br&gt;서비스가 시험 모드인 동안에만 보임 (COM-06). 정상 운영의 마감 중(시험 모드에서 돌아온 뒤 운영 재개 마감 포함)에는 보이지 않고 주문도 받음 (접수됨으로 대기)&lt;br&gt;가운데 문구 하나: &quot;지금은 시스템 점검 중입니다. 점검이 끝나면 다시 주문할 수 있습니다.&quot; 상품 목록 · 내 주문 · [주문하기] · 로그인 창 · 위쪽 알림 줄은 없음&lt;br&gt;고객 화면에는 &quot;시험 · 시험 모드&quot; 같은 내부 말을 쓰지 않음. 고객에게는 &quot;점검&quot;으로만 보임&lt;br&gt;모드는 관리자 화면(관리자 스토리보드 8번 탭)에서 바꿈. 시험 주문은 관리자 페이지의 시험 화면에서 넣고 봄 (OMS-21). 고객 화면에서 시험 주문을 보는 기능은 없음" style="shape=note;size=14;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1022" width="700" height="136" as="geometry" />
         </mxCell>
       </root>
     </mxGraphModel>

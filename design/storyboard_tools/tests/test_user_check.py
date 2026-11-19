@@ -10,11 +10,11 @@ import user_check  # noqa: E402
 import user_screen  # noqa: E402
 
 
-def make(body, notice=None, extra=None):
+def make(body, notice=None, extra=None, kind='shop'):
     """화면 하나짜리 탭을 만들어 mxfile 루트를 돌려준다. extra(t, x, y)로 규칙 위반 셀을 더한다."""
     t = sb_core.Tab('t', '시험')
     x, y = 40, 100
-    user_screen.screen(t, x, y, {'kind': 'shop', 'notice': notice, 'body': body})
+    user_screen.screen(t, x, y, {'kind': kind, 'notice': notice, 'body': body})
     if extra:
         extra(t, x, y)
     root = ET.Element('mxfile')
@@ -79,11 +79,19 @@ class UserCheckTest(unittest.TestCase):
         fails = user_check.check_screen_rules(make([('product', '콜라', 2, 3, '')]))
         self.assertTrue(any('재고보다' in f for f in fails), fails)
 
-    def test_basket_over_four(self):
-        fails = user_check.check_screen_rules(make([('product', '콜라', 9, 3, ''), ('product', '우유', 9, 2, '')]))
-        self.assertTrue(any('4개' in f for f in fails), fails)
-        fails = user_check.check_screen_rules(make([('order', '1044 콜라 3 · 우유 2', '접수됨', '')]))
-        self.assertTrue(any('4개' in f for f in fails), fails)
+    def test_order_max(self):
+        """한 주문 최대 수량은 운영 설정(OMS-20) ORDER_MAX. 바구니 용량을 넘어도 나뉘어 처리되므로 거절 아님 (OMS-19)."""
+        m = user_check.ORDER_MAX
+        self.assertGreater(m, user_check.BASKET)
+        fails = user_check.check_screen_rules(make([('product', '콜라', 99, m - 2, ''), ('product', '우유', 99, 3, '')]))
+        self.assertTrue(any(f'{m}개' in f for f in fails), fails)
+        fails = user_check.check_screen_rules(make([('order', f'1044 콜라 {m - 2} · 우유 3', '접수됨', '')]))
+        self.assertTrue(any(f'{m}개' in f for f in fails), fails)
+
+    def test_order_over_basket_is_allowed(self):
+        body = [('product', '콜라', 9, 4, ''), ('product', '우유', 9, 2, ''), ('order_btn', ''),
+                ('order', '1044 콜라 4 · 우유 2', '접수됨', '')]
+        self.assertEqual(user_check.check_screen_rules(make(body)), [])
 
     def test_notice_order_visible(self):
         fails = user_check.check_screen_rules(make(CLEAN, notice='주문 1099: 콜라가 없어 주문이 취소됐습니다'))
@@ -174,6 +182,61 @@ class UserCheckTest(unittest.TestCase):
         marks = [user_check.plain(c.get('value')) for c in root.iter('mxCell') if user_check.plain(c.get('value')).startswith('①')]
         self.assertEqual(marks, ['① 1101'])
         self.assertEqual(user_check.check_screen_rules(root), [])
+
+
+    # ---- 나뉜 주문 (OMS-19): 상세에만 바구니별 진행
+    def _split(self, status='준비 중', basket='바구니 1/2 출고', steps=None):
+        steps = steps or [('10:20', '접수됨'), ('10:21', '준비 중'), (None, '출고 중'), (None, '출고 완료')]
+        items = '미니멘토스 레인보우 4 · 과즙팡 비타민 마이구미 2'
+        return [('order', '1102 ' + items, status, 'hi'), ('detail', '1102', items, status, steps, '', basket)]
+
+    def test_split_order_detail_clean(self):
+        root = make(self._split())
+        self.assertEqual(user_check.check_screen_rules(root), [])
+        lines = [user_check.plain(c.get('value')) for c in root.iter('mxCell') if '_basket' in c.get('id', '')]
+        self.assertEqual(lines, ['바구니 1/2 출고'])
+
+    def test_split_order_never_back_to_received(self):
+        steps = [('10:20', '접수됨'), (None, '준비 중')]
+        fails = user_check.check_screen_rules(make(self._split(status='접수됨', steps=steps)))
+        self.assertTrue(any('바구니' in f for f in fails), fails)
+
+    def test_split_basket_line_format(self):
+        fails = user_check.check_screen_rules(make(self._split(basket='바구니 3/2 출고')))
+        self.assertTrue(any('바구니' in f for f in fails), fails)
+
+    # ---- 점검 중 화면 (COM-06 · R-20)
+    def test_maint_screen_clean(self):
+        root = make([], kind='maint')
+        self.assertEqual(user_check.check_screen_rules(root), [])
+        text = ' '.join(user_check.plain(c.get('value')) for c in root.iter('mxCell'))
+        self.assertIn('지금은 시스템 점검 중입니다', text)
+        for word in ('주문하기', '내 주문', '아이디', '⚠'):
+            self.assertNotIn(word, text)
+
+    def test_maint_screen_has_no_shop_parts(self):
+        def bad(t, x, y):
+            t.v('콜라<br>재고 3', sb_core.S_TXT, x + 40, y + 60, 100, 30, cid=t.nid('prod'))
+            t.v('<b>1042</b>', sb_core.S_TXT, x + 300, y + 60, 60, 16, cid=t.nid('ord'))
+            t.v('주문하기', sb_core.S_BTN, x + 200, y + 200, 60, 16)
+        fails = user_check.check_screen_rules(make([], kind='maint', extra=bad))
+        self.assertGreaterEqual(len([f for f in fails if '점검 중' in f]), 3, fails)
+
+    def test_maint_screen_needs_message(self):
+        def drop(t, x, y):
+            for c in [c for c in t.r.iter('mxCell') if '_maint' in c.get('id', '')]:
+                c.set('value', '점검')
+        fails = user_check.check_screen_rules(make([], kind='maint', extra=drop))
+        self.assertTrue(any('문구' in f for f in fails), fails)
+
+    def test_test_mode_word_forbidden(self):
+        fails = user_check.check_screen_rules(make(CLEAN, notice='시험 모드라 주문을 받지 않습니다'))
+        self.assertTrue(any('시험' in f for f in fails), fails)
+
+        def bad(t, x, y):
+            t.v('시험 모드', sb_core.S_TXT, x + 40, y + 200, 100, 16)
+        fails = user_check.check_screen_rules(make([], kind='maint', extra=bad))
+        self.assertTrue(any('시험' in f for f in fails), fails)
 
 
 if __name__ == '__main__':

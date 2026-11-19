@@ -1,7 +1,7 @@
 """고객 주문 화면 그리기. 위쪽 줄 · 알림 줄 · 왼쪽 상품 · 오른쪽 내 주문.
 
 screen dict:
-  kind: 'login' | 'shop'
+  kind: 'login' | 'shop' | 'maint'(점검 중: 가운데 문구 하나뿐, 로그인 전 · 뒤 같음 — 설계 8절)
   notice: 위쪽 알림 줄 글 (없으면 None)
   mark: 'notice'면 알림 줄 [확인]에 ①
   body 항목:
@@ -12,10 +12,11 @@ screen dict:
     ('order', 줄 글, 상태, 표시)           상태가 '접수됨'일 때만 [취소]를 그림. 표시 'hi'면 줄만 노랑,
                                           '①'이면 줄 노랑 + [취소]에 ①, 'open'이면 줄 노랑 + 주문 번호에 ① (누르면 상세)
                                           (줄 글은 '번호 상품 수량 · …')
-    ('detail', 번호, 상품 글, 상태, 진행, 표시)
+    ('detail', 번호, 상품 글, 상태, 진행, 표시[, 바구니])
                                           주문 상세 패널: 오른쪽 내 주문 자리를 덮고 열림. 진행은 [(시각|None, 상태 말, 덧붙임?)],
                                           시각이 None이면 아직 안 온 단계(회색). 상태가 '접수됨'이면 [취소].
                                           표시 '' | 'close'(① ×) | 'cancel'(① 취소)
+                                          바구니: 나뉜 주문(OMS-19)의 바구니별 진행 글 (예 '바구니 1/2 출고'). 상태 줄 아래 따로 한 줄
     ('dialog', 글, 버튼들)
 """
 from sb_core import (BAR_H, S_ALERT, S_BAR, S_BTN, S_BTN_OFF, S_BTN_ON, S_DIALOG, S_DIM, S_PANEL, S_PANEL_HEAD, S_ROW,
@@ -29,6 +30,8 @@ ROW_H = 38  # 두 줄 (상품: 이미지 · 이름 / 재고, 주문: 번호 · �
 IMG = 30
 S_IMG = 'rounded=0;html=1;dashed=1;fillColor=#ffffff;strokeColor=#999999;fontSize=7;fontColor=#999999;whiteSpace=wrap;'
 S_TXT_TOP = S_TXT.replace('verticalAlign=middle', 'verticalAlign=top')
+S_MAINT = 'rounded=1;arcSize=6;html=1;fillColor=#ffffff;strokeColor=#999999;fontSize=12;align=center;verticalAlign=middle;whiteSpace=wrap;fontColor=#333333;'
+MAINT_MSG = '지금은 시스템 점검 중입니다.<br>점검이 끝나면 다시 주문할 수 있습니다.'
 
 
 def _btn(t, label, right, y, cid=None):
@@ -47,6 +50,11 @@ def screen(t, x, y, s):
     t.v('', S_SCREEN, x, y, W, H)
     if s['kind'] == 'login':
         login_screen(t, x, y, s.get('body', ()))
+        return
+    if s['kind'] == 'maint':
+        # 점검 중: 위쪽 줄은 이름만 (로그인 전 · 뒤 같은 화면), 가운데 문구 하나
+        t.v('<b>IFP 주문</b>', S_BAR, x, y, W, BAR_H)
+        t.v(MAINT_MSG, S_MAINT, x + 80, y + 95, W - 160, 70, cid=t.nid('maint'))
         return
     t.v('<b>IFP 주문</b>', S_BAR, x, y, W, BAR_H)
     t.v('고객1', S_TXT, x + W - 150, y + 2, 50, BAR_H - 4)
@@ -114,7 +122,8 @@ def screen(t, x, y, s):
 
 def _detail(t, px, py, pw, ph, it):
     """주문 상세 패널: 머리 · 상품 · 상태([취소]) · 시간별 진행."""
-    _, no, items, status, steps, mark = it
+    _, no, items, status, steps, mark = it[:6]
+    basket = it[6] if len(it) > 6 else None
     t.v('', S_PANEL, px, py, pw, ph)
     t.v(f'<b>주문 {no} 상세</b>', S_PANEL_HEAD, px, py, pw, 18, cid=t.nid('dno'))
     _btn(t, ('① ' if mark == 'close' else '') + '×', px + pw - 3, py + 1)
@@ -127,6 +136,9 @@ def _detail(t, px, py, pw, ph, it):
     if status == '접수됨':
         _btn(t, ('① ' if mark == 'cancel' else '') + '취소', px + pw - 6, cy, cid=t.nid('cancel'))
     cy += 22
+    if basket:
+        t.v(basket, S_TXT, px + 36, cy - 6, pw - 40, 14, cid=t.nid('basket'))
+        cy += 12
     t.v('<b>진행</b>', S_TXT, px + 4, cy, 60, 14)
     cy += 16
     last = max((i for i, s in enumerate(steps) if s[0]), default=-1)

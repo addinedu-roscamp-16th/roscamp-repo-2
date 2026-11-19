@@ -3,16 +3,73 @@ from sb_core import *  # noqa: F401,F403
 from sb_core import buttons as _buttons, login_screen
 
 
-def topbar(t, x, y, w, mode, menu='현황', mark=None, estop_view=False, mode_off=False, badge=0, closing=False):
-    """위쪽 고정 줄. mode: '실행 중' | '서비스 일시 정지'. mark: 'mode' | 'estop' (① 표시).
-    mode_off: 작업 모드 버튼을 꺼진 모양으로. badge: 현황 메뉴 옆 알림 수."""
+S_BAND = 'rounded=0;html=1;fillColor=#fa6800;strokeColor=#c73500;fontColor=#ffffff;fontSize=9;fontStyle=1;align=left;spacingLeft=6;'
+S_OPLINE = 'rounded=0;html=1;fillColor=#f0f0f0;strokeColor=#bbbbbb;fontColor=#555555;fontSize=9;align=left;spacingLeft=6;'
+S_ENTERING = 'rounded=0;html=1;fillColor=#fff2cc;strokeColor=#d79b00;fontColor=#9a5b00;fontSize=9;fontStyle=1;align=left;spacingLeft=6;'
+S_TOAST = 'rounded=1;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#2d6a2d;fontSize=9;fontStyle=1;whiteSpace=wrap;'
+S_MODAL = 'rounded=1;arcSize=3;html=1;fillColor=#ffffff;strokeColor=#333333;strokeWidth=2;'
+OP_H = 20  # 운영 모드 줄(주황 띠 · 진입 중 줄 · 개발자 운영 모드 줄) 높이
+
+
+def opline(t, x, y, w, op, mark=None):
+    """위쪽 고정 줄 바로 아래 운영 모드 줄 (v1.4).
+    op: 'dev' (정상 운영 · 개발자: [시험 모드로]) | 'entering' (시험 모드 진입 중 · [열기]) | 'test' (주황 띠 "시험 모드")."""
+    yy = y + BAR_H
+    if op == 'test':
+        t.v('시험 모드 · 운영 모드: 시험 (시험 DB)', S_BAND, x, yy, w, OP_H)
+        _buttons(t, x, yy + 2, [('① ' if mark == 'op' else '') + '정상 운영으로'], x + w - 4)
+    elif op == 'entering':
+        t.v('시험 모드 진입 중 · 남은 운반 건 2건', S_ENTERING, x, yy, w, OP_H)
+        _buttons(t, x, yy + 2, [('① ' if mark == 'op' else '') + '열기'], x + w - 4)
+    elif op == 'dev':
+        t.v('운영 모드: 정상 운영 · 개발자 계정', S_OPLINE, x, yy, w, OP_H)
+        _buttons(t, x, yy + 2, [('① ' if mark == 'op' else '') + '시험 모드로'], x + w - 4)
+
+
+def modal(t, x, y, title, rows, btns, close=''):
+    """단계형 모달 (v1.4 운영 모드 마감). rows: ('row', 글, hi) · ('text', 글). close: 제목 줄 오른쪽 버튼 ('닫기' 등)."""
+    W, H = SCR_W, SCR_H
+    t.v('', S_DIM, x, y, W, H)
+    mx, my, mw, mh = x + 16, y + BAR_H + 8, W - 32, H - BAR_H - 14
+    t.v('', S_MODAL, mx, my, mw, mh)
+    t.v('<b>' + title + '</b>', S_PANEL_HEAD, mx + 4, my + 4, mw - 8, 18)
+    if close:
+        _buttons(t, mx, my + 5, [close], mx + mw - 6)
+    cy = my + 26
+    for it in rows:
+        if it[0] == 'row':
+            t.v(it[1], S_ROW_HI if it[2] else S_ROW, mx + 6, cy, mw - 12, 18)
+            cy += 20
+        else:
+            t.v(it[1], S_TXT, mx + 6, cy, mw - 12, 16)
+            cy += 17
+    _buttons(t, mx, my + mh - 21, btns, mx + mw - 6)
+
+
+def overlay(t, x, y, body):
+    """화면 위에 겹치는 것 (v1.4): 확인 창 · 모달 · 짧은 안내. 대시보드가 아닌 화면에서도 쓴다."""
+    for it in body:
+        if it[0] == 'toast':
+            t.v(it[1], S_TOAST, x + 318, y + BAR_H + OP_H + 22, SCR_W - 324, 30)  # 알림 칸 자리
+        elif it[0] == 'dialog2':
+            t.v('', S_DIM, x, y, SCR_W, SCR_H)
+            t.v(it[1], S_DIALOG, x + 100, y + 66, 320, 116)
+            _buttons(t, x, y + 160, it[2], x + 410)
+        elif it[0] == 'modal':
+            modal(t, x, y, *it[1:])
+
+
+def topbar(t, x, y, w, mode, menu='현황', mark=None, estop_view=False, mode_off=False, badge=0, closing=False, dev=False):
+    """위쪽 고정 줄. mode: '실행 중' | '서비스 일시 정지'. mark: 'mode' | 'estop' | 'menu' (① 표시).
+    mode_off: 작업 모드 버튼을 꺼진 모양으로. badge: 현황 메뉴 옆 알림 수. dev: 시험 모드의 개발자 (메뉴 "시험")."""
     t.v('', S_BAR, x, y, w, BAR_H)
     t.v('<b>IFP</b>', S_TXT, x + 4, y + 2, 24, BAR_H - 4)
     if estop_view:
         t.v('<i>비상조치 화면으로 고정됨</i>', S_TXT.replace('fontColor=#333333', 'fontColor=#888888'), x + 30, y + 2, 150, BAR_H - 4)
     else:
-        items = ['현황', '주문 관리', '로봇', '재고', '이력']
-        lab = lambda i: i + (f' <font color="#b20000">●{badge}</font>' if i == '현황' and badge else '')
+        items = ['현황', '주문 관리', '로봇', '재고', '이력'] + (['시험'] if dev else [])
+        lab = lambda i: (('① ' if mark == 'menu' and i == '시험' else '') + i
+                         + (f' <font color="#b20000">●{badge}</font>' if i == '현황' and badge else ''))
         menu_txt = ' | '.join(f'<u><b>{lab(i)}</b></u>' if i == menu else lab(i) for i in items)
         t.v(menu_txt, S_TXT, x + 28, y + 2, 186, BAR_H - 4)
     run = mode == '실행 중'
@@ -33,17 +90,25 @@ def topbar(t, x, y, w, mode, menu='현황', mark=None, estop_view=False, mode_of
 
 
 
-def draw(t, x, y, kind, mode='실행 중', body=(), menu=None, mark=None, mode_off=False, badge=0, closing=False):
-    """kind: login | dashboard | orders | stock | history | alerts | estop. 화면 크기 (SCR_W, SCR_H)."""
+def draw(t, x, y, kind, mode='실행 중', body=(), menu=None, mark=None, mode_off=False, badge=0, closing=False, op=None):
+    """kind: login | dashboard | orders | stock | history | alerts | estop | test. 화면 크기 (SCR_W, SCR_H).
+    op: 운영 모드 줄 (opline 참고, v1.4). 'test'면 주황 띠와 메뉴 "시험"(개발자)."""
     W, H = SCR_W, SCR_H
     t.v('', S_SCREEN, x, y, W, H)
     if kind == 'login':
         login_screen(t, x, y, body)
         return
     menu = menu or {'dashboard': '현황', 'orders': '주문 관리', 'robots': '로봇', 'stock': '재고', 'history': '이력',
-                    'alerts': '이력'}.get(kind, '현황')
-    topbar(t, x, y, W, mode, menu, mark, estop_view=(kind == 'estop'), mode_off=mode_off, badge=badge, closing=closing)
+                    'alerts': '이력', 'test': '시험'}.get(kind, '현황')
+    topbar(t, x, y, W, mode, menu, mark, estop_view=(kind == 'estop'), mode_off=mode_off, badge=badge, closing=closing,
+           dev=(op == 'test'))
     top = y + BAR_H + 6
+    if op:
+        opline(t, x, y, W, op, mark)
+        top += OP_H
+    if kind == 'test':
+        test_screen(t, x, top, body)
+        return
     if kind == 'dashboard':
         lw = 300
         has_map = not any(it[0] == 'nomap' for it in body)
@@ -149,7 +214,31 @@ def draw(t, x, y, kind, mode='실행 중', body=(), menu=None, mark=None, mode_o
 
 
 
+def test_screen(t, x, top, body):
+    """시험 화면 (10번 탭, SCR-17 · OMS-21). body: ('orders', 글, 버튼들) · ('head', 글) · ROW · ('text', 글)."""
+    W = SCR_W
+    cy = top
+    for it in body:
+        if it[0] == 'orders':
+            t.v(it[1], S_BOX, x + 6, cy, W - 12, 36)
+            _buttons(t, x, cy + 18, it[2], x + W - 9)
+            cy += 39
+        elif it[0] == 'head':
+            t.v(it[1], S_TXT, x + 6, cy, W - 12, 12)
+            cy += 13
+        elif it[0] == 'row':
+            _, text, buttons, hi = (list(it) + [[], False])[:4]
+            t.v(text, S_ROW_HI if hi else S_ROW, x + 6, cy, W - 12, 19)
+            if buttons:
+                _buttons(t, x, cy + 1.5, buttons, x + W - 9)
+            cy += 20
+        elif it[0] == 'text':
+            t.v(it[1], S_TXT, x + 6, cy, W - 12, 15)
+            cy += 15
+
+
 def screen(t, x, y, s):
     """sb_core.build_tab에 넘기는 화면 함수. s: 장면의 screen dict."""
     draw(t, x, y, s['kind'], s.get('mode', '실행 중'), s.get('body', ()), s.get('menu'), s.get('mark'),
-         s.get('mode_off', False), s.get('badge', 0), s.get('closing', False))
+         s.get('mode_off', False), s.get('badge', 0), s.get('closing', False), s.get('op'))
+    overlay(t, x, y, s.get('body', ()))

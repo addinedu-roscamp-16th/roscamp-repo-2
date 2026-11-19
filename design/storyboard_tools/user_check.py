@@ -9,15 +9,24 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from sb_core import S_SCREEN  # noqa: E402
 from user_screen import STATUS  # noqa: E402
 
-TAB_NAMES = ['0. 화면 구성', '1. 평상시 주문', '2. 재고 초과 거절', '3. 주문 취소', '4. 결품', '5. 마감 뒤 거절']
-VERSION = 'v1.0 · 2026-11-19'
-COVER = ['SCR-01', 'SCR-02', 'SCR-03', 'SCR-04', 'SCR-05', 'SCR-09', 'OMS-03', 'OMS-10', 'OMS-13', 'CEN-13']
+TAB_NAMES = ['0. 화면 구성', '1. 평상시 주문', '2. 재고 초과 거절', '3. 주문 취소', '4. 결품', '5. 마감 뒤 거절', '6. 점검 중']
+VERSION = 'v1.1 · 2026-11-19'
+COVER = ['SCR-01', 'SCR-02', 'SCR-03', 'SCR-04', 'SCR-05', 'SCR-09', 'OMS-03', 'OMS-10', 'OMS-13', 'CEN-13',
+         'OMS-19', 'OMS-20', 'COM-06']
+# '시험'(시험 모드)도 내부 말: 고객에게는 "점검"으로만 보인다 (설계 8절)
 FORBIDDEN = ['장애', '보류', '일시 정지', '일시 중지', '마감', '결품', '배정', '담는 중', '운반 중', 'Pode', 'Phody', 'Phony',
-             'RECEIVED', 'ASSIGNED', 'FILLING', 'HELD', 'SHIPPED', 'PARTIAL', 'CANCELLED', 'REJECT']
+             '시험', 'RECEIVED', 'ASSIGNED', 'FILLING', 'HELD', 'SHIPPED', 'PARTIAL', 'CANCELLED', 'REJECT', 'TEST']
+MAINT_TEXT = '지금은 시스템 점검 중입니다'
 REQUIRED_TEXT = {'0. 화면 구성': STATUS,
-                 '3. 주문 취소': ['이미 준비가 시작되어 취소할 수 없습니다']}
+                 '3. 주문 취소': ['이미 준비가 시작되어 취소할 수 없습니다'],
+                 '6. 점검 중': [MAINT_TEXT, '연결 중']}
 DESC_HEADS = ('고객: ', '시스템: ', '근거: ')
-BASKET = 4  # 주문 한 건 최대 수량 (바구니 용량, 주문 DB 설계 4.5)
+BASKET = 4  # 바구니 하나의 최대 상품 개수 (운영 설정 basket_capacity, 주문 DB 설계 4.13). 넘는 주문은 나뉨 (OMS-19)
+ORDER_MAX = 8  # 주문 한 건의 최대 상품 개수 (운영 설정 max_order_items, OMS-20). 스토리보드 예시 값
+# 점검 중 화면에 있으면 안 되는 것: 셀 id 조각(상품 · 수량 · 내 주문 · 알림 · 상세) / 글(주문하기 · 내 주문 · 로그인 창)
+MAINT_NO_IDS = {'_prod': '상품 목록', '_qty': '수량 버튼', '_img': '상품 이미지', '_ord': '내 주문', '_items': '내 주문',
+                '_notice': '위쪽 알림 줄', '_dno': '주문 상세'}
+MAINT_NO_TEXT = ['주문하기', '내 주문', '상품 검색', '아이디', '비밀번호', '로그아웃']
 # 다이어그램 2. 주문의 상태 이름
 DIAGRAM_STATES = ['접수됨', '배정됨', '담는 중', '담기 일시 중지', '운반 중', '출고됨', '일부 출고됨', '주문 처리 보류', '취소됨']
 
@@ -69,6 +78,25 @@ def check_screen_rules(root):
                 fails.append(f'{where}: ① 누르는 곳이 {len(marks)}개 {marks}')
             fails += _check_numbers(where, inside)
             fails += _check_detail(where, inside)
+            fails += _check_maint(where, inside)
+    return fails
+
+
+def _check_maint(where, inside):
+    """점검 중 화면(설계 8절): 가운데 문구만. 상품 · 내 주문 · [주문하기] · 로그인 창 · 알림 줄이 없다."""
+    fails = []
+    if not any('_maint' in c.get('id', '') for c in inside):
+        return fails
+    where = where + ' 점검 중'
+    if not any(MAINT_TEXT in plain(c.get('value')) for c in inside if '_maint' in c.get('id', '')):
+        fails.append(f'{where}: 문구 "{MAINT_TEXT}…"가 없음')
+    for c in inside:
+        cid, txt = c.get('id', ''), plain(c.get('value'))
+        hit = [name for k, name in MAINT_NO_IDS.items() if k in cid] + [w for w in MAINT_NO_TEXT if w in txt]
+        if '_cancel' in cid or txt.replace('①', '').strip() == '취소':
+            hit.append('[취소]')
+        for name in hit:
+            fails.append(f'{where}: 점검 중 화면에 {name}이(가) 보임 "{txt[:20]}"')
     return fails
 
 
@@ -84,7 +112,8 @@ def _order_no(c):
 
 def _check_detail(where, inside):
     """상세 패널: 진행 단계 말은 상태 말 7개, 시각은 차례대로, 상태 = 시각이 있는 마지막 단계,
-    같은 번호의 내 주문 줄과 상태 · 상품이 같음."""
+    같은 번호의 내 주문 줄과 상태 · 상품이 같음. 나뉜 주문의 바구니 줄은 진행 단계가 아니라 따로 한 줄:
+    "바구니 k/n 출고"(1 ≤ k ≤ n, n ≥ 2, 바구니 수 ≤ 주문 수량 / 용량 올림), 상태는 접수됨이 아님 (주문 요약 규칙, 주문 DB 설계 4.4)."""
     fails = []
     heads = [c for c in inside if '_dno' in c.get('id', '')]
     if not heads:
@@ -107,6 +136,18 @@ def _check_detail(where, inside):
             timed.append(word)
     if timed and timed[-1] != status:
         fails.append(f'{where}: 상세 상태 "{status}" ≠ 진행의 마지막 단계 "{timed[-1]}"')
+    for b in (c for c in inside if '_basket' in c.get('id', '')):
+        txt = plain(b.get('value'))
+        m = re.fullmatch(r'바구니 (\d+)/(\d+) 출고', txt)
+        if not m or not 1 <= int(m.group(1)) <= int(m.group(2)) or int(m.group(2)) < 2:
+            fails.append(f'{where}: 바구니 줄 "{txt}"이 "바구니 k/n 출고"(1 ≤ k ≤ n, n ≥ 2) 꼴이 아님')
+        elif status == '접수됨':
+            fails.append(f'{where}: 바구니가 출고된 나뉜 주문이 접수됨으로 보임 (주문 요약 규칙: 되돌아가지 않음)')
+        ditems = [c for c in inside if '_ditems' in c.get('id', '')]
+        if m and ditems:
+            qty = sum(int(k) for k in re.findall(r'\d+', plain(ditems[0].get('value'))))
+            if not -(-qty // BASKET) <= int(m.group(2)) <= qty:
+                fails.append(f'{where}: 바구니 수 {m.group(2)}이 주문 수량 {qty}(바구니 {BASKET}개씩)과 맞지 않음')
     for o in (c for c in inside if '_ord' in c.get('id', '') and _order_no(c) == no):
         row = [c for c in inside if '_st' in c.get('id', '') and _overlap(c, o)]
         if row and plain(row[0].get('value')) != status:
@@ -123,7 +164,8 @@ def _overlap(a, b):
 
 
 def _check_numbers(where, inside):
-    """상품 줄마다 이미지 칸, 고른 수량 ≤ 재고, 한 주문 합 ≤ 바구니 용량, 알림의 주문 번호가 내 주문 목록에 있음."""
+    """상품 줄마다 이미지 칸, 고른 수량 ≤ 재고, 한 주문 합 ≤ 주문 최대(OMS-20, 바구니 용량을 넘어도 됨 — OMS-19),
+    알림의 주문 번호가 내 주문 목록에 있음."""
     fails = []
     prods = [c for c in inside if '_prod' in c.get('id', '')]
     qtys = [c for c in inside if '_qty' in c.get('id', '')]
@@ -142,13 +184,13 @@ def _check_numbers(where, inside):
                 total += n
                 if n > stock:
                     fails.append(f'{where}: 고른 수량 {n}이 재고보다 많음 "{pt}"')
-    if total > BASKET:
-        fails.append(f'{where}: 고른 수량 합 {total} — 한 주문 최대 {BASKET}개')
+    if total > ORDER_MAX:
+        fails.append(f'{where}: 고른 수량 합 {total} — 한 주문 최대 {ORDER_MAX}개')
     nums = {_order_no(o) for o in inside if '_ord' in o.get('id', '')}
     for it in (c for c in inside if '_items' in c.get('id', '')):
         n = sum(int(k) for k in re.findall(r'\d+', plain(it.get('value'))))
-        if n > BASKET:
-            fails.append(f'{where}: 주문 "{plain(it.get("value"))}" 수량 합 {n} — 한 주문 최대 {BASKET}개')
+        if n > ORDER_MAX:
+            fails.append(f'{where}: 주문 "{plain(it.get("value"))}" 수량 합 {n} — 한 주문 최대 {ORDER_MAX}개')
     for nt in (c for c in inside if '_notice' in c.get('id', '')):
         for no in re.findall(r'주문 (\d+)', plain(nt.get('value'))):
             if no not in nums:
