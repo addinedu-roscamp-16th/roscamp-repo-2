@@ -1,0 +1,16 @@
+# AI 작업 안내
+
+이 파일은 안내판입니다. 규칙 내용은 여기에 쓰지 않고, 작업에 맞는 문서를 **그 작업을 할 때만** 열어 읽고 따릅니다. (같은 내용이 `AGENTS.md`에도 있습니다. 하나를 고치면 다른 하나도 고칩니다.)
+
+| 작업 | 먼저 읽을 문서 |
+|---|---|
+| ROS 2 통신 코드 (토픽 · 서비스 · 액션, QoS, 재시도, `fleet_interfaces`) | `docs/설계/통신_규칙.md` (규칙 `IR-nn`을 따름) |
+| 인터페이스 구현 · 변경 (이름 · 타입 · 칸) | `docs/설계/인터페이스_명세.md`와 `interfaces/fleet_interfaces/contract.yaml` (contract가 원본, 기준 버전은 명세 머리 참고) |
+| 미확정 항목에 걸림 | `docs/설계/설계_검토_사항.md` (`Q-nn`. "열림"이면 짐작해 구현하지 말고 사용자에게 물음) |
+| 빌드 · 실행 · ROS 도메인 | `docs/개발_규칙.md` |
+| 화면 · 다이어그램 · 스토리보드 | `design/README.md` |
+| 주문 DB | `docs/superpowers/specs/2026-11-18-order-db-design.md`, `design/db/README.md` |
+
+공통:
+- 인터페이스를 바꾸면 `contract.yaml` · 명세 · (필요하면) 통신 규칙을 같은 커밋에서 고칩니다.
+- 문서와 답변은 한국어로 씁니다.
