@@ -28,6 +28,7 @@ design/
 ├─ architecture/    HW · SW 아키텍처
 ├─ diagrams/        상태 · 순서도 · 시퀀스, 비상정지 순서도, 관리자 · 사용자 스토리보드
 ├─ storyboard_tools/ 스토리보드 생성 · 검사 스크립트 (README 참고)
+├─ tools/          PNG 일괄 내보내기 (export_png.py)
 ├─ db/             주문 DB 원본(DBML) · DDL · 시험 (README 참고)
 └─ exports/         제출용 PNG · zip (제출할 때만 갱신)
 ```
@@ -115,6 +116,35 @@ git push origin submit/2026-11-24-scenario
 - 2026-11-18 제출본(`exports/Scenario_2nd/`)은 Confluence Scenario 페이지 첨부와 같은 이름입니다.
 - 비상정지 순서도 PNG는 Confluence 첨부와 같은 이름으로 두었습니다.
 - 2026-11-19 관리자 스토리보드 제출본(`exports/스토리보드_1st/`)은 draw.io 내보내기 이름 그대로이며, Confluence 첨부와 같은 이름입니다.
+
+## PNG 일괄 내보내기 (제출용)
+
+`design/tools/export_png.py`가 draw.io 탭을 제출 이름 규칙에 맞춰 한꺼번에 PNG로 뽑습니다. draw.io Desktop(`drawio` 명령)이 필요합니다.
+
+- 이름 규칙: 1차 제출 `2팀_<종류>.png`, 2차 `2팀_<종류>_01.png`, 3차 `_02` … 한 종류에 탭이 여럿이면 `-<탭 이름>`을 붙입니다 (`:` 등은 `_`로).
+  - 예: `2팀_SequenceDiagram_02-6-1-1. 시퀀스_ 주문.png`, `2팀_GUIDesign_02-관리자-0. 화면 구성.png`
+- 종류: SequenceDiagram · StateDiagram · ClassDiagram · ERDiagram · GUIDesign · InterfaceSpecification. 어느 파일 · 탭이 어느 종류인지는 스크립트 안의 `RULES` 표에서 정합니다 (지금: IFP 0 · 2 ~ 5번 탭 → StateDiagram, 6-x → SequenceDiagram, 두 스토리보드 → GUIDesign. 순서도는 내보내지 않음). 새 다이어그램이 생기면 표에 한 줄 더합니다.
+
+```bash
+python3 design/tools/export_png.py        # 제출 차수 · 출력 폴더를 물어보고, 목록을 보인 뒤 확인 [Y/n]
+python3 design/tools/export_png.py 3 design/exports/Scenario_3rd --dry-run   # 이름만 확인
+python3 design/tools/export_png.py 3 design/exports/Scenario_3rd             # 내보내기
+python3 design/tools/export_png.py 3 design/exports/GUI_3rd --only GUIDesign  # 한 종류만
+```
+
+- **차수 주의: 파일 번호는 "차수 − 1"입니다.** 1차는 번호 없음, 2차 `_01`, 3차 `_02`, 4차 `_03` … 그래서 폴더 이름(`Scenario_3rd`)과 파일 번호(`_02`)가 다르게 보이지만 정상입니다. 지난 제출과 이어집니다.
+
+  | 제출 차수 | 파일 번호 | 예 (시퀀스) |
+  |---|---|---|
+  | 1차 (11-13) | 없음 | `2팀_SequenceDiagram_6-1_정상_흐름.png` |
+  | 2차 (11-18) | `_01` | `2팀_SequenceDiagram_01-6-1-1. 시퀀스_ 주문.png` |
+  | 3차 | `_02` | `2팀_SequenceDiagram_02-6-1-1. 시퀀스_ 주문.png` |
+
+  실행 전에 `--dry-run`으로 이름을 먼저 확인하세요.
+- 차수나 출력 폴더를 빼고 실행하면 물어봅니다. 출력 폴더를 그냥 Enter로 넘기면 `design/exports/제출_<차수>차`입니다.
+- 배율 기본 1(지난 제출본과 같은 크기), `--scale 2`로 크게. 같은 이름 파일이 있으면 멈추고, `--force`면 덮어씁니다.
+- snap으로 설치한 draw.io는 `/tmp`에 쓸 수 없습니다. 출력 폴더는 저장소 안이나 홈 폴더로 둡니다.
+- 이름 규칙 시험: `python3 -m unittest discover -s design/tools/tests`
 
 ## draw.io 버전 라벨 고치기
 
