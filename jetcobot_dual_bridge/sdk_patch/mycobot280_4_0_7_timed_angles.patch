@@ -1,0 +1,84 @@
+--- a/mycobot280.py
++++ b/mycobot280.py
+@@ -298,6 +298,81 @@
+         """Query sports mode"""
+         return self._mesg(ProtocolCode.GET_FRESH_MODE, has_reply=True)
+ 
++    def send_timed_angles(self, points, speed, period_s=0.4, lead_s=2.0,
++                          should_stop=None, check=None, on_send=None):
++        """Stream a timed joint path in refresh mode without waypoint waits.
++
++        ``points`` contains ``(seconds_from_start, six_angles_in_degrees)``.
++        The target is sampled ahead in time and sent with ``send_angles``. This
++        Python scheduler does not add firmware trajectory blending or prove the
++        path followed between commands. ``check(target, elapsed)`` may raise to
++        abort when measured feedback or clearance is unacceptable. The method
++        returns after sending the final target, not after physical arrival.
++        The caller must handle cancellation, final feedback, and SDK stop.
++        """
++        if self.get_fresh_mode() != 1:
++            raise RuntimeError('send_timed_angles requires fresh mode 1')
++        if not isinstance(speed, int) or isinstance(speed, bool) or not 1 <= speed <= 100:
++            raise ValueError('speed must be an integer in [1, 100]')
++        if not math.isfinite(period_s) or not 0.25 <= period_s <= 2.0:
++            raise ValueError('period_s must be in [0.25, 2.0]')
++        if not math.isfinite(lead_s) or not 0 <= lead_s <= 5.0:
++            raise ValueError('lead_s must be in [0, 5.0]')
++        path = []
++        for index, row in enumerate(points):
++            if len(row) != 2:
++                raise ValueError('each trajectory point needs time and six angles')
++            stamp, angles = row
++            stamp = float(stamp)
++            angles = tuple(float(value) for value in angles)
++            if (not math.isfinite(stamp) or stamp < 0 or len(angles) != 6 or
++                    not all(math.isfinite(value) for value in angles) or
++                    (index and stamp <= path[-1][0])):
++                raise ValueError('invalid timed angle trajectory')
++            path.append((stamp, angles))
++        if len(path) < 2 or path[-1][0] <= 0:
++            raise ValueError('trajectory needs at least two points and positive duration')
++
++        def sample(stamp):
++            if stamp <= path[0][0]:
++                return path[0][1]
++            for (t0, q0), (t1, q1) in zip(path, path[1:]):
++                if stamp <= t1:
++                    fraction = (stamp-t0)/(t1-t0)
++                    return tuple(a+fraction*(b-a) for a, b in zip(q0, q1))
++            return path[-1][1]
++
++        started = time.monotonic()
++        last_target = None
++        count = 0
++        while True:
++            tick_started = time.monotonic()
++            elapsed = tick_started-started
++            if should_stop is not None and should_stop():
++                raise InterruptedError('timed trajectory canceled')
++            if elapsed > path[-1][0]+30.0:
++                raise RuntimeError('timed trajectory could not send final target within 30 extra seconds')
++            target_time = min(path[-1][0], elapsed+lead_s)
++            target = sample(target_time)
++            if check is not None:
++                checked = check(target, elapsed)
++                if checked is not None:
++                    target = tuple(float(value) for value in checked)
++                    if len(target) != 6 or not all(math.isfinite(value) for value in target):
++                        raise ValueError('check returned invalid target')
++            final = max(abs(a-b) for a, b in zip(target, path[-1][1])) < 1e-6
++            if (last_target is None or final or
++                    max(abs(a-b) for a, b in zip(target, last_target)) >= 0.2):
++                self.send_angles([round(value, 2) for value in target], speed,
++                                 _async=True)
++                count += 1
++                last_target = target
++                if on_send is not None:
++                    on_send(target, elapsed, count, final)
++            if final:
++                return count
++            time.sleep(max(0.0, period_s-(time.monotonic()-tick_started)))
++
+     def read_next_error(self):
+         """Robot Error Detection
+ 

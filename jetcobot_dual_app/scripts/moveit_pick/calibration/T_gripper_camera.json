@@ -1,0 +1,379 @@
+{
+  "passed_internal_consistency": false,
+  "note": "Training-set consistency only, not independent accuracy validation.",
+  "transform": "p_gripper = T_gripper_camera @ p_camera_optical",
+  "base_frame": "real_robot/base_link",
+  "gripper_frame": "real_robot/6_Link",
+  "camera_frame": "OpenCV optical: x right, y down, z forward",
+  "translation_unit": "m",
+  "method": "park",
+  "intrinsics": "/home/ane/camera_code/calibration_results/camera_calibration.npz",
+  "samples": "/home/ane/camera_code/handeye_capture/manual02/handeye_samples.json",
+  "board_type": "charuco",
+  "pattern": [
+    7,
+    5
+  ],
+  "pattern_meaning": "squares",
+  "square_size_m": 0.025,
+  "marker_size_m": 0.017,
+  "dictionary": "DICT_6X6_50",
+  "limits": {
+    "max_reprojection_px": 2.0,
+    "max_translation_rms_m": 0.01,
+    "max_rotation_rms_deg": 3.0
+  },
+  "accepted": [
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0001.png",
+      "reprojection_rmse_px": 0.2452912576319896
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0002.png",
+      "reprojection_rmse_px": 0.4369736746814039
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0003.png",
+      "reprojection_rmse_px": 0.34417864097982753
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0004.png",
+      "reprojection_rmse_px": 0.2888186301331777
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0005.png",
+      "reprojection_rmse_px": 0.2886096915456415
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0006.png",
+      "reprojection_rmse_px": 0.3223566143646035
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0007.png",
+      "reprojection_rmse_px": 0.3180232019839053
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0008.png",
+      "reprojection_rmse_px": 0.26559605304281436
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0009.png",
+      "reprojection_rmse_px": 0.2648651562547254
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0010.png",
+      "reprojection_rmse_px": 0.3463841242219764
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0011.png",
+      "reprojection_rmse_px": 0.344693501086039
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0012.png",
+      "reprojection_rmse_px": 0.4300246813939045
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0013.png",
+      "reprojection_rmse_px": 0.41548514586043195
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0014.png",
+      "reprojection_rmse_px": 0.490402858815048
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0015.png",
+      "reprojection_rmse_px": 0.3062406081998894
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0016.png",
+      "reprojection_rmse_px": 0.35473657918554796
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0017.png",
+      "reprojection_rmse_px": 0.36198090053117704
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0018.png",
+      "reprojection_rmse_px": 0.3856493302082817
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0019.png",
+      "reprojection_rmse_px": 0.40311653268844627
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0020.png",
+      "reprojection_rmse_px": 0.3802786210531365
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0021.png",
+      "reprojection_rmse_px": 0.42299448577143295
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0022.png",
+      "reprojection_rmse_px": 0.39730351253910373
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0023.png",
+      "reprojection_rmse_px": 0.4030188407941853
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0024.png",
+      "reprojection_rmse_px": 0.4429046619216517
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0025.png",
+      "reprojection_rmse_px": 0.4908171907050497
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0026.png",
+      "reprojection_rmse_px": 0.42343507364194466
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0027.png",
+      "reprojection_rmse_px": 0.4010821727719143
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0028.png",
+      "reprojection_rmse_px": 0.39717250630200834
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0029.png",
+      "reprojection_rmse_px": 0.35319318074645595
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0030.png",
+      "reprojection_rmse_px": 0.5752297098753454
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0031.png",
+      "reprojection_rmse_px": 0.5371087766604175
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0032.png",
+      "reprojection_rmse_px": 0.46747611495339714
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0033.png",
+      "reprojection_rmse_px": 0.49067702984680167
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0034.png",
+      "reprojection_rmse_px": 0.4550656570441287
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0035.png",
+      "reprojection_rmse_px": 0.5090268737584212
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0036.png",
+      "reprojection_rmse_px": 0.4304697154062222
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0037.png",
+      "reprojection_rmse_px": 0.406224712354914
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0038.png",
+      "reprojection_rmse_px": 0.47061997706341135
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0039.png",
+      "reprojection_rmse_px": 0.4397934778731252
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0040.png",
+      "reprojection_rmse_px": 0.4351715983993225
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0041.png",
+      "reprojection_rmse_px": 0.458979419965793
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0042.png",
+      "reprojection_rmse_px": 0.47946518013666467
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0043.png",
+      "reprojection_rmse_px": 0.45923051889864586
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0044.png",
+      "reprojection_rmse_px": 0.4785298491317744
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0045.png",
+      "reprojection_rmse_px": 0.420667050894578
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0046.png",
+      "reprojection_rmse_px": 0.4473179313081717
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0047.png",
+      "reprojection_rmse_px": 0.4522047792037687
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0048.png",
+      "reprojection_rmse_px": 0.4249124654541295
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0049.png",
+      "reprojection_rmse_px": 0.4236284914592635
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0050.png",
+      "reprojection_rmse_px": 0.5176373647084463
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/manual02/images/handeye_0051.png",
+      "reprojection_rmse_px": 0.503101812161937
+    }
+  ],
+  "rejected": [],
+  "motion": {
+    "max_relative_rotation_deg": 122.9487983931985,
+    "rotation_singular_values": [
+      21.80585873357594,
+      7.2919493811746445,
+      5.304908490572971
+    ]
+  },
+  "consistency": {
+    "translation_rms_m": 0.012742520263536493,
+    "translation_max_m": 0.029575692061623665,
+    "rotation_rms_deg": 2.5088192529548903,
+    "rotation_max_deg": 4.4250273604159345,
+    "per_sample_translation_m": [
+      0.010378282880517125,
+      0.005494801315203379,
+      0.011307735981048951,
+      0.008597774194587128,
+      0.006684877540774853,
+      0.00477710325828311,
+      0.006757016401237325,
+      0.001315279301362638,
+      0.0027889525237161238,
+      0.02249834855421555,
+      0.029575692061623665,
+      0.027449214127062336,
+      0.02883305912965242,
+      0.017111616909066853,
+      0.022680980508970505,
+      0.013347726415507211,
+      0.011851732048310824,
+      0.012173441699589267,
+      0.015086910997495437,
+      0.013170053809460089,
+      0.01373442566550705,
+      0.008783427564536223,
+      0.00791161151177654,
+      0.009309396831339052,
+      0.009004859145885233,
+      0.012503806807762828,
+      0.012105187993985817,
+      0.0047007373942095755,
+      0.012398141331892038,
+      0.007442761825239121,
+      0.006418506642630258,
+      0.0038650377284456068,
+      0.012476836771395577,
+      0.008390666518629233,
+      0.00815502737869921,
+      0.011595109984185586,
+      0.016365882998187396,
+      0.00605201726191308,
+      0.013632199314658078,
+      0.011351064545304167,
+      0.005988219007015468,
+      0.010714203057677282,
+      0.007713483628749454,
+      0.012494120303136558,
+      0.008681232881295974,
+      0.020735748867122282,
+      0.006044016074155673,
+      0.005262818725778005,
+      0.00310062552379557,
+      0.007353899983506858,
+      0.006763291775033205
+    ],
+    "per_sample_rotation_deg": [
+      2.8640304465690467,
+      2.076108138300556,
+      3.1019412156333037,
+      2.015783621292362,
+      2.4024438200171634,
+      2.213873941845584,
+      2.340906912870531,
+      2.4757291217014052,
+      2.1526932061226334,
+      2.906719336355022,
+      3.5626073954463884,
+      3.9820913958294555,
+      4.031651531289014,
+      3.3468989053985223,
+      3.02078066557066,
+      2.628116244962834,
+      1.9435494015298636,
+      2.0040923122579386,
+      3.1161101217511424,
+      2.4841327830439948,
+      4.232417787347587,
+      1.5657932498961993,
+      0.9742462350242546,
+      1.638539178254957,
+      1.626122671869816,
+      2.8775238765489055,
+      3.051100602177144,
+      2.0713242374977807,
+      1.8398431458782951,
+      1.4874653116972567,
+      1.1145593354237864,
+      1.553769262526314,
+      2.1831600034365075,
+      1.8231657875114948,
+      2.3468858297907373,
+      2.6700445519676705,
+      4.4250273604159345,
+      1.6355202948224605,
+      2.3882601528419682,
+      1.7291470633548136,
+      1.7870426020622934,
+      2.724631798530961,
+      1.5562400290121514,
+      2.191911911720355,
+      1.8796367631417172,
+      3.860495421007541,
+      2.7842535149922374,
+      1.9101595379294756,
+      2.3660404750239477,
+      0.6165833794469687,
+      0.783899395220486
+    ]
+  },
+  "T_gripper_camera": [
+    [
+      0.035071810663956246,
+      0.03367876363184698,
+      0.9988171549272579,
+      0.037943740228967536
+    ],
+    [
+      -0.9975840429601802,
+      0.061149641194361004,
+      0.03296662877854162,
+      -0.0011889193549953648
+    ],
+    [
+      -0.059967035344203945,
+      -0.997560254953069,
+      0.03574202582389585,
+      0.04496242102662258
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ]
+}

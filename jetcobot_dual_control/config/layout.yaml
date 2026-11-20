@@ -1,0 +1,13 @@
+# world is the first robot's base frame. Metres and degrees.
+# left = new robot (.33); right = original robot (.22).
+# Preserve the original robot (.22) base as world origin.
+left:
+  xyz: [0.0, 0.30, 0.0]
+  rpy_deg: [0.0, 0.0, 0.0]
+  # Additional roll relative to the existing Gazebo dual-arm wrist model.
+  # That model already includes the previous single-arm -45deg correction.
+  wrist_roll_adjust_deg: 0.0
+right:
+  xyz: [0.0, 0.0, 0.0]
+  rpy_deg: [0.0, 0.0, 0.0]
+  wrist_roll_adjust_deg: 0.0

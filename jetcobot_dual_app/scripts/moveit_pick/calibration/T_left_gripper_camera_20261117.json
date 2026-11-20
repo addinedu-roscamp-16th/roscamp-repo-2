@@ -1,0 +1,223 @@
+{
+  "passed_internal_consistency": false,
+  "note": "Training-set consistency only, not independent accuracy validation.",
+  "transform": "p_gripper = T_gripper_camera @ p_camera_optical",
+  "base_frame": "right_base_link",
+  "gripper_frame": "left_6_Link",
+  "camera_frame": "OpenCV optical: x right, y down, z forward",
+  "translation_unit": "m",
+  "method": "park",
+  "intrinsics": "/home/ane/camera_code/moveit_pick/calibration/camera_calibration.npz",
+  "samples": "/home/ane/camera_code/handeye_capture/recal_left_20261117/handeye_samples.json",
+  "board_type": "charuco",
+  "pattern": [
+    7,
+    5
+  ],
+  "pattern_meaning": "squares",
+  "square_size_m": 0.025,
+  "marker_size_m": 0.017,
+  "dictionary": "DICT_6X6_50",
+  "limits": {
+    "max_reprojection_px": 2.0,
+    "max_translation_rms_m": 0.01,
+    "max_rotation_rms_deg": 3.0
+  },
+  "accepted": [
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0001.png",
+      "reprojection_rmse_px": 0.7944643851504454
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0002.png",
+      "reprojection_rmse_px": 0.9600470290766784
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0003.png",
+      "reprojection_rmse_px": 0.7095665101887871
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0004.png",
+      "reprojection_rmse_px": 0.6390769737825275
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0005.png",
+      "reprojection_rmse_px": 0.8744038833879618
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0006.png",
+      "reprojection_rmse_px": 1.1921958634338963
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0007.png",
+      "reprojection_rmse_px": 0.6247828750549634
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0008.png",
+      "reprojection_rmse_px": 0.6530920460957104
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0009.png",
+      "reprojection_rmse_px": 0.6540565665583108
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0010.png",
+      "reprojection_rmse_px": 0.726602574106059
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0011.png",
+      "reprojection_rmse_px": 0.8579221882859407
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0012.png",
+      "reprojection_rmse_px": 0.8354024110241782
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0013.png",
+      "reprojection_rmse_px": 0.6565374389859251
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0014.png",
+      "reprojection_rmse_px": 0.9641907434126806
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0015.png",
+      "reprojection_rmse_px": 0.9247229694119725
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0016.png",
+      "reprojection_rmse_px": 0.5260457587514149
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0017.png",
+      "reprojection_rmse_px": 0.8948591170058933
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0018.png",
+      "reprojection_rmse_px": 0.7698640358989413
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0019.png",
+      "reprojection_rmse_px": 0.7011478323329259
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0020.png",
+      "reprojection_rmse_px": 0.6341438995487353
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0021.png",
+      "reprojection_rmse_px": 0.8926293901709016
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0022.png",
+      "reprojection_rmse_px": 0.8636550842662679
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0023.png",
+      "reprojection_rmse_px": 0.41411996287629244
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0024.png",
+      "reprojection_rmse_px": 1.0055540812960013
+    },
+    {
+      "image": "/home/ane/camera_code/handeye_capture/recal_left_20261117/images/handeye_0025.png",
+      "reprojection_rmse_px": 0.7569626928715601
+    }
+  ],
+  "rejected": [],
+  "motion": {
+    "max_relative_rotation_deg": 156.87368366946268,
+    "rotation_singular_values": [
+      14.59178314219059,
+      5.277024208277175,
+      4.547162886960712
+    ]
+  },
+  "consistency": {
+    "translation_rms_m": 0.017684819981341027,
+    "translation_max_m": 0.035951434004398035,
+    "rotation_rms_deg": 2.7933605398353554,
+    "rotation_max_deg": 5.975158973926767,
+    "per_sample_translation_m": [
+      0.009785704646129195,
+      0.009965559708764511,
+      0.019189806626084126,
+      0.011373642961205833,
+      0.012567781495173118,
+      0.005462294264104695,
+      0.011569884563083615,
+      0.02024505764155201,
+      0.017562114015750405,
+      0.007795250577880904,
+      0.016522270966581834,
+      0.016314276439686137,
+      0.023069851596349725,
+      0.02028270933394142,
+      0.01512966154567669,
+      0.004515326829741366,
+      0.018814200510473805,
+      0.017661053677155873,
+      0.013146482356703541,
+      0.02473279499867516,
+      0.02183383390966406,
+      0.018532169556784574,
+      0.015051407522525106,
+      0.02244455450420919,
+      0.035951434004398035
+    ],
+    "per_sample_rotation_deg": [
+      1.4122009854800746,
+      1.3336216806557903,
+      2.1136751131326457,
+      1.1652738841486536,
+      1.5607137204621007,
+      5.975158973926767,
+      2.598940229296069,
+      2.49404804288965,
+      1.8302638965502458,
+      0.6761906049017011,
+      2.5021374168104034,
+      1.53038139582008,
+      3.36742601817892,
+      2.550461863346768,
+      2.564898034734934,
+      1.887471106039063,
+      2.7139161735208104,
+      2.836850879034574,
+      2.785349737342355,
+      3.4600034111459514,
+      3.3175212265303755,
+      3.353622686284946,
+      1.7647286784388907,
+      3.3541551468411344,
+      4.7121520772270795
+    ]
+  },
+  "T_gripper_camera": [
+    [
+      0.05045817990242418,
+      0.006474203933976526,
+      0.99870519011586,
+      0.024195285790190237
+    ],
+    [
+      -0.996521366822218,
+      0.0667355657290063,
+      0.049915225468852464,
+      -0.001832716336792605
+    ],
+    [
+      -0.06632599450978088,
+      -0.9977496925332778,
+      0.009819037734816294,
+      0.04679357890331311
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ]
+}

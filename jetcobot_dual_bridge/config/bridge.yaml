@@ -1,0 +1,15 @@
+# Same values as the 2026-11-19 final Pi command (both arms).
+# robot_side and the namespace come from the launch argument `side`.
+/**:
+  ros__parameters:
+    enable_motion: true
+    native_interpolation: true
+    state_hz: 2.0
+    gripper_type: 0
+    drag_speed: 200
+    drag_step_deg: 8.0
+    drag_deviation_deg: 1.5
+    drag_corner_trim_deg: 0.0
+    drag_send_interval_s: 0.4
+    endpoint_settle_s: 0.5
+    feedback_grace_s: 2.5

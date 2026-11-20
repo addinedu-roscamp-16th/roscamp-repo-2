@@ -1,0 +1,65 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Name: Grid
+      Value: true
+    - Class: moveit_rviz_plugin/MotionPlanning
+      Name: Dual real - PLAN ONLY
+      Enabled: true
+      Move Group Namespace: /jetcobot_dual
+      Robot Description: robot_description
+      Planning Scene Topic: /jetcobot_dual/monitored_planning_scene
+      Planned Path:
+        Trajectory Topic: /jetcobot_dual/display_planned_path
+        Loop Animation: true
+        State Display Time: 0.05 s
+      Planning Request:
+        Planning Group: arm_left
+        Planning Attempts: 10
+        Planning Time: 5
+        Interactive Marker Size: 0.15
+        Query Start State: false
+        Query Goal State: true
+      Scene Robot:
+        Robot Alpha: 0.7
+        Show Robot Visual: true
+        Show Robot Collision: false
+    - Class: rviz_default_plugins/Axes
+      Name: First robot base
+      Reference Frame: left_base_link
+      Length: 0.15
+      Radius: 0.006
+      Value: true
+    - Class: rviz_default_plugins/Axes
+      Name: Second robot base
+      Reference Frame: right_base_link
+      Length: 0.15
+      Radius: 0.006
+      Value: true
+  Enabled: true
+  Global Options:
+    Fixed Frame: world
+    Background Color: 48; 48; 48
+    Frame Rate: 30
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 1.1
+      Pitch: 0.5
+      Yaw: 0.8
+      Focal Point:
+        X: 0
+        Y: 0.15
+        Z: 0.2
+Window Geometry:
+  Width: 1280
+  Height: 900

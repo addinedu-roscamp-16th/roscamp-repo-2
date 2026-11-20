@@ -1,0 +1,79 @@
+{
+  "frame": "right_base_link",
+  "method": "one-time same-capture ChArUco relative camera pose; LEFT world pose anchor",
+  "source_capture": "/home/ane/camera_code/sam_yaw_output/capture_20261117_145527_358826",
+  "right_world_pose_left_multiply": [
+    [
+      0.999019371807304,
+      0.03337845039661695,
+      0.029089066723803143,
+      -0.015620364903799658
+    ],
+    [
+      -0.03391790612348528,
+      0.9992579255823714,
+      0.018253049197756353,
+      0.01403657915901646
+    ],
+    [
+      -0.028458221974321078,
+      -0.019221789977468,
+      0.9994101522358684,
+      0.025287674312050146
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "reference_joint_positions_rad": [
+    [
+      -0.5522221753310059,
+      0.3665191429188092,
+      -0.7178539213452678,
+      -0.8313003227248992,
+      0.03368485456349056,
+      -0.3127630019573839
+    ],
+    [
+      0.509112542806746,
+      0.3036872898470133,
+      -0.7070328799829029,
+      -0.8360127117052838,
+      0.22689280275926285,
+      -0.7255333700540428
+    ]
+  ],
+  "max_joint_difference_deg": 2.0,
+  "board_detection": {
+    "left": {
+      "marker_ids": [
+        13,
+        6
+      ],
+      "pnp_rmse_px": 0.6291170430324109
+    },
+    "right": {
+      "marker_ids": [
+        13,
+        16,
+        9,
+        6
+      ],
+      "pnp_rmse_px": 1.1010855565021582
+    },
+    "old_board_world_difference_mm": 10.174493979732551,
+    "old_board_world_difference_xyz_mm": [
+      -3.228801740147169,
+      3.18500271032246,
+      9.107739829489814
+    ],
+    "old_board_world_rotation_difference_deg": 2.7555613787981184,
+    "method": "same captured board, left world camera pose as anchor"
+  },
+  "scope": "marker-free fixed stereo correction near the recorded see_center pose, with 0.30 m physical left-right base Y spacing",
+  "physical_left_base_y_m": 0.3,
+  "quality_note": "Left image has 2 known markers (8 corners); PnP RMSE 0.629 px and leave-one-corner translation spread <=3.02 mm. Right has 4 markers. Recheck with >=3 left markers when possible."
+}

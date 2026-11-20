@@ -1,0 +1,98 @@
+{
+  "frame": "right_base_link",
+  "method": "one-time same-capture ChArUco relative camera pose; LEFT world pose anchor",
+  "source_capture": "/home/ane/camera_code/sam_yaw_output/board_capture_20261120_095903_168043",
+  "right_world_pose_left_multiply": [
+    [
+      0.9997736425402206,
+      -0.003974610994518341,
+      0.020901343241614048,
+      -0.019122234878471978
+    ],
+    [
+      0.0035722380385972323,
+      0.9998082567427489,
+      0.01925328191303445,
+      0.016103145798874542
+    ],
+    [
+      -0.02097385985595273,
+      -0.019174259215662775,
+      0.9995961409420673,
+      0.015075223683412076
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "reference_joint_positions_rad": [
+    [
+      -0.5490805826774161,
+      0.35883969421003414,
+      -0.7178539213452678,
+      -0.823620874016124,
+      0.032114058236695664,
+      -0.3127630019573839
+    ],
+    [
+      0.4876449930072157,
+      0.3066543495754037,
+      -0.6839945338565777,
+      -0.8360127117052838,
+      0.22846359908605773,
+      -0.7255333700540428
+    ]
+  ],
+  "max_joint_difference_deg": 2.0,
+  "board_detection": {
+    "left": {
+      "marker_ids": [
+        14,
+        7,
+        11,
+        15,
+        4,
+        0,
+        8,
+        12,
+        1,
+        5,
+        16,
+        9,
+        2,
+        13,
+        6
+      ],
+      "pnp_rmse_px": 1.6513931477582242
+    },
+    "right": {
+      "marker_ids": [
+        11,
+        12,
+        8,
+        5,
+        14,
+        15,
+        10,
+        7,
+        16,
+        4,
+        3,
+        9,
+        13,
+        0,
+        1,
+        6,
+        2
+      ],
+      "pnp_rmse_px": 1.2493762492050402
+    },
+    "method": "same captured board, left world camera pose as anchor"
+  },
+  "scope": "fixed stereo correction near recorded joint pose",
+  "created_by": "moveit_pick/make_stereo_correction.py",
+  "created_unix": 1795136408.0176127
+}

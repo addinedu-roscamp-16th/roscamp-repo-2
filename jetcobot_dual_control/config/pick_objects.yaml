@@ -1,0 +1,13 @@
+# Dimensions in millimetres. Local X = long side; local Y = short gripping side.
+# The camera target's object_long_yaw_deg rotates local X around base Z.
+chocobar:
+  kind: box
+  size_mm: [90.0, 35.0, 15.0]
+
+mentos_pair:
+  kind: two_cylinders
+  cylinder_length_mm: 50.0
+  cylinder_diameter_mm: 16.0
+  # Assumption: side by side, with a 10 mm longitudinal stagger.
+  # Combined extents: X=60, Y=32, Z=16 mm.
+  centers_xy_mm: [[-5.0, -8.0], [5.0, 8.0]]

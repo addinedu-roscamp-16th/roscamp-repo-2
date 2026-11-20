@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.bak
+*.bak_*
+*.before_*
+*.log
+build/
+install/
+log/
+# runtime captures (images, npz, worker logs)
+sam_yaw_output/
+*.pt
+*.pth
+.venv/

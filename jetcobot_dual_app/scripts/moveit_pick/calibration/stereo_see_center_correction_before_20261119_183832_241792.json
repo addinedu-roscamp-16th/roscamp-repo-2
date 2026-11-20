@@ -1,0 +1,101 @@
+{
+  "frame": "right_base_link",
+  "method": "one-time same-capture ChArUco relative camera pose; LEFT world pose anchor",
+  "source_capture": "/home/ane/camera_code/sam_yaw_output/capture_20261118_155524_039311",
+  "right_world_pose_left_multiply": [
+    [
+      0.9997035455086412,
+      0.024287533626218515,
+      -0.0017137117057421862,
+      -0.010906056525895644
+    ],
+    [
+      -0.024170167732246745,
+      0.9984333522132969,
+      0.05046428618255788,
+      0.01603855161586485
+    ],
+    [
+      0.0029366799706726336,
+      -0.05040790511889326,
+      0.998724395923257,
+      0.015501256196318813
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "reference_joint_positions_rad": [
+    [
+      -0.5490805826774161,
+      0.35883969421003414,
+      -0.7194247176720626,
+      -0.8297295263981043,
+      0.03368485456349056,
+      -0.3036872898470133
+    ],
+    [
+      0.48153634062523554,
+      0.3066543495754037,
+      -0.6993534312741279,
+      -0.8466592201424492,
+      0.22689280275926285,
+      -0.7255333700540428
+    ]
+  ],
+  "max_joint_difference_deg": 2.0,
+  "board_detection": {
+    "left": {
+      "marker_ids": [
+        6,
+        9,
+        13,
+        2,
+        5,
+        16,
+        12,
+        8,
+        1,
+        15,
+        4,
+        11,
+        7,
+        14
+      ],
+      "pnp_rmse_px": 1.4775231635680692
+    },
+    "right": {
+      "marker_ids": [
+        12,
+        6,
+        2,
+        1,
+        5,
+        9,
+        8,
+        13,
+        4,
+        16,
+        11,
+        7,
+        15,
+        14,
+        10
+      ],
+      "pnp_rmse_px": 1.183400716126232
+    },
+    "old_board_world_difference_mm": 7.048588423943451,
+    "old_board_world_difference_xyz_mm": [
+      -3.9002120832861698,
+      -5.23844642494653,
+      2.651343721304933
+    ],
+    "old_board_world_rotation_difference_deg": 2.6019409659050887,
+    "method": "same captured board, left world camera pose as anchor"
+  },
+  "scope": "fixed stereo correction near recorded joint pose; latest board capture after physical position change",
+  "quality_note": "Latest capture has 14 left and 15 right known ChArUco markers. PnP RMSE 1.48/1.18 px. Offline board alignment only; real grasp position is not verified."
+}

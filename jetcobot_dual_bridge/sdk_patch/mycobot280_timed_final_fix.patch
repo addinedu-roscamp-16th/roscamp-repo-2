@@ -1,0 +1,12 @@
+--- a/mycobot280.py
++++ b/mycobot280.py
+@@ -360,8 +360,7 @@
+                     target = tuple(float(value) for value in checked)
+                     if len(target) != 6 or not all(math.isfinite(value) for value in target):
+                         raise ValueError('check returned invalid target')
+-            final = (target_time >= path[-1][0] and
+-                     max(abs(a-b) for a, b in zip(target, path[-1][1])) < 1e-6)
++            final = max(abs(a-b) for a, b in zip(target, path[-1][1])) < 1e-6
+             if (last_target is None or final or
+                     max(abs(a-b) for a, b in zip(target, last_target)) >= 0.2):
+                 self.send_angles([round(value, 2) for value in target], speed,

@@ -1,0 +1,75 @@
+{
+  "frame": "right_base_link",
+  "method": "one-time same-capture ChArUco relative camera pose; LEFT world pose anchor",
+  "source_capture": "/home/ane/camera_code/sam_yaw_output/capture_20261117_112507_410136",
+  "right_world_pose_left_multiply": [
+    [
+      0.9958338993995626,
+      0.0893776062683971,
+      0.018068987364982764,
+      -0.0330840466473489
+    ],
+    [
+      -0.09012401760113871,
+      0.9948726675830641,
+      0.045891575998090677,
+      0.006509184017906101
+    ],
+    [
+      -0.013874662449732303,
+      -0.04732883681108667,
+      0.9987829969257669,
+      0.026282363559430533
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "reference_joint_positions_rad": [
+    [
+      -0.5459389900238263,
+      0.35883969421003414,
+      -0.7194247176720626,
+      -0.823620874016124,
+      0.04136430327226561,
+      -0.3036872898470133
+    ],
+    [
+      0.4799655442984406,
+      0.3066543495754037,
+      -0.6839945338565777,
+      -0.8360127117052838,
+      0.22846359908605773,
+      -0.7239625737272478
+    ]
+  ],
+  "max_joint_difference_deg": 2.0,
+  "board_detection": {
+    "left": {
+      "marker_ids": [
+        13,
+        16,
+        9,
+        6,
+        2
+      ],
+      "pnp_rmse_px": 1.465305916542112
+    },
+    "right": {
+      "marker_ids": [
+        13,
+        16,
+        6,
+        9
+      ],
+      "pnp_rmse_px": 0.9825031157290466
+    },
+    "old_board_world_difference_mm": 24.31413145239395,
+    "old_board_world_rotation_difference_deg": 5.876562731161534,
+    "method": "same captured board, left world camera pose as anchor"
+  },
+  "scope": "near the reference see_center pose; not a replacement for hand-eye"
+}

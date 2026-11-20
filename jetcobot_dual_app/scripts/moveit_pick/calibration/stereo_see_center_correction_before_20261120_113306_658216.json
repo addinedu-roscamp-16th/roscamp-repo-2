@@ -1,0 +1,99 @@
+{
+  "frame": "right_base_link",
+  "method": "one-time same-capture ChArUco relative camera pose; LEFT world pose anchor",
+  "source_capture": "/home/ane/camera_code/state_pick/sam_yaw_output/board_capture_20261120_105808_266366",
+  "right_world_pose_left_multiply": [
+    [
+      0.9999429872630438,
+      0.0031640377864239153,
+      -0.010198582663635715,
+      -0.008400670013967548
+    ],
+    [
+      -0.0028934239823236443,
+      0.9996461919004873,
+      0.0264408607369855,
+      0.016621717244054576
+    ],
+    [
+      0.010278634204962512,
+      -0.026409844447482966,
+      0.9995983542379109,
+      0.014778767132618498
+    ],
+    [
+      0.0,
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "reference_joint_positions_rad": [
+    [
+      -0.5536184387326013,
+      0.3665191429188092,
+      -0.7255333700540428,
+      -0.8283332629965088,
+      0.03665191429188092,
+      -0.3127630019573839
+    ],
+    [
+      0.48153634062523554,
+      0.3066543495754037,
+      -0.6839945338565777,
+      -0.8374089751068793,
+      0.22846359908605773,
+      -0.7255333700540428
+    ]
+  ],
+  "max_joint_difference_deg": 2.0,
+  "board_detection": {
+    "left": {
+      "marker_ids": [
+        7,
+        10,
+        14,
+        11,
+        4,
+        0,
+        15,
+        8,
+        5,
+        1,
+        12,
+        9,
+        16,
+        2,
+        6,
+        13
+      ],
+      "pnp_rmse_px": 1.543752819540136
+    },
+    "right": {
+      "marker_ids": [
+        11,
+        7,
+        5,
+        14,
+        15,
+        10,
+        12,
+        16,
+        8,
+        4,
+        3,
+        9,
+        0,
+        13,
+        1,
+        6,
+        2
+      ],
+      "pnp_rmse_px": 1.1857597624074834
+    },
+    "method": "same captured board, left world camera pose as anchor"
+  },
+  "scope": "fixed stereo correction near recorded joint pose",
+  "created_by": "moveit_pick/make_stereo_correction.py",
+  "created_unix": 1795139945.1006234
+}
