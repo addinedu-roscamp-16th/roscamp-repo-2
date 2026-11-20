@@ -34,6 +34,7 @@ RULES = [
     {'file': 'design/diagrams/IFP_다이어그램.drawio', 'kind': 'SequenceDiagram', 'tabs': ['6-']},
     {'file': 'design/diagrams/관리자_스토리보드.drawio', 'kind': 'GUIDesign', 'label': '관리자'},
     {'file': 'design/diagrams/사용자_스토리보드.drawio', 'kind': 'GUIDesign', 'label': '사용자'},
+    {'file': 'design/diagrams/인터페이스_명세.drawio', 'kind': 'InterfaceSpecification'},
     # 순서도는 제출하지 않음 (IFP "1. 순서도" 탭도 위에서 뺌). 내보내려면 enabled를 지우고 종류를 정함
     {'file': 'design/diagrams/비상정지_순서도.drawio', 'kind': 'StateDiagram', 'label': '비상정지', 'enabled': False},
 ]

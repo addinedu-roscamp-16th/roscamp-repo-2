@@ -123,7 +123,7 @@ git push origin submit/2026-11-24-scenario
 
 - 이름 규칙: 1차 제출 `2팀_<종류>.png`, 2차 `2팀_<종류>_01.png`, 3차 `_02` … 한 종류에 탭이 여럿이면 `-<탭 이름>`을 붙입니다 (`:` 등은 `_`로).
   - 예: `2팀_SequenceDiagram_02-6-1-1. 시퀀스_ 주문.png`, `2팀_GUIDesign_02-관리자-0. 화면 구성.png`
-- 종류: SequenceDiagram · StateDiagram · ClassDiagram · ERDiagram · GUIDesign · InterfaceSpecification. 어느 파일 · 탭이 어느 종류인지는 스크립트 안의 `RULES` 표에서 정합니다 (지금: IFP 0 · 2 ~ 5번 탭 → StateDiagram, 6-x → SequenceDiagram, 두 스토리보드 → GUIDesign. 순서도는 내보내지 않음). 새 다이어그램이 생기면 표에 한 줄 더합니다.
+- 종류: SequenceDiagram · StateDiagram · ClassDiagram · ERDiagram · GUIDesign · InterfaceSpecification. 어느 파일 · 탭이 어느 종류인지는 스크립트 안의 `RULES` 표에서 정합니다 (지금: IFP 0 · 2 ~ 5번 탭 → StateDiagram, 6-x → SequenceDiagram, 두 스토리보드 → GUIDesign, 인터페이스_명세 → InterfaceSpecification. 순서도는 내보내지 않음). 새 다이어그램이 생기면 표에 한 줄 더합니다.
 
 ```bash
 python3 design/tools/export_png.py        # 제출 차수 · 출력 폴더를 물어보고, 목록을 보인 뒤 확인 [Y/n]
