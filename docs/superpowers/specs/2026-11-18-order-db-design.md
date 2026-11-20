@@ -1,9 +1,9 @@
 # 주문 관리 DB 설계 (ERD)
 
-- 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영)
+- 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영) · 2026-11-20 (DB v1.1: 통신 규칙 검토 3장 #18 · #20 · #21 · #22 · #25 · #34 · #37 반영 — 보고 번호 · 중복 키 칸, `ws_event` · `bridge_session`, 사유 코드 contract 이름, 보고 반영 규칙)
 - 상태: 승인 (2026-11-19) · 구현 계획 `docs/superpowers/plans/2026-11-19-order-db.md` · 구현 `design/db/`
 - 산출물: `design/db/order_db.dbml` (원본), 여기서 만드는 ERD PNG(제출용)와 PostgreSQL DDL
-- 관련 문서: `docs/fleet-v1_HELD_검토.md`(5장 논의 결과), `2026-11-19-close-db-discussion.md`(마감 토의 기록), `design/다이어그램_수정_요청.md`(R-15 ~ R-20)
+- 관련 문서: `docs/설계/통신_규칙.md` · `docs/설계/인터페이스_명세.md`(11-20. 결정 표 원문은 커밋 `869c359`의 `docs/통신_규칙_인터페이스_검토.md` 3장), `docs/fleet-v1_HELD_검토.md`(5장 논의 결과), `2026-11-19-close-db-discussion.md`(마감 토의 기록), `design/다이어그램_수정_요청.md`(R-15 ~ R-20)
 
 ## 1. 목적
 
@@ -90,7 +90,7 @@
 
 ## 4. 테이블
 
-`※` 표시는 설계자 판단(7절)이다. 자료형은 PostgreSQL 기준. 테이블은 13개다.
+`※` 표시는 설계자 판단(7절)이다. 자료형은 PostgreSQL 기준. 테이블은 15개다 (11-20에 `ws_event` · `bridge_session` 추가).
 
 ### 4.1 account — 계정 · 역할 (OMS-01, SCR-01)
 
@@ -159,6 +159,7 @@ CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL)
 | created_at | timestamptz | NOT NULL DEFAULT now() (접수 시각, 마감 뒤 재확인 순서) |
 | updated_at | timestamptz | NOT NULL |
 | finished_at | timestamptz | 출고됨 · 일부 출고됨 · 취소됨이 된 시각 |
+| idem_key | text | UNIQUE, NULL 허용. 화면 주문 요청의 `Idempotency-Key`. 같은 키로 다시 온 요청은 새로 접수하지 않고 처음 결과를 돌려준다 (통신 규칙 #34 · #37) |
 
 상태 값 (다이어그램 v2.4 '0. 상태표' · '2. 주문', CEN-03). 주문과 운반 건이 같은 값을 쓴다.
 
@@ -171,8 +172,8 @@ CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL)
 | TRANSPORTING | 운반 중 | |
 | SHIPPED | 출고됨 | 끝 |
 | PARTIAL | 일부 출고됨 | 끝. 못 담은 상품 있음 |
-| HELD | 주문 처리 보류 | Pode 장애(운반 중) · Phody 장애. 사유는 이력에 |
-| CANCELLED | 취소됨 | 끝. 사용자 취소, 담을 상품 없음(D-14), 마감 뒤 재고 다시 확인 거절 |
+| HELD | 주문 처리 보류 | Pode 장애(운반 중) · Phody 장애 · 관제 재시작(`FLEET_RESTART`, 통신 규칙 #37). 사유는 이력에 |
+| CANCELLED | 취소됨 | 끝. 사용자 취소, 담을 상품 없음(`NOTHING_TO_FILL`, 0.6 `CANCELED`에 해당, 통신 규칙 #20), 마감 뒤 재고 다시 확인 거절. 철자는 `CANCELLED` (통신 규칙 #18) |
 
 **주문 상태 요약 규칙** ※ (사용자 화면이 보는 값). 나뉜 주문도 고객에게는 **주문 하나로 보인다** (11-19 사용자 결정, 사용자 스토리보드 설계 8절):
 
@@ -214,7 +215,10 @@ CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL)
 | status | text | NOT NULL, CHECK IN (4.4의 9개) |
 | robot_id | text | NULL 허용. 맡은 Pode (`pode1` ~ `pode3`, fleet-v1 contract 0.5 기준) ※ |
 | placed_at | timestamptz | 관제가 담은 수량(`placed`)을 알려 온 시각. NULL이면 바구니에 몇 개 담겼는지 모름 (결품 사전 확인 · 수시 조정 막기에 씀) |
-| created_at | timestamptz | NOT NULL DEFAULT now() |
+| report_epoch | integer | NULL 허용. 마지막으로 반영한 `ReportTrip`의 `report_epoch` (`bridge_session.epoch`). 반영 전 NULL (통신 규칙 #18 · #37) |
+| report_n | integer | NULL 허용. 마지막으로 반영한 `ReportTrip`의 `report_n`. CHECK `(report_epoch IS NULL) = (report_n IS NULL)`. `seq`(주문 안 순번)와는 별개 |
+| first_assigned_at | timestamptz | 처음 배정됨이 된 시각. **기록용**: 접수됨으로 돌아온 운반 건의 고객 취소 판단에 쓰지 않는다 (통신 규칙 #21) |
+| created_at | timestamptz | NOT NULL DEFAULT now(). **처음 접수 시각 — 통신 규칙 #21 · #37의 `trip.submitted_at`이 이 칸이다** ※. 다시 배정 순서와 `ListOpenTrips` 답의 정렬 기준. 접수됨으로 되돌려도 새로 찍지 않는다 (마지막 변경 시각 `updated_at` 순 금지) |
 | updated_at | timestamptz | NOT NULL |
 | finished_at | timestamptz | 출고됨 · 일부 출고됨 · 취소됨이 된 시각 |
 
@@ -243,16 +247,16 @@ CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL)
 | trip_id | text | FK → trip, NULL 허용. NULL이면 주문 요약 상태의 변화 |
 | from_status | text | NULL 허용 (처음 접수) |
 | to_status | text | NOT NULL |
-| reason | text | NULL 허용. CHECK IN ('OUT_OF_STOCK' 결품, 'PICK_FAILED' 집기 실패, 'VISION_MISS' 인식 오류, 'PODE_FAULT', 'PHODY_FAULT', 'USER_CANCEL', 'NOTHING_TO_FILL' D-14, 'STOCK_RECHECK' 마감 뒤 재고 다시 확인 거절, 'FORCED_SHIP' 강제 출고 처리, 'FORCED_PARTIAL' 일부 출고 강제 처리, 'REASSIGN' 배정됨 → 접수됨 되돌림(CEN-08, 빈 바구니 Pode 장애), 'RETURNED_TO_SHELF' 보류 → 접수됨 선반에 되돌림(D-3, R-16)) ※ |
+| reason | text | NULL 허용. contract 사유 코드 표의 이름 (통신 규칙 #37). CHECK IN ('OUT_OF_STOCK' 결품, 'PICK_FAILED' 집기 실패, 'RECOGNITION_ERROR' 인식 오류, 'ROBOT_FAULT' Pode 장애, 'ARM_FAULT' Phody 장애, 'FLEET_RESTART' 관제 재시작 보류, 'USER_CANCEL', 'NOTHING_TO_FILL' D-14, 'STOCK_RECHECK' 마감 뒤 재고 다시 확인 거절, 'FORCED_SHIP' 강제 출고 처리, 'FORCED_PARTIAL' 일부 출고 강제 처리, 'REASSIGN' 배정됨 · 담는 중 → 접수됨 되돌림(CEN-08, 빈 바구니 Pode 장애, 담은 것 0개인 Pode · Phody 장애 — 통신 규칙 #21), 'RETURNED_TO_SHELF' 보류 → 접수됨 선반에 되돌림(D-3, R-16)) ※ |
 | robot_id | text | 관련 로봇 |
 | actor | text | NOT NULL, CHECK IN ('USER', 'ADMIN', 'SYSTEM') |
 | account_id | bigint | FK → account, NULL 허용 (USER · ADMIN일 때) |
 | detail | jsonb | 결품 상품 · 수량, 관제 보고 원문(status · detail), 되돌린 상품 · 수량 등 |
 | created_at | timestamptz | NOT NULL DEFAULT now() |
 
-다이어그램 범례 "저장 값은 상태마다 하나, 사유는 detail"을 따른다: 상태는 `HELD` 하나, Pode 장애인지 Phody 장애인지는 `reason`으로 가른다.
+다이어그램 범례 "저장 값은 상태마다 하나, 사유는 detail"을 따른다: 상태는 `HELD` 하나, Pode 장애(`ROBOT_FAULT`)인지 Phody 장애(`ARM_FAULT`)인지 관제 재시작(`FLEET_RESTART`)인지는 `reason`으로 가른다. 11-20에 사유 이름을 contract 이름으로 바꿨다: `VISION_MISS` → `RECOGNITION_ERROR`, `PODE_FAULT` → `ROBOT_FAULT`, `PHODY_FAULT` → `ARM_FAULT`.
 
-- HELD는 Pode 장애(운반 중) · Phody 장애에만 쓴다 (v2.4, CEN-06 비고). 결품으로 하나도 못 담은 운반 건은 HELD가 아니라 CANCELLED (`NOTHING_TO_FILL`, D-14).
+- HELD는 Pode 장애 · Phody 장애 · 관제 재시작(`FLEET_RESTART`)에만 쓴다 (v2.4, CEN-06 비고, 통신 규칙 #14 · #37). 담기 도중 장애는 자동 출고하지 않고 보류 → 관리자 일부 출고 강제 처리로 끝낸다 (통신 규칙 #20). 담은 것이 0개면 보류 대신 접수됨으로 되돌려 다시 배정한다(`REASSIGN`, #21). 결품으로 하나도 못 담은 운반 건은 HELD가 아니라 CANCELLED (`NOTHING_TO_FILL`, D-14).
 - **보류를 끝내는 길**: Pode 장애 → 강제 출고 처리(`FORCED_SHIP`) 또는 선반에 되돌림(`RETURNED_TO_SHELF`, 바구니 상품을 창고에 되돌리고 `qty_placed`를 0으로, 접수됨으로 돌아가 다시 배정). Phody 장애 → 일부 출고 강제 처리(`FORCED_PARTIAL`).
 - fleet-v1은 v2.4에 맞추기로 했다 (검토 문서 5장). 바뀌기 전까지 웹 서비스는 검토 문서 4장 규칙으로 보고를 바꿔 읽고, 원래 보고 값은 `detail`에 남긴다.
 - Phony 장애(6-7)는 상태를 바꾸지 않는다 (운반 중 유지). 장애는 `alert`에 남고, 관리자가 강제 출고 처리하면 `FORCED_SHIP`으로 출고됨 · 일부 출고됨이 된다. R-07이 결정되면 다시 본다.
@@ -268,18 +272,21 @@ CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL)
 
 담기 일시 중지(FILLING_PAUSE)와 담는 중 → 운반 중 때의 `placed`는 아직 신호가 없다 (6절).
 
+**11-20 (통신 규칙 #18)**: 진행 보고는 fleet → 브리지 `ReportTrip` 하나로 바뀐다 (접수됨 ~ 취소됨 9개 상태, `reason`, 누적 `placed`, `missing`, 번호 `(report_epoch, report_n)`). 위 표는 인터페이스가 바뀌기 전의 신호다. 반영 규칙은 5절 "진행 보고 반영".
+
 ### 4.8 alert — 관리자 알림 (OMS-03 · 09 · 12 · 14 · 16, SCR-08 · 10)
 
 | 칼럼 | 자료형 | 제약 · 설명 |
 |---|---|---|
 | alert_id | bigint identity | PK |
 | level | text | NOT NULL, CHECK IN ('INFO', 'WARN', 'ERROR') (`FleetEvent.level`) |
-| code | text | NOT NULL. `FleetEvent.code` 또는 웹 서비스 코드 (`OUT_OF_STOCK`, `LOW_STOCK`, `NEGATIVE_STOCK`, `LATE_REPORT` 등) |
+| code | text | NOT NULL. `FleetEvent.code` 또는 웹 서비스 코드 (`OUT_OF_STOCK`, `LOW_STOCK`, `NEGATIVE_STOCK`, `LATE_REPORT`, `LATE_COMMAND_RESULT` 등) |
 | source | text | NOT NULL (`central`, `fleet`, `order_service` 등) |
 | robot_id | text | NULL 허용 |
 | order_id | text | FK → orders, NULL 허용 |
 | trip_id | text | FK → trip, NULL 허용 |
 | product_id | bigint | FK → product, NULL 허용 (재고 부족) |
+| event_id | text | UNIQUE, NULL 허용. `ReportEvent`의 `event_id` (보낸 쪽이 만든 UUID). 같은 번호로 다시 오면 새 줄을 만들지 않는다 (통신 규칙 #28 · #37). 웹이 스스로 여는 알림은 NULL |
 | message | text | NOT NULL, 화면 문구 |
 | detail | jsonb | 원본 이벤트. `LOW_STOCK`이면 재고 초과로 거절한 횟수 · 마지막 거절 시각도 여기에 |
 | status | text | NOT NULL DEFAULT 'OPEN', CHECK IN ('OPEN', 'RESOLVED') ※ |
@@ -308,8 +315,10 @@ CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL)
 | alert_id | bigint | FK → alert, NULL 허용 (알림 칸에서 누른 경우) |
 | close_id | bigint | FK → stock_close, NULL 허용 (마감 입력일 때) |
 | payload | jsonb | 못 담음 상품 · 수량, 다시 투입 때 바구니(EMPTY · NONE), 락 대상 팔, 바꾼 설정의 이전 · 새 값 등 입력 값 |
-| result | text | NOT NULL, CHECK IN ('SENT', 'ACCEPTED', 'REJECTED', 'LOCAL') — ROS로 보낸 뒤 응답. ROS로 보내지 않는 입력은 `LOCAL` |
-| result_detail | text | 거절 사유 |
+| request_id | text | UNIQUE, NULL 허용. 관리 명령의 `request_id` (UUID 문자열). 다시 보낼 때 같은 번호, `ReportCommand`를 이 번호로 찾는다. ROS로 보내지 않는 입력(`LOCAL`)은 NULL (통신 규칙 #25 · #34 · #37) |
+| result | text | NOT NULL, CHECK IN ('SENT', 'ACCEPTED', 'REJECTED', 'LOCAL') — ROS로 보낸 뒤 **접수 응답**(fleet 자기 판단). ROS로 보내지 않는 입력은 `LOCAL` |
+| result_detail | text | 거절 사유. contract 사유 코드 이름 (`NOT_STOPPED` · `LOCK_RELEASED` · `NOT_TEST_MODE` · `MODE_MISMATCH` · `BATTERY_LOW` · `UNKNOWN_TARGET` · `ORDER_STATE` · `ROBOT_TIMEOUT` · `ROBOT_REJECTED` · `HOLDING_ITEM` 등, 통신 규칙 #25) |
+| final_result | text | NULL 허용 (결과 보고 전 · `LOCAL`). `ReportCommand`의 **최종 결과**. CHECK IN ('ACCEPTED', 'REJECTED', 'UNCONFIRMED', 'TIMEOUT') ※. `UNCONFIRMED` = `ROBOT_TIMEOUT`(결과 모름, 끝 상태 아님). 그 뒤 늦은 응답 · `/fleet/robots` 관측으로 끝 상태를 **한 번만** 정하고(늦은 결과는 `LATE_COMMAND_RESULT` 알림), fleet이 로봇에 처음 요청한 때부터 30초 안에 정해지지 않으면 `TIMEOUT`으로 확정하고 알림 (통신 규칙 #25 ⑥) |
 | created_at | timestamptz | NOT NULL DEFAULT now() |
 
 action 값:
@@ -364,7 +373,7 @@ action 값:
 | book_qty | integer | CHECK >= 0. 장부 수량. 마감은 **확정 순간**의 `stock_qty`, 수시 조정은 저장 순간의 `stock_qty` |
 | in_transit_qty | integer | NOT NULL DEFAULT 0, CHECK >= 0. 수시 조정 때 진행 중 운반 건 바구니에 있던 수. 마감은 0 (진행 중 0건일 때만 세므로) |
 | diff_qty | integer | GENERATED ALWAYS AS (counted_qty − (book_qty − in_transit_qty)) STORED |
-| reason | text | 차이 사유, 고르는 목록. CHECK IN ('COUNT_DIFF' 재고 조사 차이, 'VISION_MISS' 인식 오류, 'DAMAGE_FOUND' 파손 발견, 'LOST' 분실, 'INPUT_ERROR' 입력 오류, 'TEST_RUN' 시험 영향, 'OTHER' 기타) — `TEST_RUN`은 운영 재개 마감에서만. 나머지 값은 팀 확인 필요 |
+| reason | text | 차이 사유, 고르는 목록. CHECK IN ('COUNT_DIFF' 재고 조사 차이, 'RECOGNITION_ERROR' 인식 오류 (11-20 이름 바꿈, 통신 규칙 #37), 'DAMAGE_FOUND' 파손 발견, 'LOST' 분실, 'INPUT_ERROR' 입력 오류, 'TEST_RUN' 시험 영향, 'OTHER' 기타) — `TEST_RUN`은 운영 재개 마감에서만. 나머지 값은 팀 확인 필요 |
 | account_id | bigint | FK → account, NOT NULL. 마지막으로 입력한 관리자 (두 명이 나눠 셀 때) |
 | note | text | 사유 `OTHER`면 필수 |
 | created_at | timestamptz | NOT NULL DEFAULT now() |
@@ -394,6 +403,33 @@ action 값:
 - 바꾸면 `admin_action` `SETTING_CHANGE`에 이전 · 새 값을 남긴다. 마감 중에도 바꿀 수 있다 (재고와 관계없음).
 - 관제(fleet-v1)도 `basket_capacity`를 갖고 있으므로 두 값을 맞추는 방법은 인터페이스 작업으로 넘긴다 (6절).
 
+### 4.14 ws_event — 화면 WS 사건 (OMS-05, 통신 규칙 #32 · #37)
+
+화면 WS의 "사건"(주문 · 운반 건 상태 변화, 알림 발생 · 해결, 관리 명령 결과, 고객 위쪽 알림)에 DB 순번을 붙여 남긴다. 다시 연결한 화면은 `since_seq` 뒤의 줄만 받는다. "상태"(로봇 · 작업 상태 · 재고 · 마감 진행)는 순번 없이 최신 값만 보내므로 여기 넣지 않는다.
+
+| 칼럼 | 자료형 | 제약 · 설명 |
+|---|---|---|
+| seq | bigint identity | PK. 사건 순번 |
+| type | text | NOT NULL. 사건 종류. 상태 변화 트리거는 테이블 이름(`orders` · `trip` · `alert`)을 넣는다 |
+| data | jsonb | NOT NULL. 사건 내용. 상태 변화 트리거는 `{id, status}` |
+| created_at | timestamptz | NOT NULL DEFAULT now() |
+
+- **같은 트랜잭션에서 INSERT 후 NOTIFY**: `ws_event` AFTER INSERT 트리거가 `NOTIFY`한다. 그래서 변경이 롤백되면 사건도 알림도 남지 않는다. 주문 · 운반 건 · 알림의 상태 변화는 그 테이블 트리거가 `ws_event`에 넣고, 관리 명령 결과처럼 테이블 상태 변화가 아닌 사건은 웹 서비스가 같은 트랜잭션에서 직접 넣는다.
+- 다시 받을 수 있는 기간(최근 24시간 또는 1,000건 중 많은 쪽)보다 오래된 줄을 지우는 일은 웹 서비스가 한다 (통신 규칙 #32).
+
+### 4.15 bridge_session — 노드별 epoch (통신 규칙 #18 · #37)
+
+보고를 보내는 노드가 켜질 때 브리지 `Hello`를 부르면 DB가 그 노드의 `epoch`를 1 늘려 돌려준다. 노드는 `epoch`를 받기 전에는 `Report*`를 보내지 않는다.
+
+| 칼럼 | 자료형 | 제약 · 설명 |
+|---|---|---|
+| node | text | PK. 보내는 노드. **지금은 `ReportTrip`을 보내는 fleet만 쓴다** (central의 재시작 구분은 통신 규칙 다음 주 논의 2) |
+| epoch | integer | NOT NULL, CHECK > 0. `Hello` 때마다 1씩 늘림 |
+| boot_id | text | NOT NULL. 노드가 켜질 때 만든 UUID (기록용) |
+| hello_at | timestamptz | NOT NULL DEFAULT now(). 마지막 `Hello` 시각 |
+
+- `ReportCommand` · `ReportEvent`는 `request_id` · `event_id`로 중복을 가리므로 `epoch`를 쓰지 않는다.
+
 ### 관계 요약
 
 ```
@@ -403,19 +439,24 @@ account 1 ─< orders 1 ─< order_item >─ 1 product 1 ─< stock_ledger >─ 
                 │  1 ─< status_history >─ trip
                 │  1 ─< alert >─ trip / product
 account 1 ─< admin_action >─ orders / trip / alert / stock_close
-app_setting (독립)
+app_setting · ws_event · bridge_session (독립)
 ```
 
 ## 5. 동작 규칙 (DB에 걸린 쪽)
 
 ### 주문 · 운반 건
 
-- **주문 등록 (OMS-03 · 04)**: 품목 합 > `max_order_items`이거나 상품마다 주문 수량 > `stock_qty`면 거절 (주문을 기록하지 않음). 재고 초과 거절은 `LOW_STOCK` 알림에 합친다. 통과하면 같은 트랜잭션에서 `orders` · `order_item`과 `basket_capacity` 이하로 나눈 `trip` · `trip_item`을 만든다. 예약하지 않는다(OMS-07 미포함). 마감 중에도 접수는 받는다.
+- **주문 등록 (OMS-03 · 04)**: 같은 `Idempotency-Key`(`orders.idem_key`)로 다시 온 요청은 새로 접수하지 않는다 (통신 규칙 #34). 품목 합 > `max_order_items`이거나 상품마다 주문 수량 > `stock_qty`면 거절 (주문을 기록하지 않음). 재고 초과 거절은 `LOW_STOCK` 알림에 합친다. 통과하면 같은 트랜잭션에서 `orders` · `order_item`과 `basket_capacity` 이하로 나눈 `trip` · `trip_item`을 만든다. 예약하지 않는다(OMS-07 미포함). 마감 중에도 접수는 받는다.
 - **결품 사전 확인 (6-2 #4, OMS-02)**: 상품마다 `가용 = stock_qty − (v_in_flight 운반 건의 qty_placed 합)`. 가용 < 남은 수량이면 결품. 결품이면 담기 일시 중지 → 관리자가 추가 입고를 등록하고 재개하거나 보충 불가(R-18). 재고는 창고 기준이므로 여기서 결품이면 창고에도 없다. **전제**: 출고 전에 `qty_placed`가 채워져 있어야 한다. fleet-v1은 출고 · 보류 때만 `placed`를 보내므로 이 신호가 없으면 앞선 운반 건 수량을 모른다 (6절).
-- **사용자 취소 (OMS-10)**: 그 주문의 모든 운반 건이 `RECEIVED`일 때만. 조건부 UPDATE로 central 배정과 경합해도 하나만 이긴다.
+- **사용자 취소 (OMS-10, 통신 규칙 #20 · #21 · #22)**: 그 주문의 모든 운반 건이 `RECEIVED`일 때만 (담기를 시작한 운반 건은 사용자 취소됨으로 끝나지 않음, 접수됨으로 돌아온 운반 건은 취소 허용). 웹이 central에 `CancelOrder`를 보내고, **받아들인다는 접수 응답을 받은 트랜잭션 안에서 웹이 직접** 운반 건 · 주문을 취소됨(`USER_CANCEL`, actor USER)으로 쓴다. 거절(`ALREADY_ASSIGNED` · `NOT_FOUND`)이면 쓰지 않는다. 그 뒤 fleet이 같은 취소됨을 보고하면 무시한다 (상태가 같으므로 번호만 갱신하고 ACK). 판단 주인은 통신 규칙 다음 주 논의 1.
 - **재고 차감 (6-1-3 #33, OMS-06)**: 운반 건이 출고됨 · 일부 출고됨이 될 때 상품마다 `qty_placed`만큼 `SHIP` 한 줄 (`trip_id`). 강제 출고 처리 · 일부 출고 강제 처리도 같다. 취소됨 · 선반에 되돌림은 차감 없음.
 - **출고 차감이 재고 0 아래로 가면**: 차감만 따로 시도(SAVEPOINT)하고, 실패하면 출고됨 기록은 남기고 `NEGATIVE_STOCK` 알림을 연다. 관리자가 수시 조정 등으로 맞춘 뒤 차감한다.
-- **늦게 온 출고 보고**: 이미 끝난 운반 건에 같은 결과가 다시 오면(관제 재전송) 무시한다. 결과가 다르면 덮어쓰지 않고 `LATE_REPORT` 알림 → 관리자 확인 뒤 출고 차감 (`account_id` 채움).
+- **진행 보고 반영 (통신 규칙 #18 · #37)**: 브리지가 받은 `ReportTrip` · `ReportCommand` · `ReportEvent`를 DB에 쓰는 곳은 **웹 서비스의 함수 하나(`apply_report`)**다. 브리지는 이 함수가 커밋한 뒤 응답하고, 응답이 없으면 보낸 쪽이 같은 번호로 다시 보낸다. 한 트랜잭션에서:
+  - `ReportTrip`: 운반 건마다 `(report_epoch, report_n)`을 `trip`의 값과 비교한다. **더 클 때만 반영**하고(상태 · `placed` · `missing` · `placed_at`, 이력, 주문 요약, 재고 차감, `trip.report_epoch` · `report_n` 갱신), **같거나 작으면 아무것도 바꾸지 않고 ACK만** 한다 (재전송 · 재시작 이전의 늦은 보고). 접수됨 복귀가 정상 전이이므로 상태 순서가 아니라 번호로 가린다. 번호는 더 크지만 **허용되지 않는 전이**(예: 이미 끝난 운반 건에 다른 결과, 웹이 취소됨으로 쓴 뒤의 배정됨)는 덮어쓰지 않고 `LATE_REPORT` 알림을 연다 → 관리자 확인 뒤 출고 차감 (`account_id` 채움). 처음 배정됨이 되면 `first_assigned_at`을 한 번만 채운다.
+  - `ReportCommand`: `admin_action.request_id`로 줄을 찾아 `final_result`를 쓴다 (4.9).
+  - `ReportEvent`: `alert.event_id`가 이미 있으면 ACK만 한다.
+  - 반영한 상태 변화는 같은 트랜잭션에서 `ws_event`에 남고 NOTIFY된다 (4.14).
+- **`Hello` (통신 규칙 #18, 9장 2절 5)**: `bridge_session`의 그 노드 `epoch`를 1 늘려 돌려준다. fleet이 새 `epoch`로 `Hello`를 부르면 직전 `epoch`에서 배정됨 ~ 운반 중이던 운반 건을 보류(`FLEET_RESTART`)로 쓴다. 다시 배정할 운반 건 목록(`ListOpenTrips`)은 `trip.created_at`(= `submitted_at`) 순으로 답한다 (#21).
 - **주문 요약 상태**: 운반 건 상태를 바꾸는 트랜잭션에서 4.4 규칙으로 `orders.status`를 다시 계산하고, 바뀌면 이력에 `trip_id` 없는 한 줄.
 
 ### 재고 기록
@@ -464,7 +505,7 @@ app_setting (독립)
 
 ### 화면 전달 (OMS-05)
 
-주문 · 운반 건 상태, 알림, 마감 상태가 바뀌면 `NOTIFY`로 웹 서비스에 알리고 웹 서비스가 WS로 보낸다.
+주문 · 운반 건 상태, 알림, 마감 상태가 바뀌면 `NOTIFY`로 웹 서비스에 알리고 웹 서비스가 WS로 보낸다. 11-20부터 주문 · 운반 건 · 알림의 변화는 사건으로 `ws_event`에 한 줄 넣고 같은 트랜잭션에서 NOTIFY한다(내용에 `seq`). 마감은 상태라 순번 없이 NOTIFY만 한다 (4.14, 통신 규칙 #32 · #37).
 
 ## 6. 미결 · 다른 문서에 영향
 
@@ -486,6 +527,7 @@ app_setting (독립)
 - **R-07 (Phony 장애 때 보류)**: 결정되면 4.7을 다시 본다.
 - **마감 주기 · 운영 종료와 엮을지 (OMS-18 비고, 미결)**: 시각으로만 판단하므로 하루 한 번도, 여러 번도 담긴다.
 - **pc/central/README.md**: "주문·재고·화면 백엔드" 문구를 A안에 맞게 고쳐야 한다 (DB 없음, 주문 처리).
+- 해결된 것 (11-20, 통신 규칙 검토 3장): 진행 보고 번호 · 재시작 구분(#18, `trip.report_epoch` · `report_n`, `bridge_session`), 관리 명령 결과(#25, `admin_action.request_id` · `final_result`), 놓치면 안 되는 알림(`alert.event_id`), 화면 주문 중복(#34, `orders.idem_key`), 화면 사건 순번(`ws_event`), 사용자 취소를 쓰는 곳(#22), 사유 코드 이름(#37). D-14는 `NOTHING_TO_FILL`로 정해짐(#20).
 - 해결된 것 (11-19): `SubmitOrder` · `set_run_mode`가 관제 계약에서 빠짐(관제는 central의 주문 번호를 그대로 씀), `docs/관제_동작.md`는 fleet-v1에서 지워져 고치지 않음, HELD의 뜻(검토 문서 5장), 마감 결정 D-1 ~ D-4, 주문 나눔 D-5 · D-6.
 
 ## 7. 설계자 판단
@@ -502,13 +544,16 @@ app_setting (독립)
 - 장애 기록(OMS-14)은 따로 테이블을 두지 않고 `status_history`(주문 쪽)와 `alert`(로봇 쪽)로 남긴다. 장애의 시계열 상세는 InfluxDB.
 - 재고 초과 거절은 거절된 주문을 `orders`에 넣지 않고 알림 횟수로만 남긴다.
 - 마감을 취소해도 실사 행을 남긴다 (토의자 A는 버리자고 함). 원장이 취소된 마감의 행을 가리킬 수 없으므로 재고에 섞일 길이 없다.
+- (11-20) 통신 규칙 #21 · #37의 `trip.submitted_at`은 새 칸을 만들지 않고 `trip.created_at`(운반 건을 만든 접수 시각, 되돌려도 바뀌지 않음)으로 쓴다. contract에서는 `submitted_at`이라는 이름으로 내보낸다.
+- (11-20) `admin_action.final_result` 값은 결정에 있는 `UNCONFIRMED` · `TIMEOUT`에 접수 응답과 같은 말 `ACCEPTED` · `REJECTED`를 더한 4개로 둔다. contract 표가 정해지면 맞춘다.
+- (11-20) `VISION_MISS` → `RECOGNITION_ERROR`는 이력 사유와 실사 차이 사유(4.11) 둘 다 바꾼다. 거절 사유(`admin_action.result_detail`)는 CHECK 없이 contract 이름을 그대로 적는다.
 - 마감 중 입고를 실사 전까지 받기로 하면서 반출은 마감 시작부터 그대로 막는다. 반출은 기다리는 동안 해야 할 이유가 없고, 막는 범위를 줄이는 것만 사용자가 정했다.
 
 ## 8. 파일 · 버전
 
 - `design/db/order_db.dbml`: 원본. 테이블 · 칼럼 노트에 기능 ID를 적는다.
 - `design/db/order_db.sql`: `dbml2sql --postgres`로 만든 DDL. 손으로 고치지 않는다.
-- `design/db/order_db_extra.sql`: DBML로 표현하지 못하는 것만 손으로 쓴다 — 부분 UNIQUE 인덱스(`WHERE`), 여러 칼럼 CHECK(4.3 CHECK, `qty_placed + qty_missing <= qty_ordered`, `stock_close` 상태 · 시각 등), 생성 칼럼(`diff_qty`), 원장 트리거(잠금 · 마감 중 막기 · 바로잡기 확인 · 재고 반영) · UPDATE/DELETE 금지 트리거, 마감 확정 검사 트리거, `v_in_flight` 뷰, `NOTIFY` 트리거. 적용 순서는 `order_db.sql` → `order_db_extra.sql`. 같은 규칙을 DBML 테이블 노트에도 적어 ERD 그림에 보이게 한다 ※
+- `design/db/order_db_extra.sql`: DBML로 표현하지 못하는 것만 손으로 쓴다 — 부분 UNIQUE 인덱스(`WHERE`), 여러 칼럼 CHECK(4.3 CHECK, `qty_placed + qty_missing <= qty_ordered`, `stock_close` 상태 · 시각 등), 생성 칼럼(`diff_qty`), 원장 트리거(잠금 · 마감 중 막기 · 바로잡기 확인 · 재고 반영) · UPDATE/DELETE 금지 트리거, 마감 확정 검사 트리거, `v_in_flight` 뷰, `ws_event` 넣기 · `NOTIFY` 트리거. 적용 순서는 `order_db.sql` → `order_db_extra.sql`. 같은 규칙을 DBML 테이블 노트에도 적어 ERD 그림에 보이게 한다 ※
 - 검증: 빈 PostgreSQL에 두 파일을 차례로 적용해 오류가 없는지 확인하고, 마감 중 입고 거절 · 바로잡기 · 확정 검사 · 재확인을 SQL로 시험한다.
 - 제출 PNG: `design/exports/`에 제출 이름 규칙으로.
 - 버전 v1.0부터 `design/README.md` 현재 문서 표 · CHANGELOG에 함께 기록 (기존 관리 규칙). DBML 맨 위 `Project` 노트에도 버전을 적는다.

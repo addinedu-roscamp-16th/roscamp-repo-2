@@ -19,7 +19,11 @@ ALTER TABLE order_item ADD CONSTRAINT ck_order_item_qty CHECK (qty_ordered > 0);
 ALTER TABLE trip
   ADD CONSTRAINT ck_trip_status CHECK (status IN (
     'RECEIVED', 'ASSIGNED', 'FILLING', 'FILLING_PAUSE', 'TRANSPORTING', 'SHIPPED', 'PARTIAL', 'HELD', 'CANCELLED')),
-  ADD CONSTRAINT ck_trip_seq CHECK (seq > 0);
+  ADD CONSTRAINT ck_trip_seq CHECK (seq > 0),
+  -- 보고 번호 (report_epoch, report_n)는 함께 채운다 (통신 규칙 #18)
+  ADD CONSTRAINT ck_trip_report_no CHECK ((report_epoch IS NULL) = (report_n IS NULL));
+
+ALTER TABLE bridge_session ADD CONSTRAINT ck_bridge_session_epoch CHECK (epoch > 0);
 
 ALTER TABLE trip_item ADD CONSTRAINT ck_trip_item_qty CHECK (
   qty_ordered > 0 AND qty_placed >= 0 AND qty_missing >= 0 AND qty_placed + qty_missing <= qty_ordered);
@@ -30,8 +34,9 @@ ALTER TABLE status_history
   ADD CONSTRAINT ck_status_history_from_status CHECK (from_status IN (
     'RECEIVED', 'ASSIGNED', 'FILLING', 'FILLING_PAUSE', 'TRANSPORTING', 'SHIPPED', 'PARTIAL', 'HELD', 'CANCELLED')),
   ADD CONSTRAINT ck_status_history_reason CHECK (reason IN (
-    'OUT_OF_STOCK', 'PICK_FAILED', 'VISION_MISS', 'PODE_FAULT', 'PHODY_FAULT', 'USER_CANCEL', 'NOTHING_TO_FILL',
-    'STOCK_RECHECK', 'FORCED_SHIP', 'FORCED_PARTIAL', 'REASSIGN', 'RETURNED_TO_SHELF')),
+    -- contract 사유 코드 표의 이름 (통신 규칙 #37): 인식 오류 RECOGNITION_ERROR, Pode 장애 ROBOT_FAULT, Phody 장애 ARM_FAULT
+    'OUT_OF_STOCK', 'PICK_FAILED', 'RECOGNITION_ERROR', 'ROBOT_FAULT', 'ARM_FAULT', 'FLEET_RESTART', 'USER_CANCEL',
+    'NOTHING_TO_FILL', 'STOCK_RECHECK', 'FORCED_SHIP', 'FORCED_PARTIAL', 'REASSIGN', 'RETURNED_TO_SHELF')),
   ADD CONSTRAINT ck_status_history_actor CHECK (actor IN ('USER', 'ADMIN', 'SYSTEM'));
 
 ALTER TABLE alert
@@ -50,7 +55,9 @@ ALTER TABLE admin_action
     'CLOSE_START', 'CLOSE_CONFIRM', 'CLOSE_CANCEL',
     -- 시험 (시험 DB에만 생김)
     'MOCK_SCENARIO', 'MOCK_ORDER', 'FORCE_CONDITION', 'FORCE_STATE', 'FORCE_CLEAR', 'CHARGE_END')),
-  ADD CONSTRAINT ck_admin_action_result CHECK (result IN ('SENT', 'ACCEPTED', 'REJECTED', 'LOCAL'));
+  ADD CONSTRAINT ck_admin_action_result CHECK (result IN ('SENT', 'ACCEPTED', 'REJECTED', 'LOCAL')),
+  -- ReportCommand 최종 결과 (통신 규칙 #25 ⑥): UNCONFIRMED = ROBOT_TIMEOUT(결과 모름), 30초가 지나면 TIMEOUT
+  ADD CONSTRAINT ck_admin_action_final_result CHECK (final_result IN ('ACCEPTED', 'REJECTED', 'UNCONFIRMED', 'TIMEOUT'));
 
 ALTER TABLE stock_close
   ADD CONSTRAINT ck_stock_close_status CHECK (status IN ('IN_PROGRESS', 'CONFIRMED', 'CANCELLED')),
@@ -62,7 +69,7 @@ ALTER TABLE stock_close
 ALTER TABLE stock_count
   ADD CONSTRAINT ck_stock_count_qty CHECK (counted_qty >= 0 AND book_qty >= 0 AND in_transit_qty >= 0),
   ADD CONSTRAINT ck_stock_count_reason CHECK (reason IN (
-    'COUNT_DIFF', 'VISION_MISS', 'DAMAGE_FOUND', 'LOST', 'INPUT_ERROR', 'TEST_RUN', 'OTHER')),
+    'COUNT_DIFF', 'RECOGNITION_ERROR', 'DAMAGE_FOUND', 'LOST', 'INPUT_ERROR', 'TEST_RUN', 'OTHER')),
   ADD CONSTRAINT ck_stock_count_other_note CHECK (reason IS DISTINCT FROM 'OTHER' OR note IS NOT NULL);
 
 ALTER TABLE app_setting
@@ -365,17 +372,39 @@ END $$;
 
 -- == Task 6: NOTIFY · 처음 설정 값 ==
 
--- 화면 전달 (OMS-05): 주문 · 운반 건 · 알림은 새로 생기거나 상태가 바뀔 때, 마감은 바뀔 때마다 알린다.
--- 채널 ifp_events, 내용 {"t": 테이블, "id": 키, "status": 새 상태}. 트리거 인자 = 키 칼럼 이름.
+-- 화면 전달 (OMS-05, 통신 규칙 #32 · #37): 사건은 ws_event에 넣고 같은 트랜잭션에서 NOTIFY한다.
+-- 채널 ifp_events. ws_event 한 줄마다 {"seq": 순번, "t": type, ...data의 id · status}.
+-- 웹 서비스가 직접 넣는 사건(관리 명령 결과 등)도 같은 INSERT 트리거로 알린다.
+CREATE FUNCTION fn_ws_event_notify() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+  PERFORM pg_notify('ifp_events', jsonb_strip_nulls(jsonb_build_object(
+    'seq', NEW.seq,
+    't', NEW.type,
+    'id', NEW.data ->> 'id',
+    'status', NEW.data ->> 'status'))::text);
+  RETURN NULL;
+END $$;
+
+CREATE TRIGGER tg_ws_event_notify AFTER INSERT ON ws_event
+  FOR EACH ROW EXECUTE FUNCTION fn_ws_event_notify();
+
+-- 주문 · 운반 건 · 알림은 새로 생기거나 상태가 바뀔 때 ws_event 한 줄(사건), 마감은 바뀔 때마다 NOTIFY만(상태, 순번 없음).
+-- 트리거 인자 = 키 칼럼 이름.
 CREATE FUNCTION fn_notify_change() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-  IF TG_OP = 'UPDATE' AND TG_TABLE_NAME <> 'stock_close' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+  IF TG_TABLE_NAME = 'stock_close' THEN
+    PERFORM pg_notify('ifp_events', json_build_object(
+      't', TG_TABLE_NAME,
+      'id', to_jsonb(NEW) ->> TG_ARGV[0],
+      'status', NEW.status)::text);
     RETURN NULL;
   END IF;
-  PERFORM pg_notify('ifp_events', json_build_object(
-    't', TG_TABLE_NAME,
+  IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
+    RETURN NULL;
+  END IF;
+  INSERT INTO ws_event (type, data) VALUES (TG_TABLE_NAME, jsonb_build_object(
     'id', to_jsonb(NEW) ->> TG_ARGV[0],
-    'status', NEW.status)::text);
+    'status', NEW.status));
   RETURN NULL;
 END $$;
 

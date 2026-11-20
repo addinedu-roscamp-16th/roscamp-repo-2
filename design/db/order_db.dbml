@@ -5,7 +5,7 @@
 Project ifp_order_db {
   database_type: 'PostgreSQL'
   Note: '''
-  주문 관리 DB v1.0 · 2026-11-19
+  주문 관리 DB v1.1 · 2026-11-20 (통신 규칙 검토 3장 #18 · #20 · #21 · #22 · #25 · #34 · #37 반영)
   원본 설계: docs/superpowers/specs/2026-11-18-order-db-design.md
   적용 순서: order_db.sql → order_db_extra.sql
   '''
@@ -57,6 +57,7 @@ Table orders {
   created_at timestamptz [not null, default: `now()`, note: '접수 시각 (마감 뒤 재확인 순서)']
   updated_at timestamptz [not null]
   finished_at timestamptz [note: '출고됨 · 일부 출고됨 · 취소됨이 된 시각']
+  idem_key text [unique, note: '화면 주문의 Idempotency-Key. 같은 키는 한 번만 접수 (통신 규칙 #34 · #37)']
   Note: '주문 (OMS-04 · 05 · 10, SCR-04 · 07). 상태는 운반 건들의 요약'
 }
 
@@ -77,7 +78,10 @@ Table trip {
   status text [not null, note: '4.4의 9개 값']
   robot_id text [note: '맡은 Pode (pode1 ~ pode3)']
   placed_at timestamptz [note: '관제가 담은 수량을 알려 온 시각. NULL이면 바구니 수량 모름']
-  created_at timestamptz [not null, default: `now()`]
+  report_epoch integer [note: '마지막으로 반영한 ReportTrip의 epoch (bridge_session). 반영 전 NULL']
+  report_n integer [note: '마지막으로 반영한 ReportTrip의 report_n. (report_epoch, report_n)이 더 클 때만 반영']
+  first_assigned_at timestamptz [note: '처음 배정됨이 된 시각. 기록용 (취소 판단에 쓰지 않음, 통신 규칙 #21)']
+  created_at timestamptz [not null, default: `now()`, note: '처음 접수 시각 = contract의 submitted_at. 다시 배정 순서 · ListOpenTrips 정렬 기준, 접수됨 복귀 때 새로 찍지 않음 (통신 규칙 #21)']
   updated_at timestamptz [not null]
   finished_at timestamptz
   indexes {
@@ -104,7 +108,7 @@ Table status_history {
   trip_id text [ref: > trip.trip_id, note: 'NULL이면 주문 요약 상태의 변화']
   from_status text [note: 'NULL = 처음 접수']
   to_status text [not null]
-  reason text [note: "OUT_OF_STOCK · PICK_FAILED · VISION_MISS · PODE_FAULT · PHODY_FAULT · USER_CANCEL · NOTHING_TO_FILL · STOCK_RECHECK · FORCED_SHIP · FORCED_PARTIAL · REASSIGN · RETURNED_TO_SHELF"]
+  reason text [note: "contract 사유 코드 표의 이름: OUT_OF_STOCK · PICK_FAILED · RECOGNITION_ERROR · ROBOT_FAULT(Pode 장애) · ARM_FAULT(Phody 장애) · FLEET_RESTART · USER_CANCEL · NOTHING_TO_FILL · STOCK_RECHECK · FORCED_SHIP · FORCED_PARTIAL · REASSIGN · RETURNED_TO_SHELF"]
   robot_id text
   actor text [not null, note: "CHECK IN ('USER','ADMIN','SYSTEM')"]
   account_id bigint [ref: > account.account_id]
@@ -116,7 +120,8 @@ Table status_history {
 Table alert {
   alert_id bigint [pk, increment]
   level text [not null, note: "CHECK IN ('INFO','WARN','ERROR')"]
-  code text [not null, note: 'FleetEvent.code 또는 웹 코드 (OUT_OF_STOCK, LOW_STOCK, NEGATIVE_STOCK, LATE_REPORT, MODE_MISMATCH, TEST_LEFTOVER_STOP 등)']
+  code text [not null, note: 'FleetEvent.code 또는 웹 코드 (OUT_OF_STOCK, LOW_STOCK, NEGATIVE_STOCK, LATE_REPORT, LATE_COMMAND_RESULT, MODE_MISMATCH, TEST_LEFTOVER_STOP 등)']
+  event_id text [unique, note: 'ReportEvent의 event_id (보낸 쪽이 만든 UUID). 같은 번호는 한 번만 (통신 규칙 #37)']
   source text [not null, note: 'central · fleet · order_service 등']
   robot_id text
   order_id text [ref: > orders.order_id]
@@ -141,8 +146,10 @@ Table admin_action {
   alert_id bigint [ref: > alert.alert_id]
   close_id bigint [ref: > stock_close.close_id]
   payload jsonb [note: '입력 값 (못 담음 상품 · 수량, 바꾼 설정의 이전 · 새 값 등)']
-  result text [not null, note: "CHECK IN ('SENT','ACCEPTED','REJECTED','LOCAL')"]
-  result_detail text [note: '거절 사유']
+  request_id text [unique, note: '관리 명령의 request_id (UUID). ROS로 보내지 않는 입력은 NULL (통신 규칙 #25 · #37)']
+  result text [not null, note: "CHECK IN ('SENT','ACCEPTED','REJECTED','LOCAL') — fleet 접수 응답"]
+  result_detail text [note: '거절 사유 (contract 사유 코드: NOT_STOPPED · LOCK_RELEASED · HOLDING_ITEM · ROBOT_TIMEOUT · ROBOT_REJECTED 등)']
+  final_result text [note: "ReportCommand 최종 결과. CHECK IN ('ACCEPTED','REJECTED','UNCONFIRMED','TIMEOUT'). UNCONFIRMED = ROBOT_TIMEOUT(결과 모름), 끝 상태는 한 번만 정함"]
   created_at timestamptz [not null, default: `now()`]
   Note: '관리자 입력 기록 (SCR-08 · 11 · 12 · 16 · 18 · 20 · 21, COM-02, SCR-19)'
 }
@@ -170,7 +177,7 @@ Table stock_count {
   book_qty integer [note: '장부 수량 (마감은 확정 순간, 수시 조정은 저장 순간). CHECK >= 0']
   in_transit_qty integer [not null, default: 0, note: '수시 조정 때 진행 중 바구니에 있던 수. CHECK >= 0']
   diff_qty integer [note: 'GENERATED: counted_qty - (book_qty - in_transit_qty)']
-  reason text [note: "COUNT_DIFF · VISION_MISS · DAMAGE_FOUND · LOST · INPUT_ERROR · TEST_RUN(운영 재개 마감만) · OTHER"]
+  reason text [note: "COUNT_DIFF · RECOGNITION_ERROR · DAMAGE_FOUND · LOST · INPUT_ERROR · TEST_RUN(운영 재개 마감만) · OTHER"]
   account_id bigint [not null, ref: > account.account_id, note: '마지막으로 입력한 관리자']
   note text [note: '사유 OTHER면 필수']
   created_at timestamptz [not null, default: `now()`]
@@ -187,4 +194,20 @@ Table app_setting {
   updated_at timestamptz [not null]
   updated_by bigint [ref: > account.account_id]
   Note: '운영 설정 (D-6, R-15). 처음 값: basket_capacity 4, max_order_items 8'
+}
+
+Table ws_event {
+  seq bigint [pk, increment, note: '화면 WS 사건 순번. 다시 연결하면 since_seq 뒤만 보냄']
+  type text [not null, note: '사건 종류 (orders · trip · alert 상태 변화, 관리 명령 결과 등)']
+  data jsonb [not null, note: '사건 내용']
+  created_at timestamptz [not null, default: `now()`]
+  Note: '화면 WS 사건 (OMS-05, 통신 규칙 #32 · #37). 같은 트랜잭션에서 INSERT 후 NOTIFY (INSERT 트리거). 주문 · 운반 건 · 알림 상태 변화는 트리거가 넣음'
+}
+
+Table bridge_session {
+  node text [pk, note: '보고를 보내는 노드. 지금은 fleet만 (central은 통신 규칙 다음 주 논의 2)']
+  epoch integer [not null, note: 'Hello 때마다 DB가 1씩 늘려 줌. CHECK > 0']
+  boot_id text [not null, note: '노드가 켜질 때 만든 UUID (기록용)']
+  hello_at timestamptz [not null, default: `now()`, note: '마지막 Hello 시각']
+  Note: '노드별 epoch (통신 규칙 #18 · #37). ReportTrip 번호 (report_epoch, report_n)의 앞자리'
 }

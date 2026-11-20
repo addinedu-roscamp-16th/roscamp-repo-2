@@ -32,6 +32,9 @@ ROW_SQL = {
         "insert into admin_action (account_id, action, result) values (%(acc)s, %(v)s, 'LOCAL')", None),
     "admin_action.result": (
         "insert into admin_action (account_id, action, result) values (%(acc)s, 'ESTOP', %(v)s)", None),
+    "admin_action.final_result": (
+        "insert into admin_action (account_id, action, result, final_result) "
+        "values (%(acc)s, 'LOCK_RELEASE', 'ACCEPTED', %(v)s)", None),
     "stock_close.close_kind": (
         "insert into stock_close (started_by, close_kind) values (%(acc)s, %(v)s)", None),
     "stock_count.reason": (
@@ -45,12 +48,14 @@ GOOD = {
     "account": "DEV", "orders": "FILLING_PAUSE", "trip": "HELD", "status_history.reason": "RETURNED_TO_SHELF",
     "status_history.actor": "ADMIN", "alert.level": "WARN", "alert.status": "RESOLVED",
     "admin_action.action": "CHARGE_END", "admin_action.result": "REJECTED",
+    "admin_action.final_result": "UNCONFIRMED",
     "stock_close.close_kind": "TEST_ENTRY", "stock_count.reason": "LOST", "app_setting.key": "max_order_items",
 }
 UNKNOWN = {
     "account": "ROOT", "orders": "REJECTED", "trip": "DONE", "status_history.reason": "OTHER",
     "status_history.actor": "ROBOT", "alert.level": "FATAL", "alert.status": "ACK",
     "admin_action.action": "DELETE_ALL", "admin_action.result": "OK",
+    "admin_action.final_result": "ROBOT_TIMEOUT",
     "stock_close.close_kind": "AUTO", "stock_count.reason": "MISC", "app_setting.key": "max_baskets",
 }
 
@@ -230,3 +235,58 @@ def test_updated_at_moves_on_update(conn):
     conn.execute("update orders set status = 'ASSIGNED' where order_id = %s", (order_id,))
     after = conn.execute("select updated_at from orders where order_id = %s", (order_id,)).fetchone()[0]
     assert after > before
+
+
+# 사유 코드는 contract 이름 (통신 규칙 #37): 옛 이름은 거절, 새 이름은 받음
+@pytest.mark.parametrize("reason", ["RECOGNITION_ERROR", "ROBOT_FAULT", "ARM_FAULT", "FLEET_RESTART", "NOTHING_TO_FILL"])
+def test_history_reason_contract_names(conn, reason):
+    _, _, order_id, _ = _base(conn)
+    conn.execute("insert into status_history (order_id, to_status, reason, actor) values (%s, 'HELD', %s, 'SYSTEM')",
+                 (order_id, reason))
+
+
+@pytest.mark.parametrize("reason", ["VISION_MISS", "PODE_FAULT", "PHODY_FAULT"])
+def test_history_reason_old_names_rejected(conn, reason):
+    _, _, order_id, _ = _base(conn)
+    with pytest.raises(errors.CheckViolation):
+        conn.execute("insert into status_history (order_id, to_status, reason, actor) values (%s, 'HELD', %s, 'SYSTEM')",
+                     (order_id, reason))
+
+
+def test_count_reason_recognition_error(conn):
+    acc, pid, _, _ = _base(conn)
+    conn.execute("insert into stock_count (product_id, account_id, counted_qty, book_qty, reason) "
+                 "values (%s, %s, 1, 2, 'RECOGNITION_ERROR')", (pid, acc))
+    with pytest.raises(errors.CheckViolation):
+        conn.execute("insert into stock_count (product_id, account_id, counted_qty, book_qty, reason) "
+                     "values (%s, %s, 1, 2, 'VISION_MISS')", (pid, acc))
+
+
+def test_trip_report_no_filled_together(conn):
+    _, _, _, trip_id = _base(conn)
+    with pytest.raises(errors.CheckViolation):
+        conn.execute("update trip set report_epoch = 1 where trip_id = %s", (trip_id,))
+    conn.execute("update trip set report_epoch = 1, report_n = 7 where trip_id = %s", (trip_id,))
+
+
+def test_bridge_session_epoch_positive(conn):
+    with pytest.raises(errors.CheckViolation):
+        conn.execute("insert into bridge_session (node, epoch, boot_id) values ('fleet', 0, 'b')")
+    conn.execute("insert into bridge_session (node, epoch, boot_id) values ('fleet', 1, 'b')")
+
+
+# 같은 번호는 한 줄만 (통신 규칙 #37): 주문 Idempotency-Key, 알림 event_id, 관리 명령 request_id
+def test_idempotency_keys_unique(conn):
+    acc, _, order_id, _ = _base(conn)
+    conn.execute("update orders set idem_key = 'k1' where order_id = %s", (order_id,))
+    with pytest.raises(errors.UniqueViolation):
+        conn.execute("insert into orders (order_id, account_id, status, idem_key) values ('O-z', %s, 'RECEIVED', 'k1')",
+                     (acc,))
+    conn.execute("insert into alert (level, code, source, message, event_id) values ('WARN', 'X', 'fleet', 'm', 'e1')")
+    with pytest.raises(errors.UniqueViolation):
+        conn.execute("insert into alert (level, code, source, message, event_id) values ('WARN', 'X', 'fleet', 'm', 'e1')")
+    conn.execute("insert into admin_action (account_id, action, result, request_id) values (%s, 'LOCK_RELEASE', 'SENT', 'r1')",
+                 (acc,))
+    with pytest.raises(errors.UniqueViolation):
+        conn.execute("insert into admin_action (account_id, action, result, request_id) "
+                     "values (%s, 'LOCK_RELEASE', 'SENT', 'r1')", (acc,))
