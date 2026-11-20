@@ -118,7 +118,7 @@ git push origin submit/2026-11-24-scenario
 | 2026-11-20 | 스토리보드_1st/2팀_GUIDesign-관리자_스타일(다크).png | 화면 디자인 컨셉 3안 · 관리자 (Confluence "화면 디자인 컨셉 시안 4안_261120") | 3안 (선택) |
 | 2026-11-20 | 스토리보드_1st/2팀_GUIDesign-사용자_스타일(밝은 톤).png | 화면 디자인 컨셉 3안 · 사용자 (〃) | 3안 (선택) |
 | 2026-11-20 | ERD_1st/2팀_ERDiagram.png | db/order_db.dbml + order_db.dbdiagram (dbdiagram.io) | DB v1.1 |
-| 2026-11-20 | ERD_1st/2팀_ERDiagram_상세.pdf | 주문 DB 상세 설명 (PDF) | DB v1.1 |
+| 2026-11-20 | ERD_1st/2팀_ERDiagram_상세.pdf | Confluence "주문 DB ERD" 페이지 버전 3 (https://iphonic.atlassian.net/wiki/x/F4AFAQ) | DB v1.1 |
 | 2026-11-20 | 인터페이스_1st/2팀_InterfaceSpecification-*.png 7장 | diagrams/인터페이스_명세.drawio · 1 ~ 4-2번 탭 | v0.1 |
 | 2026-11-20 | 인터페이스_1st/2팀_InterfaceSpecification_상세.pdf | Confluence "Interface Specip" 페이지 버전 4 (docs/설계/인터페이스_명세.md v0.2 기준) | v0.1 |
 
