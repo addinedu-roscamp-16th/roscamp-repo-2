@@ -6,6 +6,7 @@
 |---|---|
 | ROS 2 통신 코드 (토픽 · 서비스 · 액션, QoS, 재시도, `fleet_interfaces`) | `docs/설계/통신_규칙.md` (규칙 `IR-nn`을 따름) |
 | 인터페이스 구현 · 변경 (이름 · 타입 · 칸) | `docs/설계/인터페이스_명세.md`와 `interfaces/fleet_interfaces/contract.yaml` (contract가 원본, 기준 버전은 명세 머리 참고) |
+| 관제(fleet) · central · `fleet_interfaces`를 명세에 맞추는 작업 | `docs/설계/fleet_작업_목록.md` (`W-nn`) |
 | 미확정 항목에 걸림 | `docs/설계/설계_검토_사항.md` (`Q-nn`. "열림"이면 짐작해 구현하지 말고 사용자에게 물음) |
 | 빌드 · 실행 · ROS 도메인 | `docs/개발_규칙.md` |
 | 화면 · 다이어그램 · 스토리보드 | `design/README.md` |
