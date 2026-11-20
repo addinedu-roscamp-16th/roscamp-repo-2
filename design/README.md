@@ -13,8 +13,10 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 | 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.2 | 2026-11-19 | 비상정지_순서도_r1.drawio |
 | 관리자 페이지 스토리보드 | [diagrams/관리자_스토리보드.drawio](diagrams/관리자_스토리보드.drawio) | v1.4 | 2026-11-19 | - |
 | 사용자 주문 페이지 스토리보드 | [diagrams/사용자_스토리보드.drawio](diagrams/사용자_스토리보드.drawio) | v1.1 | 2026-11-19 | - |
-| 주문 DB (ERD) | [db/order_db.dbml](db/order_db.dbml) | v1.0 | 2026-11-19 | - |
+| 주문 DB (ERD) | [db/order_db.dbml](db/order_db.dbml) | v1.1 | 2026-11-20 | - |
+| 인터페이스 명세 그림 | [diagrams/인터페이스_명세.drawio](diagrams/인터페이스_명세.drawio) | v0.1 | 2026-11-20 | - |
 | 다이어그램 수정 요청 | [다이어그램_수정_요청.md](다이어그램_수정_요청.md) | - | 2026-11-19 | - |
+| 통신 규칙 반영 수정 요청 | [통신규칙_반영_수정_요청.md](통신규칙_반영_수정_요청.md) | - | 2026-11-20 | - |
 
 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 적습니다.
 
@@ -111,10 +113,20 @@ git push origin submit/2026-11-24-scenario
 | 2026-11-19 | 스토리보드_1st/관리자_스토리보드-6. 서비스 일시 정지 · 재시작.drawio.png | 〃 · 6. 서비스 일시 정지 · 재시작 | v1.2 |
 | 2026-11-19 | 스토리보드_1st/관리자_스토리보드-7. 재고 · 이력.drawio.png | 〃 · 7. 재고 · 이력 | v1.2 |
 | 2026-11-19 | 스토리보드_1st/관리자_스토리보드-8. 비상정지.drawio.png | 〃 · 8. 비상정지 | v1.2 |
+| 2026-11-20 | 스토리보드_1st/2팀_GUIDesign-관리자.png | diagrams/관리자_스토리보드.drawio · 0 ~ 10번 탭을 한 장으로 (2열) | v1.4 |
+| 2026-11-20 | 스토리보드_1st/2팀_GUIDesign-사용자.png | diagrams/사용자_스토리보드.drawio · 0 ~ 6번 탭을 한 장으로 (2열) | v1.1 |
+| 2026-11-20 | 스토리보드_1st/2팀_GUIDesign-관리자_스타일(다크).png | 화면 디자인 컨셉 3안 · 관리자 (Confluence "화면 디자인 컨셉 시안 4안_261120") | 3안 (선택) |
+| 2026-11-20 | 스토리보드_1st/2팀_GUIDesign-사용자_스타일(밝은 톤).png | 화면 디자인 컨셉 3안 · 사용자 (〃) | 3안 (선택) |
+| 2026-11-20 | ERD_1st/2팀_ERDiagram.png | db/order_db.dbml + order_db.dbdiagram (dbdiagram.io) | DB v1.1 |
+| 2026-11-20 | ERD_1st/2팀_ERDiagram_상세.pdf | 주문 DB 상세 설명 (PDF) | DB v1.1 |
+| 2026-11-20 | 인터페이스_1st/2팀_InterfaceSpecification-*.png 7장 | diagrams/인터페이스_명세.drawio · 1 ~ 4-2번 탭 | v0.1 |
+| 2026-11-20 | 인터페이스_1st/2팀_InterfaceSpecification_상세.pdf | Confluence "Interface Specip" 페이지 버전 4 (docs/설계/인터페이스_명세.md v0.2 기준) | v0.1 |
 
 - 상태 다이어그램의 "1. 순서도" 탭은 제출하지 않았습니다.
 - 2026-11-18 제출본(`exports/Scenario_2nd/`)은 Confluence Scenario 페이지 첨부와 같은 이름입니다.
 - 비상정지 순서도 PNG는 Confluence 첨부와 같은 이름으로 두었습니다.
+- 2026-11-20 스토리보드 제출본은 탭별 PNG(`스토리보드_1st/2팀_GUIDesign-<관리자|사용자>-<탭>.png`)를 역할별 한 장으로 묶은 것입니다 (제출 파일 수 10개 제한). 탭별 PNG는 Confluence 스토리보드 페이지(관리자 v1.4 · 사용자 v1.1)의 첨부와 같습니다.
+- 2026-11-20 화면 스타일은 4가지 시안 중 3안(밝은 초록 포인트)을 골랐습니다.
 - 2026-11-19 관리자 스토리보드 제출본(`exports/스토리보드_1st/`)은 draw.io 내보내기 이름 그대로이며, Confluence 첨부와 같은 이름입니다.
 
 ## PNG 일괄 내보내기 (제출용)

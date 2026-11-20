@@ -2,6 +2,13 @@
 
 새 항목은 위에 추가합니다. 형식: `## 날짜` 아래에 `- 문서 버전: 바뀐 내용`.
 
+## 2026-11-20
+
+- 주문 DB v1.1: 통신 규칙 결정 반영 — 보고 번호(`trip.report_epoch` · `report_n`), `first_assigned_at`, `admin_action.request_id` · `final_result`, `alert.event_id`, `orders.idem_key`, `ws_event` · `bridge_session` 테이블(15개), 사유 코드 이름을 contract에 맞춤. 시험 118개
+- 인터페이스 명세 그림 v0.1 (새 문서): UML 컴포넌트 · 구간별 인터페이스 3장 · 클래스 · 시퀀스 2장 (UML 검수 반영). 본문은 `docs/설계/인터페이스_명세.md`
+- 화면 스타일: 디자인 컨셉 4안 중 3안(밝은 초록 포인트) 선택, 두 스토리보드 Confluence 페이지에 스타일 안내 추가
+- 제출: 스토리보드(관리자 v1.4 · 사용자 v1.1, 역할별 한 장 + 3안 스타일), ERD(DB v1.1), 인터페이스 명세(그림 v0.1 + 상세 PDF). 태그 `submit/2026-11-20-gui-erd-interface`
+
 ## 2026-11-19
 
 - 주문 DB v1.0: DBML 원본(`db/order_db.dbml`, 테이블 13개) · DDL(`dbml2sql`, `db/order_db.sql`) · extra SQL(CHECK · 부분 UNIQUE · 원장 트리거 · 마감 검사 · `v_in_flight` · 재확인 함수 · NOTIFY · 처음 설정 값) · 시험 96개 (설계 문서 `docs/superpowers/specs/2026-11-18-order-db-design.md`)
