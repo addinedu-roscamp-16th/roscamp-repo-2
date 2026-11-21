@@ -499,7 +499,15 @@ def main():
                         help='Save a checked case-arrival plan for later execution; plan only')
     parser.add_argument('--use-plan', type=Path,
                         help='Recheck a saved arrival plan against the current scene before executing')
+    parser.add_argument('--checkpoint', type=Path,
+                        help='Record completed placement stages for the scheduler')
     args = parser.parse_args()
+
+    def checkpoint(stage):
+        if args.checkpoint is not None:
+            temporary = args.checkpoint.with_suffix('.tmp')
+            temporary.write_text(json.dumps({'stage': stage, 'arm': args.arm}))
+            temporary.replace(args.checkpoint)
     if args.place and not args.execute:
         parser.error('--place requires --execute')
     if args.save_plan and args.execute:
@@ -539,6 +547,7 @@ def main():
         state[f'{arm}_gripper_controller'] = held_object.planning_grip_value(
             coord.node, wait, arm)
         mark('setup (gate/scene checks, gripper)')
+        print('STATE PLACE PLANNING BEGIN', flush=True)
         phases = None
         strategy = None
         if args.use_plan:
@@ -555,6 +564,7 @@ def main():
             with PlanningMargin(coord, args.planning_extra_mm/1000.0):
                 strategy, phases = checked_goal(coord, state, case_xy, rim_z_mm,
                                                 allow_staged=args.allow_staged, arm=arm)
+        print('STATE PLACE PLANNING END', flush=True)
         mark('plan case arrival (RRT + paired checks)')
         if args.save_plan:
             save_checked_plan(args.save_plan, arm, own_held_type, case_xy,
@@ -582,10 +592,11 @@ def main():
             from coordinated_see_center import see_center_goals, choose_return
             place_steps.place(coord, case_xy, rim_z_mm, below_rim_mm=args.below_rim_mm,
                               release_gap_mm=args.release_gap_mm, up_mm=args.lift_mm,
-                              descent_method=args.descent_method, arm=arm)
+                              descent_method=args.descent_method, arm=arm, checkpoint=checkpoint)
             mark('place (center, lower, release, lift)')
             state = coord.state()
             goals = see_center_goals(coord)
+            print('STATE PLACE PLANNING BEGIN', flush=True)
             try:
                 with PlanningMargin(coord, args.planning_extra_mm/1000.0):
                     strategy, phases = choose_return(coord, state, goals, arm)
@@ -596,9 +607,14 @@ def main():
                       'replanning with execution padding only.', flush=True)
                 with PlanningMargin(coord, 0.0):
                     strategy, phases = choose_return(coord, state, goals, arm)
+            print('STATE PLACE PLANNING END', flush=True)
             mark('plan return to see_center')
             print(f'RETURN PLAN: {strategy}', flush=True)
+            print('SEE_CENTER_RETURN_ENDPOINT ' + json.dumps({
+                name: float(phases[-1]['end'][name]) for name in ALL_JOINTS
+            }), flush=True)
             execute_phases(coord, phases)
+            checkpoint('returned')
             mark('execute return to see_center')
             print('PLACE AND RETURN COMPLETE.', flush=True)
         return 0

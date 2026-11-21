@@ -14,9 +14,9 @@ replaces only the ROI selection and perception:
      between objects but no new capture is taken.
   4. Alternate arm assignments (each arm's turn takes the remaining object most
      on its own side). After E (or --auto-execute): approach, fine, grasp/lift,
-     then carry and place at once. While that arm places, the other arm's
-     approach is planned in the background from the future state "placing arm
-     at see_center"; execution re-checks the real start (1 deg) or re-plans.
+     then carry and place at once. During the return to see_center, the next
+     approach is planned from the return path's projected endpoint. Execution
+     checks the measured start or re-plans.
 
 One gate goal runs at a time, so arm motions are sequential; only planning
 overlaps with motion.
@@ -74,6 +74,8 @@ MAX_ROIS = 12
 def parse_multi_args():
     ap = argparse.ArgumentParser(add_help=False)
     ap.add_argument('--auto-execute', action='store_true')
+    ap.add_argument('--order-ids', nargs='+', metavar='OBJECT_ID',
+                    help='Pick only these matched ROI IDs (for example object_1 object_3)')
     ap.add_argument('--first-arm', choices=('left', 'right'), default='left',
                     help='Alternate assignments from this arm; an unreachable assigned arm fails closed')
     ap.add_argument('--object-height-mm', type=float, default=15.0)
@@ -120,7 +122,14 @@ class MultiApp(sam.SAMYawApp):
         self.bg = None
         self.bg_waiting = False
         self.bg_pending_arm = None
-        self.operator_stop_requested = False
+        self.operator_paused = False
+        self.return_settling = None
+        self.active_object = None
+        self.recovery = None
+        self.manual_restart = False
+        self.place_planning = False
+        self.plan_wait_sample = None
+        self.plan_wait_seconds = 0.0
         self.next_start_retry_at = 0.0
         self.see_center_z = {}
         self.see_center_joints = {}
@@ -219,6 +228,9 @@ class MultiApp(sam.SAMYawApp):
     def reset(self):
         if getattr(self, '_keep_queue', False):
             return super().reset()
+        if self.operator_paused and self.motion_child is not None:
+            print('STATE: wait for worker cancellation before resetting.', flush=True)
+            return
         if (self.args.enable_execute and self.queue_started and
                 (self.held_jobs or self.work.pick_owner or
                  self.work.basket_owner)):
@@ -239,7 +251,14 @@ class MultiApp(sam.SAMYawApp):
         self.bg = None
         self.bg_waiting = False
         self.bg_pending_arm = None
-        self.operator_stop_requested = False
+        self.operator_paused = False
+        self.return_settling = None
+        self.active_object = None
+        self.recovery = None
+        self.manual_restart = False
+        self.place_planning = False
+        self.plan_wait_sample = None
+        self.plan_wait_seconds = 0.0
         self.next_start_retry_at = 0.0
         self.see_center_z = {}
 
@@ -303,6 +322,14 @@ class MultiApp(sam.SAMYawApp):
             print(f'  {obj["id"]} L{obj["left_roi"]}-R{obj["right_roi"]}: '
                   f'XYZ {np.round(xyz, 1).tolist()} mm, long yaw {obj["object_long_yaw_deg"]:+.1f} deg, '
                   f'{obj["valid_points"]} points', flush=True)
+        if MULTI.order_ids:
+            by_id = {obj['id']: obj for obj in objects}
+            missing = sorted(set(MULTI.order_ids) - by_id.keys())
+            if missing or len(set(MULTI.order_ids)) != len(MULTI.order_ids):
+                self.status = 'ORDER IDS INVALID - R RECAPTURE'
+                print(f'{self.status}: missing={missing}, repeated IDs are not allowed', flush=True)
+                return
+            objects = [by_id[object_id] for object_id in MULTI.order_ids]
         assignments = alternating_assignments(len(objects), MULTI.first_arm)
         self.queue = self._order_by_side(objects, assignments)
         self.work = WorkState()
@@ -524,8 +551,8 @@ class MultiApp(sam.SAMYawApp):
             self.status = f'ALL {self.queue_total} OBJECTS DONE - R NEW CAPTURE'
             print(self.status, flush=True)
             return
-        obj = self.queue.pop(0)
-        number = self.queue_total - len(self.queue)
+        obj = self.queue[0]
+        number = self.queue_total - len(self.queue) + 1
         assigned_arm = obj['assigned_arm']
         self._wait_arms_still()
         try:
@@ -533,57 +560,48 @@ class MultiApp(sam.SAMYawApp):
         except RuntimeError as exc:
             self.status = 'MULTI: NO FRESH JOINTS - CHECK PI / R'
             print(f'Cannot start object {number}: {exc}', flush=True)
-            self.queue.insert(0, obj)
             self.next_start_retry_at = time.monotonic() + 2.0
             return
         if not self.work.request_pick(assigned_arm):
-            self.queue.insert(0, obj)
             self.status = f'{assigned_arm.upper()} PICK WAITING - PRODUCT AREA OCCUPIED'
             print(self.status, flush=True)
             self.next_start_retry_at = time.monotonic() + 0.5
             return
+        self.active_object = self.queue.pop(0)
         self.next_start_retry_at = 0.0
         preview, target = self._write_object_target(obj, number, assigned_arm, joints, stamps)
         self._apply_object(assigned_arm, preview, target, joints, stamps)
         print(f'STATE OBJECT {number}/{self.queue_total}: {obj["id"]} -> {assigned_arm.upper()} '
               f'XYZ {np.round(target["center_xyz_mm"], 1).tolist()} mm', flush=True)
-        self.auto_execute_pending = MULTI.auto_execute or self.queue_auto_started
-        self.select_object_type('chocobar')  # plans the approach for the assigned arm
+        self.auto_execute_pending = self.queue_auto_started or (MULTI.auto_execute and not self.manual_restart)
+        self.select_object_type('chocobar')
+        if self.motion_child is None:
+            self.pause_motion('approach planner did not start', stage='PLAN')
 
     # ------------------------------------------- background next-arm plan
-    def _start_background_plan(self, placing_arm):
-        """While one arm carries/places, plan the other arm's approach from the
-        future state 'placing arm back at see_center'. Planning does not use the
-        gate, so this hides the approach planning time. Execution re-checks the
-        real start (1 deg) and re-plans from the live pose if it differs."""
+    def _start_background_plan(self, placing_arm, endpoint, *, before_execution=False):
+        """Plan the next approach from both arms' projected return state."""
         if self.bg is not None or not self.queue:
             return
         obj = self.queue[0]
         arm = obj['assigned_arm']
-        names = [f'{placing_arm}_{i}_Joint' for i in range(1, 7)]
+        names = [[f'{side}_{i}_Joint' for i in range(1, 7)]
+                 for side in ('left', 'right')]
         if (arm == placing_arm or self.work.arms[arm] not in ('idle', 'pick_waiting') or
-                set(self.see_center_joints.get(placing_arm, {})) != set(names)):
+                set(endpoint) != {name for row in names for name in row}):
             return
         try:
-            _, joints, stamps = self.live_poses.snapshot()
+            _, _, stamps = self.live_poses.snapshot()
         except RuntimeError as exc:
             print(f'STATE: no background plan ({exc}); will plan after placement.', flush=True)
             return
-        assumed = {name: float(self.see_center_joints[placing_arm][name]) for name in names}
-        joints = np.array(joints, dtype=float)
-        joints[0 if placing_arm == 'left' else 1] = [assumed[name] for name in names]
+        joints = np.array([[endpoint[name] for name in row] for row in names], dtype=float)
+        if not np.isfinite(joints).all():
+            return
+        assumed = self._joint_dict(joints)
         number = self.queue_total - len(self.queue) + 1
         preview, target = self._write_object_target(obj, number, arm, joints, stamps, assumed)
-        cmd = [str(self.args.motion_python), str(HERE.parent / 'moveit_pick' / 'move_dual_sam_yaw_real.py'),
-               '--target-file', str(preview), '--out-dir', str(preview.parent),
-               '--above-mm', str(self.args.above_mm),
-               '--yaw-camera', self.args.yaw_camera,
-               '--tcp-closing-axis', self.args.tcp_closing_axis,
-               '--yaw-offset-deg', str(self.args.yaw_offset_deg),
-               '--max-capture-age', str(self.args.max_capture_age),
-               '--max-state-change-deg', str(self.args.max_state_change_deg)]
-        if self.args.allow_gripper_tilt:
-            cmd.append('--allow-gripper-tilt')
+        cmd = self.approach_command(preview)
         logpath = preview.parent / 'moveit_plan_background.log'
         log = logpath.open('w')
         try:
@@ -596,12 +614,14 @@ class MultiApp(sam.SAMYawApp):
             log.close()
             print(f'STATE: background plan did not start ({exc}).', flush=True)
             return
-        self.queue.pop(0)
         self.bg = {'obj': obj, 'number': number, 'arm': arm, 'preview': preview,
                    'target': target, 'joints': joints, 'stamps': stamps, 'child': child,
                    'log': log, 'logpath': logpath, 'code': None, 'started': time.monotonic()}
-        print(f'STATE NEXT PLAN (background): object {number} -> {arm.upper()} while '
-              f'{placing_arm.upper()} places; log={logpath}', flush=True)
+        timing = ('before first execution' if before_execution
+                  else f'while {placing_arm.upper()} returns to see_center')
+        self.bg['timing'] = timing
+        print(f'STATE NEXT PLAN: object {number} -> {arm.upper()} {timing}; log={logpath}',
+              flush=True)
 
     def _poll_background(self):
         bg = self.bg
@@ -621,42 +641,93 @@ class MultiApp(sam.SAMYawApp):
             except OSError:
                 pass
         if self.bg_waiting:
+            self._record_stationary_plan_wait()
             self._adopt_background()
+        elif not self.queue_auto_started and self.plan_ready and self._background_usable(bg):
+            self.status = 'APPROACH PLANS READY - E EXECUTE'
+
+    def _background_usable(self, bg):
+        if bg['code'] != 0:
+            return False
+        try:
+            summary = json.loads((bg['preview'].parent / 'moveit_plan_summary.json').read_text())
+        except (OSError, ValueError):
+            return False
+        age = time.time() - bg['target']['capture_time_unix']
+        return (summary.get('selected_arm') == bg['arm'] and
+                summary.get('execution_allowed') is not False and
+                age < self.args.max_capture_age - 15)
+
+    def _prepare_next_at_return(self, placing_arm, endpoint):
+        bg = self.bg
+        if bg is not None and bg['child'] is None:
+            assumed = bg['target']['multi_object']['assumed_start_rad']
+            drift = max(abs(endpoint[name] - value) for name, value in assumed.items())
+            if self._background_usable(bg) and np.rad2deg(drift) <= self.args.max_state_change_deg:
+                return
+            print('STATE: advance plan does not match the return; planning from its endpoint.',
+                  flush=True)
+            self.bg = None
+        self._start_background_plan(placing_arm, endpoint)
 
     def _adopt_background(self):
         bg, self.bg = self.bg, None
         self.bg_waiting = False
         arm = bg['arm']
-        try:
-            summary = json.loads((bg['preview'].parent / 'moveit_plan_summary.json').read_text())
-        except (OSError, ValueError):
-            summary = {}
-        age = time.time() - bg['target']['capture_time_unix']
-        usable = (bg['code'] == 0 and summary.get('selected_arm') == arm and
-                  summary.get('execution_allowed') is not False and
-                  age < self.args.max_capture_age - 15)
+        usable = bool(self.queue and self.queue[0] is bg['obj'] and
+                      self._background_usable(bg))
         super().reset()  # per-object UI state only; queue and work state are kept
         if not usable:
-            print(f'STATE: background plan not usable (exit={bg["code"]}, age {age:.0f} s); '
+            print(f'STATE: background plan not usable (exit={bg["code"]}); '
                   'planning from the current pose.', flush=True)
-            self.queue.insert(0, bg['obj'])
             self.start_next_object()
             return
         if not self.work.request_pick(arm):
-            self.queue.insert(0, bg['obj'])
             self.status = f'{arm.upper()} PICK WAITING - PRODUCT AREA OCCUPIED'
             print(self.status, flush=True)
             self.next_start_retry_at = time.monotonic() + 0.5
             return
+        self.active_object = self.queue.pop(0)
         self._apply_object(arm, bg['preview'], bg['target'], bg['joints'], bg['stamps'])
         self.selected_object_type = 'chocobar'
         self.args.object_type = 'chocobar'
         self.plan_ready = True
         print(f'STATE OBJECT {bg["number"]}/{self.queue_total}: {bg["obj"]["id"]} -> '
-              f'{arm.upper()} (approach planned during placement)', flush=True)
-        self._wait_arms_still()
-        if MULTI.auto_execute or self.queue_auto_started:
-            self.start_motion(execute=True)  # re-plans if the real start differs
+              f'{arm.upper()} (approach planned {bg["timing"]})', flush=True)
+        now = time.monotonic()
+        self.return_settling = {'after': now, 'deadline': now + 8.0,
+                                'sample': None, 'since': None}
+        self.status = 'WAITING FOR FRESH STABLE JOINTS'
+
+    def _poll_return_settling(self):
+        settling = self.return_settling
+        now = time.monotonic()
+        if now >= settling['deadline']:
+            self.return_settling = None
+            self.pause_motion('joint feedback did not settle after see_center return', stage='PLAN')
+            return
+        samples = [self.live_poses.samples.get(side) for side in ('left', 'right')]
+        if any(sample is None or sample[0] < settling['after'] or now - sample[0] > 1.5
+               for sample in samples):
+            settling.update(sample=None, since=None)
+            return
+        received = tuple(sample[0] for sample in samples)
+        if abs(received[0] - received[1]) > 0.75:
+            settling.update(sample=None, since=None)
+            return
+        previous = settling['sample']
+        if previous and not all(new > old for new, old in zip(received, previous[0])):
+            return
+        joints = np.array([list(sample[2].values()) for sample in samples])
+        if previous is None or np.rad2deg(np.max(np.abs(joints - previous[1]))) > 0.3:
+            settling['since'] = min(received)
+            settling['sample'] = (received, joints)
+            return
+        if min(received) - settling['since'] < 0.5:
+            return
+        self.return_settling = None
+        if self.queue_auto_started or (MULTI.auto_execute and not self.manual_restart):
+            self.start_motion(execute=True)
         else:
             self.status = 'PLAN READY - E EXECUTE'
 
@@ -697,6 +768,8 @@ class MultiApp(sam.SAMYawApp):
         self.capture_time_unix = target['capture_time_unix']
 
     def start_motion(self, execute=False):
+        if self.return_settling is not None:
+            return
         if (self.queue_started and self.execute_phase == 'approach' and self.preview_file is not None
                 and self.frozen_joints is not None):
             try:
@@ -710,11 +783,12 @@ class MultiApp(sam.SAMYawApp):
                 self._wait_arms_still()
                 self._refresh_target_joints()
                 self.plan_ready = False
-                self.auto_execute_pending = MULTI.auto_execute or self.queue_auto_started
+                self.auto_execute_pending = self.queue_auto_started or (MULTI.auto_execute and not self.manual_restart)
                 return super().start_motion(execute=False)
         result = super().start_motion(execute=execute)
         if execute and self.execute_phase == 'approach' and self.motion_child is not None:
             self.queue_auto_started = True
+            self.manual_restart = False
         return result
 
     def _launch_worker(self, stage, script, args, folder):
@@ -735,7 +809,7 @@ class MultiApp(sam.SAMYawApp):
             self.motion_log_reader = self.motion_log_writer = None
             raise
         self.motion_stage = stage
-        self.operator_stop_requested = False
+        self.place_planning = False
         self.status = f'STATE {stage}: {self.motion_child.pid}'
         print(f'{self.status}; log={logpath}', flush=True)
 
@@ -747,8 +821,11 @@ class MultiApp(sam.SAMYawApp):
                 print(self.status, flush=True)
                 return
         script = HERE.parent / 'right_place_trial' / 'coordinated_right_case.py'
+        checkpoint = job['folder'] / 'placement_checkpoint.json'
+        checkpoint.unlink(missing_ok=True)
         self._launch_worker('PLACE', script,
-                            ['--execute', '--place', '--from-pick', '--arm', side], job['folder'])
+                            ['--execute', '--place', '--from-pick', '--arm', side,
+                             '--checkpoint', str(checkpoint.resolve())], job['folder'])
 
     def _finish_custom(self, child, stage):
         rest = self.motion_log_reader.read()
@@ -762,16 +839,16 @@ class MultiApp(sam.SAMYawApp):
         print(f'STATE {stage} worker exit={code}', flush=True)
         if code != 0:
             self.bg_waiting = False
-            self.work.error(f'{stage} worker exit={code}; inspect robot and gate')
-            self.status = 'STATE SERVICE ERROR - CHECK ROBOT AND GATE'
+            self.pause_motion(f'{stage} worker exit={code}', stage=stage)
             return
-        job = self.held_jobs.pop(0)
+        job = self.held_jobs[0]
         if self.work.pick_owner == job['arm'] and not self._await_pick_release(job['arm']):
-            self.work.pause(job['arm'], 'TCP has not reached see_center Z after placement')
-            self.status = 'STATE PAUSED - PICK AREA STILL OCCUPIED'
+            self.pause_motion('TCP has not reached see_center Z after placement', stage='PLACE')
             return
         self.work.returned_from_place(job['arm'])
+        self.held_jobs.pop(0)
         self.active_arm = None
+        self.active_object = None
         if self.held_jobs:
             self._start_place(self.held_jobs[0])
         elif self.bg is not None:
@@ -789,8 +866,63 @@ class MultiApp(sam.SAMYawApp):
             self.status = f'ALL {self.queue_total} OBJECTS DONE - R NEW CAPTURE'
             print(self.status, flush=True)
 
+    def _record_stationary_plan_wait(self):
+        now = time.monotonic()
+        waiting = (self.queue_started and not self.operator_paused and
+                   ((self.motion_stage == 'PLAN' and self.motion_child is not None and
+                     self.motion_child.poll() is None) or
+                    (self.motion_stage == 'PLACE' and self.place_planning) or
+                    (self.bg_waiting and self.bg and self.bg['child'] is not None)))
+        samples = [self.live_poses.samples.get(side) for side in ('left', 'right')]
+        if waiting and all(sample is not None and now - sample[0] <= 0.5 for sample in samples):
+            received = tuple(sample[0] for sample in samples)
+            previous = self.plan_wait_sample
+            if previous is not None and not all(new > old for new, old in zip(received, previous[1])):
+                return
+            joints = np.array([list(sample[2].values()) for sample in samples])
+            if previous is not None and np.rad2deg(np.max(np.abs(joints - previous[2]))) <= 0.3:
+                elapsed = now - previous[0]
+                if elapsed <= 0.5:
+                    self.plan_wait_seconds += elapsed
+            self.plan_wait_sample = (now, received, joints)
+            return
+        if not waiting and self.plan_wait_seconds > 0:
+            seconds = self.plan_wait_seconds
+            print(f'TIMING BOTH ARMS STATIONARY WAITING FOR PLAN: {seconds:.3f} s', flush=True)
+            try:
+                with (self.multi_folder / 'stationary_plan_wait.jsonl').open('a') as log:
+                    obj = self.active_object or (self.queue[0] if self.queue else None)
+                    log.write(json.dumps({'unix_time': time.time(), 'seconds': round(seconds, 3),
+                                          'object': obj['id'] if obj else None}) + '\n')
+            except OSError as exc:
+                print(f'STATE: could not write planning wait measurement: {exc}', flush=True)
+            self.plan_wait_seconds = 0.0
+        self.plan_wait_sample = None
+
     def poll_motion(self):
+        self._record_stationary_plan_wait()
         self._poll_background()
+        if self.operator_paused:
+            child = self.motion_child
+            if child is not None:
+                pending = self.motion_log_reader.read()
+                if pending:
+                    print(pending, end='', flush=True)
+                code = child.poll()
+                if code is not None:
+                    self._timing(code)
+                    self.motion_log_reader.close()
+                    self.motion_log_writer.close()
+                    self.motion_log_reader = self.motion_log_writer = self.motion_child = None
+                    self.motion_stage = None
+                    self.status = 'PAUSED - CHECK ROBOT AND GATE'
+                    self._write_recovery()
+                    print(f'STATE: paused worker exited ({code}); verify robot and gate.',
+                          flush=True)
+            return
+        if self.return_settling is not None:
+            self._poll_return_settling()
+            return
         if self.queue_started:
             self._watch_pick_height()
             if (self.motion_child is None and self.active_arm is None and self.queue and
@@ -808,26 +940,36 @@ class MultiApp(sam.SAMYawApp):
             pending = self.motion_log_reader.read()
             if pending:
                 print(pending, end='', flush=True)
-                if self.bg_pending_arm and 'TIME plan case arrival' in pending:  # after PLACE planning: no move_group contention
-                    side, self.bg_pending_arm = self.bg_pending_arm, None
-                    self._start_background_plan(side)
+                for line in pending.splitlines():
+                    if line == 'STATE PLACE PLANNING BEGIN':
+                        self.place_planning = True
+                    elif line == 'STATE PLACE PLANNING END':
+                        self.place_planning = False
+                        self._record_stationary_plan_wait()
+                    prefix = 'SEE_CENTER_RETURN_ENDPOINT '
+                    if self.bg_pending_arm and line.startswith(prefix):
+                        try:
+                            endpoint = json.loads(line[len(prefix):])
+                        except ValueError:
+                            continue
+                        side, self.bg_pending_arm = self.bg_pending_arm, None
+                        if child.poll() is None:
+                            self._prepare_next_at_return(side, endpoint)
             if child.poll() is not None:
+                self.place_planning = False
+                self._record_stationary_plan_wait()
                 self.bg_pending_arm = None
                 try:
                     self._finish_custom(child, stage)
                 except Exception as exc:
-                    self.work.error(f'{stage} handoff failed: {exc}')
-                    self.status = 'STATE SERVICE ERROR - HANDOFF FAILED'
-                    print(f'{self.status}: {exc}', flush=True)
+                    self.pause_motion(f'{stage} handoff failed: {exc}', stage=stage)
             return
         self._keep_queue = self.queue_started
         try:
             try:
                 super().poll_motion()
             except Exception as exc:
-                self.work.error(f'Pick worker handoff failed: {exc}')
-                self.status = 'STATE SERVICE ERROR - PICK HANDOFF FAILED'
-                print(f'{self.status}: {exc}', flush=True)
+                self.pause_motion(f'Pick worker handoff failed: {exc}', stage=stage)
                 return
         finally:
             self._keep_queue = False
@@ -836,16 +978,17 @@ class MultiApp(sam.SAMYawApp):
             return
         code = child.returncode
         if code != 0 and stage in ('PLAN', 'EXECUTE', 'FINE') and self.active_arm:
-            # A plan-only failure never moved the arm: free the product area.
-            self.work.pause(self.active_arm, f'{stage} worker exit={code}',
-                            release_pick=(stage == 'PLAN'))
-            self.status = f'{self.active_arm.upper()} PAUSED - CHECK LOG AND ROBOT'
-            print(self.status, flush=True)
+            self.pause_motion(f'{stage} worker exit={code}', stage=stage)
             return
         if stage == 'PLAN' and code == 0 and self.auto_execute_pending and self.plan_ready:
             self.auto_execute_pending = False
             print('STATE: auto-execute next assigned arm approach.', flush=True)
             self.start_motion(execute=True)
+        elif (stage == 'PLAN' and code == 0 and self.plan_ready and self.queue_started
+              and not self.queue_auto_started and self.args.enable_execute):
+            center = {name: value for joints in self.see_center_joints.values()
+                      for name, value in joints.items()}
+            self._start_background_plan(self.active_arm, center, before_execution=True)
 
     def start_place_after_lift(self):
         """Carry and place at once (the gate runs one goal at a time, so holding
@@ -860,12 +1003,9 @@ class MultiApp(sam.SAMYawApp):
         try:
             self._start_place(job)
         except Exception as exc:
-            self.work.error(f'Cannot start carry/place worker: {exc}')
-            self.status = 'STATE SERVICE ERROR - WORKER DID NOT START'
-            print(f'{self.status}: {exc}', flush=True)
+            self.pause_motion(f'Cannot start carry/place worker: {exc}', stage='PLACE')
             return
-        # Start the next plan only after the place worker finished its setup
-        # (scene/gate queries), so the two workers do not start together.
+        # Wait until the return path is planned and its endpoint is available.
         if self.work.basket_owner == side and self.motion_child is not None:
             self.bg_pending_arm = side
 
@@ -889,22 +1029,117 @@ class MultiApp(sam.SAMYawApp):
             return
         return super().start_lift()
 
+    def pause_motion(self, reason='operator pressed P', *, stage=None):
+        if not self.operator_paused:
+            stage = stage or self.motion_stage
+            if stage is None and self.return_settling is not None:
+                stage = 'PLAN'
+            self.operator_paused = True
+            self._record_stationary_plan_wait()
+            self.pending = False
+            self.return_settling = None
+            self.auto_execute_pending = False
+            self.auto_grasp_cancelled = True
+            self.bg_waiting = False
+            self.bg_pending_arm = None
+            side = self.active_arm or self.work.basket_owner or self.work.pick_owner
+            if side and not self.work.stopped and self.work.arms[side] != 'paused':
+                self.work.pause(side, reason, release_pick=(stage == 'PLAN'))
+            if self.active_object is not None:
+                self.recovery = {'object': self.active_object['id'], 'arm': side,
+                                 'stage': stage, 'phase': self.execute_phase,
+                                 'reason': reason, 'pick_owner': self.work.pick_owner,
+                                 'basket_owner': self.work.basket_owner}
+                self._write_recovery()
+            if self.args.auto_fine:
+                self.pause_auto_fine(reason)
+        self.status = ('PAUSED - STOP REQUESTED' if self.motion_child
+                       else f'PAUSED - {reason}')
+        if self.recovery is not None:
+            print('STATE: see recovery.json; U to recover after checking the robot and gate.',
+                  flush=True)
+        print(f'STATE: {self.status}', flush=True)
+        self.stop_motion()
+
+    def _write_recovery(self):
+        if self.recovery is None:
+            return
+        checkpoint = {}
+        if self.held_jobs:
+            path = self.held_jobs[0]['folder'] / 'placement_checkpoint.json'
+            try:
+                checkpoint = json.loads(path.read_text())
+            except (OSError, ValueError):
+                pass
+        self.recovery['placement'] = checkpoint.get('stage', 'unconfirmed')
+        self.recovery['pending_objects'] = [obj['id'] for obj in self.queue]
+        try:
+            path = self.multi_folder / 'recovery.json'
+            temporary = path.with_suffix('.tmp')
+            temporary.write_text(json.dumps(self.recovery, indent=2, ensure_ascii=False))
+            temporary.replace(path)
+        except OSError as exc:
+            print(f'STATE: could not write recovery record: {exc}', flush=True)
+
+    def recover_work(self):
+        if not self.operator_paused or self.recovery is None:
+            return
+        if self.motion_child is not None or (self.bg and self.bg['child'] is not None):
+            print('STATE: wait for workers to exit before recovery.', flush=True)
+            return
+        self._write_recovery()
+        recovery = self.recovery
+        retry = (recovery['stage'] == 'PLAN' and not self.held_jobs and
+                 self.work.pick_owner is None and self.work.basket_owner is None)
+        if not retry:
+            if recovery['placement'] not in ('scene_detached', 'returned'):
+                print('STATE: physical progress unconfirmed; inspect robot, gate and recovery.json.',
+                      flush=True)
+                return
+            try:
+                _, joints, _ = self.live_poses.snapshot()
+                actual = self._joint_dict(joints)
+                error = max(abs(actual[name] - value) for center in self.see_center_joints.values()
+                            for name, value in center.items())
+            except (RuntimeError, ValueError, KeyError) as exc:
+                print(f'STATE: cannot confirm see_center for recovery ({exc}).', flush=True)
+                return
+            if np.rad2deg(error) > self.args.max_state_change_deg:
+                print('STATE: confirm the item is in the basket and recover both arms to see_center.',
+                      flush=True)
+                return
+        if time.time() - self.multi_capture_time > self.args.max_capture_age and (retry or self.queue):
+            print('STATE: item observations expired; recapture before continuing.', flush=True)
+            return
+        recovery['resolution'] = 'replan_pick' if retry else 'placement_confirmed_by_operator'
+        if retry:
+            self.queue.insert(0, self.active_object)
+        self._write_recovery()
+        self.active_object = self.active_arm = None
+        self.held_jobs.clear()
+        self.bg = None
+        self.work = WorkState()
+        self.queue_auto_started = False
+        self.manual_restart = True
+        self.operator_paused = False
+        self.recovery = None
+        super().reset()
+        self.start_next_object()
+
     def stop_motion(self):
+        super().stop_motion()
         bg = self.bg
         if bg is not None and bg['child'] is not None and bg['child'].poll() is None:
             try:
                 os.killpg(bg['child'].pid, signal.SIGTERM)
                 bg['child'].wait(timeout=3)
-            except (OSError, subprocess.TimeoutExpired):
-                pass
+            except (OSError, subprocess.TimeoutExpired) as exc:
+                print(f'STATE: background worker exit unconfirmed ({exc}).', flush=True)
+                return
             bg['log'].close()
-            self.queue.insert(0, bg['obj'])
             self.bg = None
             self.bg_waiting = False
             print('STATE: background approach plan stopped.', flush=True)
-        if self.motion_child is not None and self.motion_child.poll() is None:
-            self.operator_stop_requested = True
-        return super().stop_motion()
 
 
 if __name__ == '__main__':
@@ -919,4 +1154,4 @@ if __name__ == '__main__':
             sys.argv.insert(1, flag)
     sam.SAMYawApp = MultiApp
     sam.TOP_WINDOW = 'Top view | objects, case, pick order'
-    sam.main()
+    sam.main(max_state_change_deg=3.0, pause_key=True)

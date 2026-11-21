@@ -12,6 +12,7 @@ controller, clearance and physical workspace independently.
 import argparse
 import json
 import math
+import signal
 import sys
 import time
 from pathlib import Path
@@ -268,10 +269,10 @@ def main():
     from shape_msgs.msg import SolidPrimitive
     from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 
-    rclpy.init()
+    from rclpy.signals import SignalHandlerOptions
+    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
     node = rclpy.create_node(f'sam_yaw_moveit_{args.arm}')
     joint_current = {'msg': None, 'at': 0.}
-    active = {'handle': None}
     def joint_cb(msg):
         joint_current['msg'] = msg
         joint_current['at'] = time.monotonic()
@@ -330,24 +331,55 @@ def main():
             raise TimeoutError('MoveIt response timeout')
         return fut.result()
 
+    def run_action(client, goal, name, timeout, *, accept_timeout=12.0):
+        stop = False
+
+        def request_stop(*_):
+            nonlocal stop
+            stop = True
+
+        previous_handler = signal.signal(signal.SIGINT, request_stop)
+        try:
+            try:
+                handle = await_future(client.send_goal_async(goal), accept_timeout)
+            except Exception:
+                print(f'{name}: goal acceptance unknown; check robot and gate.', flush=True)
+                raise
+            if not handle.accepted:
+                if stop:
+                    raise KeyboardInterrupt
+                return None
+            result = handle.get_result_async()
+            try:
+                deadline = time.monotonic() + timeout
+                while not result.done():
+                    if stop:
+                        raise KeyboardInterrupt
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError(f'{name} result timed out')
+                    rclpy.spin_once(node, timeout_sec=0.10)
+                if stop:
+                    raise KeyboardInterrupt
+                return result.result()
+            except BaseException:
+                try:
+                    if not result.done():
+                        await_future(handle.cancel_goal_async(), 3.0)
+                    terminal = await_future(result, 5.0)
+                    print(f'{name}: controller finished with status {terminal.status}.', flush=True)
+                except Exception as exc:
+                    print(f'{name}: cancellation unconfirmed; check robot and gate ({exc}).',
+                          flush=True)
+                raise
+        finally:
+            signal.signal(signal.SIGINT, previous_handler)
+
     def action_goal(client, goal, name, timeout):
         if not client.wait_for_server(timeout_sec=8.):
             raise RuntimeError(f'{name} action server unavailable; check MoveIt launch/namespaces')
-        handle = await_future(client.send_goal_async(goal), 12.)
-        if not handle.accepted:
+        wrapped = run_action(client, goal, name, timeout)
+        if wrapped is None:
             raise RuntimeError(f'{name} goal rejected')
-        active['handle'] = handle
-        try:
-            wrapped = await_future(handle.get_result_async(), timeout)
-        except (KeyboardInterrupt, Exception):
-            print(f'Cancel requested for {name}; not a substitute for a physical E-stop!', flush=True)
-            try:
-                await_future(handle.cancel_goal_async(), 3.)
-            except Exception as cancel_exc:
-                print(f'ROS cancellation not confirmed: {cancel_exc}', flush=True)
-            raise
-        finally:
-            active['handle'] = None
         code = wrapped.result.error_code.val
         if wrapped.status != GoalStatus.STATUS_SUCCEEDED or code != MoveItErrorCodes.SUCCESS:
             meanings = { -1:'PLANNING_FAILED', -4:'CONTROL_FAILED', -10:'START_STATE_IN_COLLISION',
@@ -652,17 +684,10 @@ def main():
                         'commanded_joint_goal_rad':goal_joint, 'at':time.time()}))
                     print(f'EXECUTE ALIGN PREDICTION: slow SDK joint goal for XY '
                           f'{np.round(delta_mm, 1).tolist()} mm, speed=1.', flush=True)
-                    handle = await_future(slow_client.send_goal_async(slow_goal), 8.)
-                    if not handle.accepted:
+                    wrapped = run_action(slow_client, slow_goal, 'Pi slow joint goal',
+                                         95.0, accept_timeout=8.0)
+                    if wrapped is None:
                         raise RuntimeError('Pi rejected slow joint goal')
-                    try:
-                        wrapped = await_future(handle.get_result_async(), 95.)
-                    except BaseException:
-                        try:
-                            await_future(handle.cancel_goal_async(), 3.)
-                        except Exception:
-                            pass
-                        raise
                     if (wrapped.status != GoalStatus.STATUS_SUCCEEDED or
                             wrapped.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL):
                         raise RuntimeError(f'Pi slow joint goal failed: '
@@ -864,13 +889,13 @@ def main():
                 # Gate needs a gripper reading < 5 s old; the Pi reads it only
                 # while the arm is idle, so retry briefly after a motion.
                 for attempt in range(8):
-                    handle = await_future(grip_client.send_goal_async(grip), 12.)
-                    if handle.accepted:
+                    reply = run_action(grip_client, grip, 'Gripper close', 45.0)
+                    if reply is not None:
                         break
-                    time.sleep(1.0)
-                if not handle.accepted:
+                    if attempt < 7:
+                        time.sleep(1.0)
+                if reply is None:
                     raise RuntimeError('Gripper close goal rejected')
-                reply = await_future(handle.get_result_async(), 45.)
                 if reply.status != GoalStatus.STATUS_SUCCEEDED or reply.result.error_code != 0:
                     raise RuntimeError(f'Gripper close failed: status={reply.status}, error={reply.result.error_code}, detail={reply.result.error_string}')
                 (log_dir/'gripper_close_complete.json').write_text(json.dumps({'arm':args.arm,'at':time.time()}))

@@ -353,15 +353,28 @@ class DualArmCoordinator:
             client=self.clients['both' if coordinated else side]
             if not client.wait_for_server(timeout_sec=8):raise RuntimeError(f'{side} guarded controller unavailable')
             print(f'EXECUTE {index}/{len(chosen["phases"])} {side} {actual_route}',flush=True)
-            handle=self.wait(client.send_goal_async(FollowJointTrajectory.Goal(trajectory=trajectory)),12,stoppable=False)
+            if self.stop:raise StopRequested()
+            try:
+                handle=self.wait(client.send_goal_async(FollowJointTrajectory.Goal(trajectory=trajectory)),
+                                 12,stoppable=False)
+            except Exception:
+                print(f'{side}: goal acceptance unknown; check robot and gate.',flush=True)
+                raise
             if not handle.accepted:raise RuntimeError(f'{side} goal rejected')
             self.handles[side]=handle
+            result=handle.get_result_async()
             try:
                 if self.stop:raise StopRequested()
-                reply=self.wait(handle.get_result_async(),180)
+                reply=self.wait(result,180)
             except BaseException:
-                try:self.wait(handle.cancel_goal_async(),4,stoppable=False)
-                except Exception as exc:print(f'{side} cancel failed: {exc}',flush=True)
+                try:
+                    if not result.done():
+                        self.wait(handle.cancel_goal_async(),4,stoppable=False)
+                    terminal=self.wait(result,5,stoppable=False)
+                    print(f'{side}: controller finished with status {terminal.status}.',flush=True)
+                except Exception as exc:
+                    print(f'{side}: cancellation unconfirmed; check robot and gate ({exc}).',
+                          flush=True)
                 raise
             finally:self.handles.pop(side,None)
             if reply.status!=GoalStatus.STATUS_SUCCEEDED or reply.result.error_code!=0:

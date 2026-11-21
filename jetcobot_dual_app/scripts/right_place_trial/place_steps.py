@@ -276,7 +276,7 @@ def cartesian_move(coord, target, label):
 
 
 def place(coord, case_xy, rim_z_mm, below_rim_mm=-13.0, release_gap_mm=None, up_mm=30.0,
-          descent_method='moveit', arm='right'):
+          descent_method='moveit', arm='right', checkpoint=None):
     # Same steps for either arm. Nothing here is a fixed right-arm offset:
     # the sag is corrected from measured joints, and the SDK MoveL path (with
     # the right-arm grasp compensation) is not used by default.
@@ -300,9 +300,13 @@ def place(coord, case_xy, rim_z_mm, below_rim_mm=-13.0, release_gap_mm=None, up_
           f'tips {now.position.z*1000.0 - GRASP_CLOSED_TIP_OFFSET_MM[ARM] - rim_z_mm:.1f} mm above rim '
           f'(case center [{case_xy[0]*1000:.0f}, {case_xy[1]*1000:.0f}]).', flush=True)
     open_slightly(coord, release_gap_mm)
+    if checkpoint is not None:
+        checkpoint('gripper_released')
     print(f'  TIME place release: {time.monotonic()-t:.1f} s', flush=True)
     t = time.monotonic()
     held_object.apply(coord.node, wait, arm=ARM, remove=True)
+    if checkpoint is not None:
+        checkpoint('scene_detached')
     vertical_move(coord, up_mm, 'PLACE LIFT')
     print(f'  TIME place lift: {time.monotonic()-t:.1f} s', flush=True)
     print('PLACE COMPLETE: object released, gripper partly open, lifted.', flush=True)

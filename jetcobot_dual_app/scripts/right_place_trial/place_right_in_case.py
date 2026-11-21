@@ -24,7 +24,7 @@ def _pkg_share(name, fallback):
 import numpy as np
 import yaml
 
-from dual_arm_coordinator_real import DualArmCoordinator
+from dual_arm_coordinator_real import DualArmCoordinator, StopRequested
 from move_right_sam_yaw import GRASP_CLOSED_TIP_OFFSET_MM, tcp_down_tilt_deg
 
 CASE_CONFIG = _pkg_share('jetcobot_dual_control', '~/pinky_ws/src/jetcobot_dual/jetcobot_dual_control') / 'config' / 'tin_case.yaml'
@@ -74,17 +74,36 @@ def wait_action(coord, client, goal, label, timeout=45.0):
     from action_msgs.msg import GoalStatus
     if not client.wait_for_server(timeout_sec=8.0):
         raise RuntimeError(f'{label} controller unavailable')
-    handle = coord.wait(client.send_goal_async(goal), 12.0)
-    if not handle.accepted:
-        raise RuntimeError(f'{label} rejected')
+    if coord.stop:
+        raise StopRequested()
     try:
-        reply = coord.wait(handle.get_result_async(), timeout)
+        handle = coord.wait(client.send_goal_async(goal), 12.0, stoppable=False)
+    except Exception:
+        print(f'{label}: goal acceptance unknown; check robot and gate.', flush=True)
+        raise
+    if not handle.accepted:
+        if coord.stop:
+            raise StopRequested()
+        raise RuntimeError(f'{label} rejected')
+    result = handle.get_result_async()
+    try:
+        if coord.stop:
+            raise StopRequested()
+        reply = coord.wait(result, timeout)
     except BaseException:
         try:
-            coord.wait(handle.cancel_goal_async(), 3.0, stoppable=False)
-        except Exception:
-            pass
+            if not result.done():
+                coord.wait(handle.cancel_goal_async(), 3.0, stoppable=False)
+            terminal = coord.wait(result, 5.0, stoppable=False)
+            if terminal.status not in (GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED,
+                                       GoalStatus.STATUS_SUCCEEDED):
+                raise RuntimeError(f'unexpected terminal status {terminal.status}')
+            print(f'{label}: controller finished with status {terminal.status}.', flush=True)
+        except Exception as exc:
+            print(f'{label}: cancellation unconfirmed; check robot and gate ({exc}).', flush=True)
         raise
+    if coord.stop:
+        raise StopRequested()
     if reply.status != GoalStatus.STATUS_SUCCEEDED or reply.result.error_code != 0:
         raise RuntimeError(f'{label} failed: status={reply.status}, '
                            f'code={reply.result.error_code}, {reply.result.error_string}')

@@ -1732,6 +1732,22 @@ class SAMYawApp(AutoFineMixin):
             self.motion_log_reader = self.motion_log_writer = self.motion_child = None
             self.status = 'GRIPPER OPEN WORKER FAILED'
 
+    def approach_command(self, preview, execute=False):
+        worker = Path(__file__).with_name('move_dual_sam_yaw_real.py')
+        cmd = [str(self.args.motion_python), str(worker),
+               '--target-file', str(preview), '--out-dir', str(preview.parent),
+               '--above-mm', str(self.args.above_mm),
+               '--yaw-camera', self.args.yaw_camera,
+               '--tcp-closing-axis', self.args.tcp_closing_axis,
+               '--yaw-offset-deg', str(self.args.yaw_offset_deg),
+               '--max-capture-age', str(self.args.max_capture_age),
+               '--max-state-change-deg', str(self.args.max_state_change_deg)]
+        if self.args.allow_gripper_tilt:
+            cmd.append('--allow-gripper-tilt')
+        if execute:
+            cmd.append('--execute-saved-plan')
+        return cmd
+
     def start_motion(self, execute=False):
         if self.preview_file is None:
             print('No valid preview to send to MoveIt.', flush=True)
@@ -1781,47 +1797,34 @@ class SAMYawApp(AutoFineMixin):
             print('PLAN/EXECUTE BLOCKED: capture expired; R recapture.', flush=True)
             self.plan_ready = False
             return
-        worker = Path(__file__).with_name('move_right_sam_yaw.py')
-        cmd = [str(self.args.motion_python), str(worker),
-               '--target-file', str(self.preview_file),
-               '--phase', self.execute_phase if execute else 'approach',
-               '--arm', self.args.arm,
-               '--yaw-camera', self.args.yaw_camera,
-               '--peer-home',
-               '--group', self.args.group, '--tip-link', self.args.tip_link,
-               '--move-action', self.args.move_action,
-               '--execute-action', self.args.execute_action,
-               '--display-topic', self.args.display_topic,
-               '--tcp-closing-axis', self.args.tcp_closing_axis,
-               '--yaw-offset-deg', str(self.args.yaw_offset_deg),
-               '--above-mm', str(self.args.above_mm),
-               '--max-joint-change-deg', str(self.args.max_joint_change_deg),
-               '--max-state-change-deg', str(self.args.max_state_change_deg),
-               '--max-capture-age', str(self.args.max_capture_age),
-               '--min-valid-points', str(self.args.min_valid_points),
-               '--out-dir', str(self.preview_file.parent)]
         if self.execute_phase == 'approach':
-            worker = Path(__file__).with_name('move_dual_sam_yaw_real.py')
+            cmd = self.approach_command(self.preview_file, execute)
+        else:
+            worker = Path(__file__).with_name('move_right_sam_yaw.py')
             cmd = [str(self.args.motion_python), str(worker),
                    '--target-file', str(self.preview_file),
-                   '--out-dir', str(self.preview_file.parent),
-                   '--above-mm', str(self.args.above_mm),
+                   '--phase', self.execute_phase if execute else 'approach',
+                   '--arm', self.args.arm,
                    '--yaw-camera', self.args.yaw_camera,
+                   '--peer-home',
+                   '--group', self.args.group, '--tip-link', self.args.tip_link,
+                   '--move-action', self.args.move_action,
+                   '--execute-action', self.args.execute_action,
+                   '--display-topic', self.args.display_topic,
                    '--tcp-closing-axis', self.args.tcp_closing_axis,
                    '--yaw-offset-deg', str(self.args.yaw_offset_deg),
+                   '--above-mm', str(self.args.above_mm),
+                   '--max-joint-change-deg', str(self.args.max_joint_change_deg),
+                   '--max-state-change-deg', str(self.args.max_state_change_deg),
                    '--max-capture-age', str(self.args.max_capture_age),
-                   '--max-state-change-deg', str(self.args.max_state_change_deg)]
-            if execute:
-                cmd.append('--execute-saved-plan')
-        if self.args.allow_gripper_tilt:
-            if self.execute_phase == 'approach':
-                cmd.append('--allow-gripper-tilt')
-            else:
+                   '--min-valid-points', str(self.args.min_valid_points),
+                   '--out-dir', str(self.preview_file.parent)]
+            if self.args.allow_gripper_tilt:
                 cmd.extend(['--orientation-tolerance-deg', '8'])
-        if self.args.allow_uncertain_yaw and self.execute_phase != 'approach':
-            cmd.append('--allow-uncertain-yaw')
-        if self.args.minimal_drag and self.execute_phase != 'approach':
-            cmd.append('--minimal-drag')
+            if self.args.allow_uncertain_yaw:
+                cmd.append('--allow-uncertain-yaw')
+            if self.args.minimal_drag:
+                cmd.append('--minimal-drag')
         if execute:
             self.grasp_preview_file = None
             if self.execute_phase != 'approach':
@@ -2065,7 +2068,7 @@ class SAMYawApp(AutoFineMixin):
             print(f'Worker still active, PID={self.motion_child.pid}.', flush=True)
 
 
-def main():
+def main(*, max_state_change_deg=1.0, pause_key=False):
     global K, DIST, T_GRIPPER_CAMERA_BY_SIDE
     parser=argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     execution_mode = parser.add_mutually_exclusive_group()
@@ -2113,7 +2116,7 @@ def main():
     parser.add_argument('--camera-center', action='store_true',
                         help='Shift TCP sideways to center target in the moving arm camera')
     parser.add_argument('--max-joint-change-deg',type=float,default=45.)
-    parser.add_argument('--max-state-change-deg',type=float,default=1.)
+    parser.add_argument('--max-state-change-deg', type=float, default=max_state_change_deg)
     parser.add_argument('--max-capture-age',type=float,default=120.)
     parser.add_argument('--allow-uncertain-yaw',action='store_true',
                         help='Compatibility flag; yaw disagreement is now warning-only')
@@ -2235,15 +2238,19 @@ def main():
         cv2.namedWindow(MAIN_WINDOW,cv2.WINDOW_AUTOSIZE)
         cv2.setMouseCallback(MAIN_WINDOW,app.on_mouse)
         print(f'Moving arm=AUTO (initial preview={args.arm}); yaw camera={args.yaw_camera}; group={args.group}; approach={"CAMERA CENTER" if args.camera_center else "TCP ABOVE TARGET"} +{args.above_mm:.0f} mm. Initial stereo ROIs -> match; 1 chocolate / 2 Mentos -> PLAN; E approaches. ' + ('AUTO FINE OK -> calibrated descent -> gripper close -> 5 cm lift -> both see_center; S stops.' if args.auto_fine else 'After approach: G previews grasp; L lifts.') + ' O open gripper; C both see_center + open both grippers; R reset; S stop; Q quit.', flush=True)
+        if pause_key:
+            print('P pauses the queue and requests motion cancellation.', flush=True)
         while True:
             live.poll()
             for cam in cameras:
                 cam.poll()
             app.poll_motion()
-            if app.pending:
+            paused = pause_key and app.operator_paused
+            if app.pending and not paused:
                 app.pending=False
                 app.run()
-            app.maybe_auto_fine()
+            if not paused:
+                app.maybe_auto_fine()
             cv2.imshow(MAIN_WINDOW,app.view())
             approach_frame = app.approach_camera_frame()
             if approach_frame is not None:
@@ -2255,6 +2262,14 @@ def main():
             key=cv2.waitKey(10)&255
             if key in (ord('q'),27):
                 break
+            if pause_key and key in (ord('p'), ord('P'), ord('s')):
+                app.pause_motion(f'operator pressed {chr(key).upper()}')
+                continue
+            if paused and key in (ord('u'), ord('U')):
+                app.recover_work()
+                continue
+            if paused and key not in (ord('r'), ord('s')):
+                continue
             if key in (ord('c'), ord('C')):
                 app.start_return_see_center()
             elif key==ord('r'):
@@ -2295,7 +2310,8 @@ def main():
                     print('Fine alignment complete. Press G for grasp preview or R to recapture.', flush=True)
                 else:
                     app.start_motion(execute=True)
-            app.maybe_auto_grasp()
+            if not paused:
+                app.maybe_auto_grasp()
     finally:
         if 'app' in locals():
             app.stop_motion()

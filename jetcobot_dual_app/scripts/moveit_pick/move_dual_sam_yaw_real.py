@@ -99,9 +99,8 @@ def main():
             else:
                 current=coordinator.ready()
                 captured=data.get('joint_positions_rad',{})
-                # state_pick background plan: the other arm is still placing, so
-                # its joints are replaced by its see_center goal. Execution
-                # re-checks the real start against this plan (1 deg).
+                # Background planning can specify the projected return state.
+                # Saved-plan execution checks it against both measured arms.
                 assumed=data.get('multi_object', {}).get('assumed_start_rad') or {}
                 if captured:
                     drift=max((abs(math.degrees(current[n]-float(captured[n])))
@@ -109,7 +108,7 @@ def main():
                     if drift>args.max_state_change_deg:
                         raise RuntimeError(f'Arms changed {drift:.1f} deg since camera capture; recapture')
                 if assumed:
-                    print(f'PLAN FROM ASSUMED START: {sorted(assumed)[0].split("_")[0].upper()} arm at see_center',flush=True)
+                    print(f'PLAN FROM ASSUMED START: {len(assumed)} projected return joints', flush=True)
                 required_arm=data.get('multi_object', {}).get('assigned_arm')
                 peer_mode = ('hold' if data.get('multi_object', {}).get('peer_holding')
                              else args.peer_mode)
