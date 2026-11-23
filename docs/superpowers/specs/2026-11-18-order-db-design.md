@@ -411,7 +411,7 @@ action 값:
 |---|---|---|
 | seq | bigint identity | PK. 사건 순번 |
 | type | text | NOT NULL. 사건 종류. 상태 변화 트리거는 테이블 이름(`orders` · `trip` · `alert`)을 넣는다 |
-| data | jsonb | NOT NULL. 사건 내용. 상태 변화 트리거는 `{id, status}` |
+| data | jsonb | NOT NULL. 사건 내용. 상태 변화 트리거가 화면 WS `data` 칸(명세 3.1, 2026-11-23)을 그 시점 값으로 채운다: `orders` → `{order_id, status}`, `trip` → `{trip_id, order_id, status, robot_id, items}`(`items`는 `trip_item`에서). 고객 말(`status_text`)로 바꾸기는 웹 서비스가 보낼 때 한다 ※ |
 | created_at | timestamptz | NOT NULL DEFAULT now() |
 
 - **같은 트랜잭션에서 INSERT 후 NOTIFY**: `ws_event` AFTER INSERT 트리거가 `NOTIFY`한다. 그래서 변경이 롤백되면 사건도 알림도 남지 않는다. 주문 · 운반 건 · 알림의 상태 변화는 그 테이블 트리거가 `ws_event`에 넣고, 관리 명령 결과처럼 테이블 상태 변화가 아닌 사건은 웹 서비스가 같은 트랜잭션에서 직접 넣는다.
