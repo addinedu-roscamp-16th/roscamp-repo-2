@@ -64,8 +64,6 @@ ros2 launch pode_fsm pode_fsm.launch.py namespace:=pode1
 # 관제 없이 손으로 시험할 때는 heartbeat_timeout_s:=0
 ```
 
-Gazebo에서 Pode 한 대를 Nav2와 함께 돌리는 방법은 `sim/fleet_gz_sim/README.md`.
-
 ### 동작 없음(설계 4.5, 임시)
 
 ```bash

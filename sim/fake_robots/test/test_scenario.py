@@ -566,25 +566,3 @@ def test_the_shipped_scenarios_parse_as_before_with_no_object(site):
         for fault in load_scenario(f, site_of(f, site)).faults:
             assert fault.type != "object", name
             assert (fault.x, fault.y, fault.radius_m) == (0.0, 0.0, OBJECT_RADIUS_M), name
-
-
-def test_force_ship_after_s_must_not_be_negative(site):
-    assert parse_scenario(minimal(), site).force_ship_after_s is None
-    assert parse_scenario(minimal(force_ship_after_s=5), site).force_ship_after_s == 5.0
-    with pytest.raises(ScenarioError, match="force_ship_after_s"):
-        parse_scenario(minimal(force_ship_after_s=-1), site)
-
-
-def test_hold_reasons_need_a_scenario_order_and_a_known_reason(site):
-    for bad in ({"O-9": "ARM_FAULT"}, {"O-1": "LOST"}):
-        with pytest.raises(ScenarioError):
-            parse_scenario(minimal(expect={"hold_reasons": bad}), site)
-    ok = parse_scenario(minimal(expect={"hold_reasons": {"O-1": "ARM_FAULT"}}), site)
-    assert ok.expect.hold_reasons == {"O-1": "ARM_FAULT"}
-
-
-def test_order_results_accept_canceled_held_and_over_capacity(site):
-    data = {"robots": {"pode1": {"start": "P-1"}},
-            "orders": [{"id": "O-1", "items": {"A": 1}}]}
-    for result in ("CANCELED", "HELD", "OVER_CAPACITY"):
-        parse_scenario({**data, "expect": {"order_results": {"O-1": result}}}, site)

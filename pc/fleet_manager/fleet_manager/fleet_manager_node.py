@@ -142,7 +142,7 @@ class FleetManagerNode(Node):
         self._events_pub = self.create_publisher(FleetEvent, name("events"), self._qos("events"))
         self.create_subscription(
             OrderBoard, name("order_board"), self._on_order_board, self._qos("order_board"))
-        # 운영 모드(F-13): 이번 주는 바뀔 때 로그만. TEST 모드 주문 거부(IR-73)는 다음 주
+        # 운영 모드(F-13): 이번 주는 바뀔 때 로그만. 모드가 다를 때 처리(IR-73)는 다음 주
         self._system_mode = ""
         self.create_subscription(
             SystemMode, name("system_mode"), self._on_system_mode, self._qos("system_mode"))
@@ -189,7 +189,7 @@ class FleetManagerNode(Node):
         return robot in self._reached
 
     def _on_system_mode(self, msg: SystemMode) -> None:
-        # TODO(Q-nn): IR-73 TEST 모드 주문 거부. 설계 검토 사항에 등록하면 번호를 채운다
+        # TODO(Q-nn): IR-73 모드가 다르면 연결 거부·알림, 로봇 set_mode, 안 맞으면 배정 제외
         if msg.mode != self._system_mode:
             self._system_mode = msg.mode
             self.get_logger().info(f"system mode {msg.mode}")
