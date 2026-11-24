@@ -29,7 +29,7 @@ def minimal(**over):
         "timeout_s": 100,
         "stock": {"arm_left": {"A": 2}, "arm_right": {"C": 1}},
         "orders": [{"at_s": 0, "id": "O-1", "items": {"A": 1}}],
-        "robots": {"pode1": {"start": "P-1", "speed_mps": 0.2, "pose_noise_m": 0.0}},
+        "robots": {"pode1": {"start": "P-1", "speed_scale": 1.0, "pose_noise_m": 0.0}},
     }
     data.update(over)
     return data
@@ -280,7 +280,7 @@ def test_every_scenario_checks_order_of_work(site, name):
 
 def test_nav_abort_target_must_be_a_node_and_only_for_nav_abort(site):
     def with_fault(fault):
-        robots = {"pode1": {"start": "P-3", "speed_mps": 0.2, "pose_noise_m": 0.0}}
+        robots = {"pode1": {"start": "P-3", "speed_scale": 1.0, "pose_noise_m": 0.0}}
         return minimal(robots=robots, faults=[fault], expect={"orders_shipped": 1})
     sc = parse_scenario(with_fault({"at_s": 0, "robot": "pode1", "type": "nav_abort",
                                     "target": "W"}), site)
@@ -302,6 +302,11 @@ def test_fake_arms_together_or_not_at_all(site):
     assert split_fake_arms("arm_ship", site) == (False, [], ["arm_ship"])
     assert split_fake_arms("arm_left arm_right", site) == (True, ["arm_left", "arm_right"], [])
     assert split_fake_arms("", site) == (False, [], [])
+
+
+@pytest.mark.parametrize("none", ["none", "None", "NONE", " none "])
+def test_fake_arms_none_means_no_fake_arms(site, none):
+    assert split_fake_arms(none, site) == (False, [], [])
 
 
 @pytest.mark.parametrize("bad", ["arm_left", "arm_right arm_ship", "arm9", "arm_left arm_right workcell"])

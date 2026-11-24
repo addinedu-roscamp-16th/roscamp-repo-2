@@ -13,13 +13,17 @@ COMM_LOSS_POLICIES = ("stop", "base_end")
 OPTIONAL = frozenset({"zone_clear_m"})
 # 0이 '끔'(zone_clear_m은 '식을 씀')인 키. 다른 시간·거리 키는 0보다 커야 한다
 ZERO_MEANS_OFF = frozenset({"zone_clear_m", "idle_watch_s", "silent_limit_s", "start_limit_s",
-                            "battery_low_pct"})
-# 이 끝말의 키가 시간·거리·속도·백분율이다
-MEASURE_SUFFIXES = ("_s", "_m", "_mps", "_pct")
+                            "battery_low_pct", "nav_pass_m", "nav_turn_rps"})
+# 이 끝말의 키가 시간·거리·속도·각속도·백분율이다
+MEASURE_SUFFIXES = ("_s", "_m", "_mps", "_rps", "_pct")
 # Pode 기본 blocked_after_s(pode_fsm/params.py). 계약에 없어 기본값을 적는다
 ROBOT_BLOCKED_AFTER_S = 10.0
 # 상태 보고 주기 0.5 s, 두 쪽 진전 재기 시작 차이, 여유
 BLOCKED_REPORT_MARGIN_S = 2.0
+# IR-41: 보고·취소를 다시 보낼 때 간격을 ±20% 무작위로 늘이고 줄인다
+RETRY_JITTER = 0.2
+# IR-40 표: Report* 응답 한도. 이보다 오래 답이 없는 요청만 클라이언트가 버린다(IR-41)
+REPORT_REPLY_LIMIT_S = 3.0
 
 
 # ---- FleetParams: 운영 파라미터 목록 ----
@@ -70,8 +74,12 @@ class FleetParams:
     self_recovery_limit_s: float = 45.0
     traffic_mode: str = "zones"
     nav_speed_mps: float = 0.12
+    nav_eta_speed_ratio: float = 1.0  # 기록 호환: 옛 기록은 비율 없이(1.0) 돈다
     follow_speed_mps: float = 0.12
     retreat_speed_mps: float = 0.05
+    nav_pass_m: float = 0.0  # 기록 호환: 이 키가 없는 옛 기록은 넘김 거리 없이 돈다(파일은 0.15)
+    nav_turn_rps: float = 0.0  # 기록 호환: 이 키가 없는 옛 기록은 끝 회전 없이 돈다(파일은 1.0)
+    nav_goal_tolerance_m: float = 0.05
     footprint_radius_m: float = 0.085
     release_margin_m: float = 0.05
     zone_clear_m: float = 0.0
@@ -104,12 +112,21 @@ class FleetParams:
     check_interval_s: float = 5.0
     clear_confirm: int = 2
     blocked_retry_max_s: float = 300.0
+    report_max_in_flight: int = 4
 
     # ---- 파라미터 값 검사 ----
     def __post_init__(self):
         if self.comm_loss_policy not in COMM_LOSS_POLICIES:
             raise ValueError(f"comm_loss_policy must be one of {COMM_LOSS_POLICIES}, "
                              f"got {self.comm_loss_policy!r}")
+        ratio = self.nav_eta_speed_ratio
+        if (isinstance(ratio, bool) or not isinstance(ratio, (int, float))
+                or not _finite(ratio) or not 0.0 < ratio <= 1.0):
+            raise ValueError(f"nav_eta_speed_ratio must be a number in (0, 1], got {ratio!r}")
+        # 너무 작으면 곱이 0이 되어 ETA 나누기가 깨진다. 속도 자체는 check_measures가 본다
+        speed = self.nav_speed_mps
+        if isinstance(speed, (int, float)) and speed > 0.0 and not speed * ratio > 0.0:
+            raise ValueError(f"nav_eta_speed_ratio {ratio!r} makes the ETA speed zero")
 
 
 # ---- 파라미터 파일 읽기 ----
@@ -157,6 +174,9 @@ def check_types(data: dict, source="params") -> None:
     if data.get("release_confirm_samples", 1) < 1:
         raise ValueError(f"{source}: release_confirm_samples must be >= 1, "
                          f"got {data['release_confirm_samples']!r}")
+    if data.get("report_max_in_flight", 1) < 1:
+        raise ValueError(f"{source}: report_max_in_flight must be >= 1, "
+                         f"got {data['report_max_in_flight']!r}")
 
 
 # ---- 시간·거리 값 검사: 유한, 음수 아님, 끔이 아니면 0보다 큼 ----

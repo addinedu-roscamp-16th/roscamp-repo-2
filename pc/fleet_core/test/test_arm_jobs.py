@@ -98,7 +98,7 @@ def test_past_the_retry_limit_the_arm_is_reported_faulty_not_the_robot():
     out = jobs.take_output()
     assert [type(c) for c in out] == [ArmSwapResult, ArmFault, EventOut]
     assert out[1] == ArmFault("r1", SWAP, "arm_ship", "arm_ship: GRIPPER")
-    assert codes(out) == ["SWAP_FAILED"]
+    assert codes(out) == ["SWAP_FAILED"] and out[2].detail == "arm_ship: GRIPPER"
 
 
 def test_a_goal_stopped_by_the_run_mode_is_no_failed_attempt():

@@ -32,9 +32,10 @@ arm_retry_wait_s: 2.0         # 추정
 fill_timeout_s: 90.0          # 추정: 팔 두 대가 바구니 하나를 채움
 swap_timeout_s: 60.0          # 추정: arm_ship이 찬 바구니를 빼고 빈 바구니를 놓음
 cancel_retry_s: 1.0           # 추정: 취소한 goal 결과가 없으면 이 주기로 다시 요청
-cancel_warn_after: 5          # 결과 없이 이만큼 주기가 지나면 CANCEL_UNCONFIRMED.
-                              # 코어가 기다리는 팔을 늦었다고 하지 않게 arm_cancel_wait_s 이상
-report_retry_s: 2.0           # 추정: 답이 없으면 이만큼 뒤 주문 보고를 다시 보냄
+cancel_warn_after: 7          # 결과 없이 이만큼 주기가 지나면 CANCEL_UNCONFIRMED.
+                              # 코어가 기다리는 팔을 늦었다고 하지 않게 ×0.8(IR-41 지터 하한)도 arm_cancel_wait_s 이상
+report_retry_s: 2.0           # 추정: 답이 없으면 이만큼(±20%) 뒤 주문 보고를 다시 보냄
+report_max_in_flight: 4       # IR-41: 답을 기다리는 주문 보고 요청 수 상한. 로봇 세 대가 한꺼번에 끝내도 기다리지 않게 하나 더
 zone_wait_warn_s: 60.0        # 한 구역을 이만큼 기다리면 경고
 deadlock_grace_s: 5.0         # 교착 두 번째 단계 전 대기
 score_same_call: -4.0         # 이미 불린 로봇은 다른 로봇이 확실히 가깝지 않으면 호출을 유지
@@ -51,8 +52,12 @@ self_recovery_limit_s: 45.0   # 제안: 로봇이 RECOVERING(자가 복구)을 �
 traffic_mode: zones           # 교통 층: zones(지점·구역 그래프의 구역 허락). 다른 값은 없다
 # 구역 교통 층(traffic/zone). 모두 제안값이고 실측 전이다
 nav_speed_mps: 0.12           # 넓은 구역(Nav2 goal)의 ETA와 길 비용에 쓰는 속도
+nav_eta_speed_ratio: 1.0      # 넓은 구역 ETA 순항 속도 = nav_speed_mps x 이 비율(0 초과 1 이하). 길 비용에는 안 씀. 사용자 결정 2026-11-23: 틀만, 값은 실측 뒤
 follow_speed_mps: 0.12        # 고정 경로(FollowPath)의 같은 값
 retreat_speed_mps: 0.05       # 후진(Retreat) 속도
+nav_pass_m: 0.15              # 넓은 구역 ETA: 다음 조각이 있으면 로봇은 끝 노드 이만큼 앞에서 넘어간다(pode_fsm pass_m와 같게). 0이면 끔
+nav_turn_rps: 1.0             # 넓은 구역 ETA: 후진이 이어지거나 Route가 끝나면 끝에 서서 이 각속도로 끝 방향으로 돈다(RPP rotate_to_heading_angular_vel). 0이면 끔
+nav_goal_tolerance_m: 0.05    # 넓은 구역 ETA: 끝 노드에서 이만큼 안이면 이미 닿아 도는 중으로 본다(Nav2 general_goal_checker xy_goal_tolerance)
 footprint_radius_m: 0.085     # Nav2 발자국(0.12 x 0.12 m)의 반 대각선
 release_margin_m: 0.05        # 제안: 보고 중심이 뒤 구역에서 footprint_radius_m + 이 값(0.135 m) 넘게 벗어나면 그 구역을 놓는다
 node_clear_m: 0.20            # 뒤 지점에서 이만큼 멀어지면 그 지점을 놓는다

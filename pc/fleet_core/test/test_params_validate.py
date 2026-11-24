@@ -18,6 +18,7 @@ import yaml
 from fleet_core.common.params import (
     DEFAULT_PARAMS,
     OPTIONAL,
+    RETRY_JITTER,
     ZERO_MEANS_OFF,
     FleetParams,
     load_params,
@@ -96,7 +97,8 @@ def test_zero_is_an_error_where_zero_does_not_mean_off(tmp_path, key):
 
 def test_zero_means_off_keys_are_the_documented_ones():
     assert ZERO_MEANS_OFF == frozenset({"zone_clear_m", "idle_watch_s", "silent_limit_s",
-                                        "start_limit_s", "battery_low_pct"})
+                                        "start_limit_s", "battery_low_pct", "nav_pass_m",
+                                        "nav_turn_rps"})
 
 
 @pytest.mark.parametrize("key", sorted(ZERO_MEANS_OFF - OPTIONAL))
@@ -114,14 +116,15 @@ def test_score_values_may_be_negative(tmp_path):
     assert params.score_same_call == -9.0
 
 
-RECORD_COMPAT = {"idle_watch_s", "silent_limit_s", "start_limit_s"}
+RECORD_COMPAT = {"idle_watch_s", "silent_limit_s", "start_limit_s", "nav_pass_m", "nav_turn_rps"}
 
 
 def test_code_defaults_match_the_shipped_file_except_record_compat_watches():
     """FleetParams(**fields)로 바로 만들 때(tools/replay.py의 옛 기록)의 기본값.
 
     stall_s는 파일과 같다(12 s). 0이 '끔'인 세 감시는 그 키가 없는 옛 기록을 감시 없이
-    재생하려고 0으로 둔다(test_zone_silent, test_zone_no_start). load_params는 빠진 키를
+    재생하려고 0으로 둔다(test_zone_silent, test_zone_no_start). Nav2 goal 끝 보정 두 키도
+    같은 까닭으로 0이다(test_zone_eta_end). load_params는 빠진 키를
     오류로 내므로 운영 파일에는 이 기본값이 쓰이지 않는다.
     """
     differ = {name: (f.default, SHIPPED[name]) for name, f in FIELDS.items()
@@ -139,6 +142,17 @@ def test_release_confirm_samples_is_a_positive_integer(tmp_path, bad):
     """0이나 음수면 첫 보고만으로 구역을 놓는다(progress.py _counted)."""
     with pytest.raises(ValueError, match="release_confirm_samples"):
         load_params(write(tmp_path, {**SHIPPED, "release_confirm_samples": bad}))
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, 2.5, "3"])
+def test_report_max_in_flight_is_a_positive_integer(tmp_path, bad):
+    """IR-41 동시 보고 상한. 0이면 보고가 하나도 나가지 않는다."""
+    with pytest.raises(ValueError, match="report_max_in_flight"):
+        load_params(write(tmp_path, {**SHIPPED, "report_max_in_flight": bad}))
+
+
+def test_report_max_in_flight_ships_as_4():
+    assert load_params().report_max_in_flight == 4
 
 
 def test_the_station_time_estimates_are_gone():
@@ -285,3 +299,11 @@ def test_without_the_compat_default_the_old_record_would_replay_differently(tmp_
     assert result.compared and not result.same
     assert len(produced) > 1, "재생 줄을 받지 못하면 아래 단언이 빈 목록으로 통과한다"
     assert all(abs(t - recorded[0]) > 1.0 for t in stall_times(produced))
+
+
+def test_the_cancel_warning_waits_as_long_as_the_core_waits_for_an_arm():
+    """노드의 CANCEL_UNCONFIRMED는 코어가 아직 기다리는 팔을 일찍 부르면 안 된다.
+    재시도 간격이 ±20%로 흔들리므로 가장 짧은 경우로 본다(IR-41)."""
+    params = load_params()
+    shortest = params.cancel_warn_after * params.cancel_retry_s * (1.0 - RETRY_JITTER)
+    assert shortest >= params.arm_cancel_wait_s

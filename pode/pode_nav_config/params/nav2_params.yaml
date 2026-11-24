@@ -129,7 +129,7 @@ controller_server:
       yaw_goal_tolerance: 3.2
     FollowPath:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.25  # 전달사항(제조사 0.2)
+      desired_linear_vel: 0.12  # nav_speed.yaml(제조사 0.2)
       # 앞보기는 속도에 비례한다: 0.8초 앞, 0.10~0.25 m(2026-11-15). 0.10 m 고정은
       # 0.20 m/s에서 0.5초 앞만 봐서 폭 0.18 m 급행에서 방향이 표준편차
       # 10.3도로 흔들렸고, 0.8초로 두자 1.6도였다. 0.12 m/s에서는 전과 같은 0.10 m다. 예전의 속도
@@ -187,7 +187,7 @@ controller_server:
     # An explicit copy of FollowPath (keep every other key equal; test_nav_config checks it)
     FollowPathThrough:
       plugin: "nav2_regulated_pure_pursuit_controller::RegulatedPurePursuitController"
-      desired_linear_vel: 0.25  # 전달사항(제조사 0.2)
+      desired_linear_vel: 0.12  # nav_speed.yaml(제조사 0.2)
       # FollowPath와 같다: 앞보기는 속도에 비례한다(0.8초 앞, 0.10~0.25 m)
       lookahead_dist: 0.10  # 속도 비례를 켜서 쓰지 않는다
       min_lookahead_dist: 0.10  # 전달사항(제조사 0.3)

@@ -72,6 +72,7 @@ class _Interfaces:
         self.services = []
         self._on_order_board = self._on_confirm_clear = self._on_reinstate = object()
         self._on_force_ship = object()
+        self._on_system_mode = object()
 
     def _qos(self, key):
         return None
