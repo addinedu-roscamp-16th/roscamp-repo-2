@@ -6,8 +6,10 @@ import math
 import random
 
 from fake_robots.scenario_cfg import (
+    AFTER_EVENT_FAULTS,
     EXPECT_DEFAULTS,
     FAULT_TYPES,
+    HOLD_REASONS,
     LOW_BATTERY_KEYS,
     OBJECT_KEYS,
     OBJECT_MAP_MARGIN_M,
@@ -16,6 +18,7 @@ from fake_robots.scenario_cfg import (
     RANDOM_KEYS,
     REINSTATE_BASKETS,
     ROBOT_FAULTS,
+    UNTIL_EVENT_FAULTS,
     Expect,
     Fault,
     OrderCfg,
@@ -134,12 +137,22 @@ def _parse_fault(raw: dict, robots: dict, site) -> Fault:
     target = str(raw.get("target", ""))
     if target and (kind != "nav_abort" or target not in site.nodes):
         raise ScenarioError(f"target needs nav_abort and a node of the map in {raw}")
+    after, detail, until = (str(raw.get(k, "")) for k in
+                            ("after_event", "after_detail", "until_event"))
+    if after and (kind not in AFTER_EVENT_FAULTS or not float(raw["at_s"]) >= 0):
+        raise ScenarioError(f"after_event needs one of {AFTER_EVENT_FAULTS} and an at_s delay "
+                            f">= 0: {raw}")
+    if detail and not after:
+        raise ScenarioError(f"after_detail needs after_event: {raw}")
+    if until and kind not in UNTIL_EVENT_FAULTS:
+        raise ScenarioError(f"until_event needs one of {UNTIL_EVENT_FAULTS}: {raw}")
     return Fault(float(raw["at_s"]), raw.get("robot", ""), kind,
                  float(raw.get("duration_s", 0.0)), int(raw.get("count", 1)),
                  raw.get("arm", ""), int(raw.get("after_items", 0)),
                  start=start, basket=basket, target=target,
                  offset_m=float(raw.get("offset_m", 0.0)),
-                 distance_m=float(raw.get("distance_m", 0.0)), x=x, y=y, radius_m=radius)
+                 distance_m=float(raw.get("distance_m", 0.0)), x=x, y=y, radius_m=radius,
+                 after_event=after, after_detail=detail, until_event=until)
 
 
 def _object_place(raw: dict, site) -> tuple[float, float, float]:
@@ -167,6 +180,11 @@ def _object_place(raw: dict, site) -> tuple[float, float, float]:
 
 def _check_reinstates(faults: list) -> None:
     """다시 투입은 그 로봇을 치운 뒤에만 할 수 있다."""
+    for f in faults:
+        if f.type == "operator_remove" and f.after_event and sum(
+                g.type == "operator_remove" and g.robot == f.robot for g in faults) > 1:
+            raise ScenarioError(f"operator_remove of {f.robot} on an event must be its only "
+                                "operator_remove (the put-back waits for it)")
     removed: set[str] = set()
     for f in sorted(faults, key=lambda f: f.at_s):
         if f.type == "operator_remove":
@@ -188,6 +206,10 @@ def _parse_expect(data: dict, faults: list) -> Expect:
         if order not in ids or result not in ORDER_RESULTS:
             raise ScenarioError(f"order_results: {order}: {result} needs a scenario order and "
                                 f"one of {ORDER_RESULTS}")
+    for order, reason in (raw.get("hold_reasons") or {}).items():
+        if order not in ids or reason not in HOLD_REASONS:
+            raise ScenarioError(f"hold_reasons: {order}: {reason} needs a scenario order and "
+                                f"one of {HOLD_REASONS}")
     expect = Expect(**{**EXPECT_DEFAULTS, **raw})
     if faults and max(expect.orders_shipped or 0, expect.orders_shipped_min) < 1:
         raise ScenarioError("a scenario with faults must expect at least one shipped order "
