@@ -1,0 +1,202 @@
+{
+  "id": "LT-03",
+  "result": "통과",
+  "reason": "",
+  "run_id": "20261109-211124",
+  "run_kind": "공식",
+  "started": 1794226370.8429267,
+  "finished": 1794226377.8813417,
+  "devices": "2대",
+  "two_device_check": null,
+  "conditions": {
+    "devices": "2대",
+    "PI_HOST": "sbt-pi",
+    "ROS_DISTRO": "jazzy",
+    "ROS_DOMAIN_ID": "99",
+    "params": {
+      "before_disconnect": 30,
+      "received_before_disconnect": 20,
+      "during_replay": 20,
+      "deadline_s": 20.0,
+      "rate_hz": 20,
+      "replay_delay_s": 1.0,
+      "status_robots": 3,
+      "status_period_ms": 100
+    },
+    "violation": ""
+  },
+  "observations": {
+    "replay_begin": [
+      {
+        "t": 5563.86049692,
+        "wall": 1794226376.74711,
+        "kind": "ws_replay_begin",
+        "conn": 2,
+        "since_seq": 23,
+        "live_queued": 20,
+        "replay_count": 27
+      }
+    ],
+    "status_sender_last_seq": {
+      "r1": 10,
+      "r2": 10,
+      "r3": 10
+    },
+    "status_after_reconnect": {
+      "r1": 10,
+      "r2": 10,
+      "r3": 10
+    },
+    "status_snapshot_on_connect": [
+      0,
+      3
+    ],
+    "last_seq_before_disconnect": 23,
+    "first_connection_seqs": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6,
+      7,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23
+    ],
+    "expected_after_S": [
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50
+    ],
+    "received_after_reconnect": [
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50
+    ],
+    "missing": [],
+    "duplicates": []
+  },
+  "notes": [],
+  "params": {
+    "it01": {
+      "response_delay_s": 3.0,
+      "timer_period_ms": 200,
+      "min_ticks": 5,
+      "deadline_s": 5.0,
+      "blocking_wait_timeout_s": 10.0,
+      "fms_timeout_margin_s": 5.0,
+      "exec_time_s": 0.5
+    },
+    "it02": {
+      "status_period_ms": 100,
+      "alert_delay_s": 1.0,
+      "max_gap_ms": 500,
+      "observe_s": 6.0,
+      "alerts": 3,
+      "alert_rate_hz": 5,
+      "resend_interval_s": 30.0
+    },
+    "it03": {
+      "fms_timeout_s": 2.0,
+      "query_retry_s": 0.5,
+      "exec_time_s": 1.0,
+      "deadline_s": 30.0
+    },
+    "it04": {
+      "discovery_timeout_s": 10.0,
+      "observe_s": 5.0,
+      "publish_count": 20,
+      "rate_hz": 10
+    },
+    "lt01": {
+      "count": 1000,
+      "ignore_first_ack_every": 100,
+      "resend_interval_s": 2.0,
+      "resend_deadline_s": 60.0
+    },
+    "lt02": {
+      "queue_cap": 50,
+      "robots": 10,
+      "publish_hz": 200,
+      "client_read_delay_s": 0.05,
+      "duration_s": 10.0,
+      "last_state_deadline_s": 5.0
+    },
+    "lt03": {
+      "before_disconnect": 30,
+      "received_before_disconnect": 20,
+      "during_replay": 20,
+      "deadline_s": 20.0,
+      "rate_hz": 20,
+      "replay_delay_s": 1.0,
+      "status_robots": 3,
+      "status_period_ms": 100
+    },
+    "bridge": {
+      "http_port": 8765,
+      "outbox_period_ms": 100
+    }
+  }
+}
