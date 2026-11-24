@@ -34,6 +34,7 @@ from fleet_interfaces.msg import (
     OrderBoard,
     RobotState,
     RobotStatusArray,
+    SystemMode,
     ZoneStateArray,
 )
 from fleet_interfaces.srv import CheckClear, ConfirmClear, Reinstate, ReportOrder
@@ -141,6 +142,10 @@ class FleetManagerNode(Node):
         self._events_pub = self.create_publisher(FleetEvent, name("events"), self._qos("events"))
         self.create_subscription(
             OrderBoard, name("order_board"), self._on_order_board, self._qos("order_board"))
+        # 운영 모드(F-13): 이번 주는 바뀔 때 로그만. TEST 모드 주문 거부(IR-73)는 다음 주
+        self._system_mode = ""
+        self.create_subscription(
+            SystemMode, name("system_mode"), self._on_system_mode, self._qos("system_mode"))
         self._move = {}
         self._dock = {}
         self._retreat = {}
@@ -182,6 +187,12 @@ class FleetManagerNode(Node):
                 and self._dock[robot].server_is_ready()):
             self._reached.add(robot)
         return robot in self._reached
+
+    def _on_system_mode(self, msg: SystemMode) -> None:
+        # TODO(Q-nn): IR-73 TEST 모드 주문 거부. 설계 검토 사항에 등록하면 번호를 채운다
+        if msg.mode != self._system_mode:
+            self._system_mode = msg.mode
+            self.get_logger().info(f"system mode {msg.mode}")
 
     def _on_order_board(self, msg: OrderBoard) -> None:
         self.core.on_order_board(adapters.order_board_mode(msg), adapters.order_board_orders(msg))
@@ -425,6 +436,7 @@ def main() -> None:
     rclpy.init()
     node = FleetManagerNode(record=args.record)
     try:
+        # TODO(Q-nn): IR-30 예외. 단일 스레드, call_async만 쓰고 콜백에서 기다리지 않음
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
