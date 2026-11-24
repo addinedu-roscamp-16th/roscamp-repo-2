@@ -40,7 +40,7 @@
         <mxCell id="estop0-e11" edge="1" parent="1" source="estop0-est" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=11;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="estop0-pod" value="">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="estop0-e12" edge="1" parent="1" source="estop0-est" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=11;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="estop0-phd" value="/safety/estop · /safety/set_lock">
+        <mxCell id="estop0-e12" edge="1" parent="1" source="estop0-est" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=11;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="estop0-phd" value="/safety/estop · /{robot}/set_lock (estop 노드가 직접)">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="estop0-e13" edge="1" parent="1" source="estop0-est" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=11;labelBackgroundColor=#ffffff;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" target="estop0-phn" value="">
@@ -61,7 +61,7 @@
         <mxCell id="estop0-c18" parent="1" style="shape=note;size=14;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" value="&lt;b&gt;해제 (P-05)&lt;/b&gt;&lt;br&gt;태블릿은 정지만 가능. 해제는 로그인한 관리자가 관리자 페이지에서만 하며, 주문 관리(웹)에서 권한을 확인한 뒤 estop 노드에 전달" vertex="1">
           <mxGeometry height="100" width="300" x="1240" y="450" as="geometry" />
         </mxCell>
-      <mxCell id="version-label" value="v1.2 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
+      <mxCell id="version-label" value="v1.3 · 2026-11-24" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
     </mxGraphModel>
   </diagram>
   <diagram id="estop1" name="1. 비상정지 발생">
@@ -225,7 +225,7 @@
         <mxCell id="estop1-e38" edge="1" parent="1" source="estop1-P1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=11;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#666666;exitX=0.5;exitY=1;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="estop1-S4" value="정지 보고">
           <mxGeometry relative="1" x="-0.129" as="geometry" />
         </mxCell>
-      <mxCell id="version-label" value="v1.2 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
+      <mxCell id="version-label" value="v1.3 · 2026-11-24" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
     </mxGraphModel>
   </diagram>
   <diagram id="estop2" name="2. 현장 정리">
@@ -266,7 +266,7 @@
         <mxCell id="estop2-A1" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" value="정리 시작" vertex="1">
           <mxGeometry height="56" width="170" x="75" y="194" as="geometry" />
         </mxCell>
-        <mxCell id="estop2-E1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="/safety/set_lock 전달:&lt;br&gt;해제" vertex="1">
+        <mxCell id="estop2-E1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="/{robot}/set_lock 전달:&lt;br&gt;해제" vertex="1">
           <mxGeometry height="64" width="200" x="540" y="414" as="geometry" />
         </mxCell>
         <mxCell id="estop2-P1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="바퀴 모터 락 풀림&lt;br&gt;(ESTOP, 락 풀림)" vertex="1">
@@ -299,7 +299,7 @@
         <mxCell id="estop2-S3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="로봇별 락 잠금 누름" vertex="1">
           <mxGeometry height="64" width="170" x="316" y="1295" as="geometry" />
         </mxCell>
-        <mxCell id="estop2-E2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="/safety/set_lock 전달:&lt;br&gt;잠금" vertex="1">
+        <mxCell id="estop2-E2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="/{robot}/set_lock 전달:&lt;br&gt;잠금" vertex="1">
           <mxGeometry height="64" width="200" x="540" y="1401" as="geometry" />
         </mxCell>
         <mxCell id="estop2-P2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" value="바퀴 모터 락 잠김&lt;br&gt;(ESTOP, 락 잠김)" vertex="1">
@@ -419,7 +419,7 @@
         <mxCell id="estop2-e48" edge="1" parent="1" source="estop2-P2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;fontSize=11;labelBackgroundColor=#ffffff;dashed=1;strokeColor=#666666;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" target="estop2-S4" value="락 잠김 보고">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-      <mxCell id="version-label" value="v1.2 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
+      <mxCell id="version-label" value="v1.3 · 2026-11-24" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
     </mxGraphModel>
   </diagram>
   <diagram id="estop3" name="3. 해제 · 재개">
@@ -580,7 +580,7 @@
         <mxCell id="estop3-c50" parent="1" style="shape=note;size=14;whiteSpace=wrap;html=1;dashed=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;align=left;spacingLeft=6;verticalAlign=top;" value="&lt;b&gt;Pode · Phody · Phony 상태가 IDLE이어도&lt;/b&gt; 작업 모드가 PAUSE라 움직이지 않음. 관리자가 재개를 눌러야 RUN" vertex="1">
           <mxGeometry height="80" width="380" x="2570" y="110" as="geometry" />
         </mxCell>
-      <mxCell id="version-label" value="v1.2 · 2026-11-19" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
+      <mxCell id="version-label" value="v1.3 · 2026-11-24" style="text;html=1;fontSize=12;fontColor=#666666;align=left;verticalAlign=middle;" vertex="1" parent="1"><mxGeometry x="40.0" y="-16.0" width="200" height="24" as="geometry" /></mxCell></root>
     </mxGraphModel>
   </diagram>
 </mxfile>

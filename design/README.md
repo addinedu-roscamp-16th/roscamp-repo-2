@@ -9,12 +9,12 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 |---|---|---|---|---|
 | HW 아키텍처 | [architecture/hw_architecture.drawio](architecture/hw_architecture.drawio) | v1.18 | 2026-11-17 | hw_architecture_r18.drawio |
 | SW 아키텍처 | [architecture/sw_architecture.drawio](architecture/sw_architecture.drawio) | v1.15 | 2026-11-17 | sw_architecture_r15.drawio |
-| 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.5 | 2026-11-19 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
-| 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.2 | 2026-11-19 | 비상정지_순서도_r1.drawio |
+| 상태 · 순서도 · 시퀀스 다이어그램 | [diagrams/IFP_다이어그램.drawio](diagrams/IFP_다이어그램.drawio) | v2.6 | 2026-11-24 | IFP(Intelligent Flying Pod)_다이어그램_r7.drawio |
+| 비상정지 순서도 | [diagrams/비상정지_순서도.drawio](diagrams/비상정지_순서도.drawio) | v1.3 | 2026-11-24 | 비상정지_순서도_r1.drawio |
 | 관리자 페이지 스토리보드 | [diagrams/관리자_스토리보드.drawio](diagrams/관리자_스토리보드.drawio) | v1.4 | 2026-11-19 | - |
 | 사용자 주문 페이지 스토리보드 | [diagrams/사용자_스토리보드.drawio](diagrams/사용자_스토리보드.drawio) | v1.1 | 2026-11-19 | - |
 | 주문 DB (ERD) | [db/order_db.dbml](db/order_db.dbml) | v1.1 | 2026-11-20 | - |
-| 인터페이스 명세 그림 | [diagrams/인터페이스_명세.drawio](diagrams/인터페이스_명세.drawio) | v0.1 | 2026-11-20 | - |
+| 인터페이스 명세 그림 | [diagrams/인터페이스_명세.drawio](diagrams/인터페이스_명세.drawio) | v0.2 | 2026-11-24 | - |
 | 다이어그램 수정 요청 | [다이어그램_수정_요청.md](다이어그램_수정_요청.md) | - | 2026-11-19 | - |
 | 통신 규칙 반영 수정 요청 | [통신규칙_반영_수정_요청.md](통신규칙_반영_수정_요청.md) | - | 2026-11-20 | - |
 

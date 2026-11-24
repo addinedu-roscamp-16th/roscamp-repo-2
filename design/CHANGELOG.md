@@ -2,6 +2,17 @@
 
 새 항목은 위에 추가합니다. 형식: `## 날짜` 아래에 `- 문서 버전: 바뀐 내용`.
 
+## 2026-11-24
+
+- IFP_다이어그램 v2.6: 비상정지 시나리오(제안 v3, P-01 ~ P-14)를 채택해 넣음 (사용자 결정)
+  - 새 시퀀스 탭 6-11 비상정지: ① 발생 (estop 노드 → `/safety/estop` → 모든 로봇 ESTOP, 1초 안 보고 없는 로봇 경고) · ② 현장 정리 (로봇별 락 해제 · 잠금, 수동 출고) · ③ 해제 · 재개 (관리자만, PAUSE 유지, 위치 다시 설정, 운반 건 정리, 재시작은 '6-9')
+  - 비상정지 중 락 해제 · 잠금은 estop 노드가 로봇의 `/{robot}/set_lock`을 직접 부름 (fleet을 거치지 않음, 사용자 결정)
+  - 3 · 4 · 5번 탭: 비상정지 영역(모든 상태 → ESTOP → 대기)과 노트. 0. 상태표: Pode · Phody · Phony 표에 ESTOP 줄, 비상정지 노트, 락 · 명령 경로 노트 고침. 2. 주문: 해제 뒤 주문 처리 노트(P-12)
+  - Phony 락 해제 · 잠금 추가 (사용자 결정): 비상정지와 Phony 장애 모두. 5번 탭 오류 상태 · 운행 복귀 확인 [락 잠김], 6-7에 7a ~ 7g 락 해제 · 8a ~ 8g 락 잠금
+- 비상정지_순서도 v1.3: 락 명령 `/safety/set_lock` → 로봇의 `/{robot}/set_lock` (estop 노드가 직접)
+- 인터페이스 명세 그림 v0.2: 구간 E의 "Phony는 락이 없음"을 고침. 본문 `docs/설계/인터페이스_명세.md`도 Phony 락 반영 (`/fleet/set_lock` · `/{robot}/set_lock` · 상태 칸 `lock`)
+- 기능 검토 시트 "기능 목록": PHN-07(Phony 락 해제 · 잠금) 추가, PHN-06 · COM-02 · SCR-20 고침 (변경 이력 71번부터)
+
 ## 2026-11-20
 
 - 주문 DB v1.1: 통신 규칙 결정 반영 — 보고 번호(`trip.report_epoch` · `report_n`), `first_assigned_at`, `admin_action.request_id` · `final_result`, `alert.event_id`, `orders.idem_key`, `ws_event` · `bridge_session` 테이블(15개), 사유 코드 이름을 contract에 맞춤. 시험 118개
