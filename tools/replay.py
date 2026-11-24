@@ -5,13 +5,13 @@
         (또는 pc.launch.py에 record:=run.jsonl)
     python3 tools/replay.py run.jsonl
 
-첫 줄은 코어를 띄운 설정이다(로봇, 파라미터, 맵 본문, 양방향 설정).
+첫 줄은 코어를 띄운 설정이다(로봇, 파라미터, 지도 본문).
 이후 줄은 모두 시각 `t`와 아래 중 하나를 가진다.
 
-    {"t": 12.5, "in": "on_robot_state", "args": ["pinky1", 1.2, 2.0, 0.0, "MOVING", 90.0]}
+    {"t": 12.5, "in": "on_robot_state", "args": ["pode1", 1.2, 2.0, 0.0, "MOVING", 90.0]}
     {"t": 12.6, "in": "tick", "args": []}
     {"t": 12.6, "inside": "DispatchCmd", "goal_id": 3, "station_id": "WORK", "robot_id": ""}
-    {"t": 12.6, "out": "MoveCmd", "robot": "pinky1", "goal_id": 4, "target_id": "N", ...}
+    {"t": 12.6, "out": "MoveCmd", "robot": "pode1", "goal_id": 4, "target_id": "N", ...}
 
 `in`은 FleetManager의 메서드, `args`는 그 인자다. 한 번의 실행은 `in` 줄이 이어지고 각각 뒤에
 그 결과가 붙는 형태다. `inside`는 두 코어끼리 주고받은 것, `out`은 ROS로 나간 것이다.
@@ -34,10 +34,8 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
-
-import yaml
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO / "pc" / "fleet_core"))
@@ -45,7 +43,11 @@ sys.path.insert(0, str(REPO / "pc" / "fleet_core"))
 from fleet_core.common.commands import OrderRecord  # noqa: E402
 from fleet_core.common.params import FleetParams  # noqa: E402
 from fleet_core.manager import FleetManager  # noqa: E402
-from fleet_core.traffic.lane_map import LaneMap  # noqa: E402
+from fleet_core.traffic.modes import NoZoneTraffic  # noqa: E402
+from fleet_core.traffic.site import site_from_text  # noqa: E402
+
+# 옛 기록 호환 기본값: 기록에 없는 키는 그 기록을 만든 코드의 기본값으로 재생한다
+RECORD_DEFAULTS = {"stall_s": 6.0, "use_order_model": False}  # order: 2026-11-12 전 기록
 
 
 @dataclass(frozen=True)
@@ -60,6 +62,7 @@ class Result:
     produced: str = ""
     uncompared: int = 0  # 기록이 끝난 뒤에 나온 줄 수
     cut_line: bool = False  # 마지막 줄이 반쯤만 써져 빼 둠
+    skipped: tuple = ()
 
 
 def _count(lines: list[str], key: str) -> int:
@@ -69,7 +72,9 @@ def _count(lines: list[str], key: str) -> int:
 def _arguments(entry: dict) -> list:
     if entry["in"] == "on_order_board":
         mode, orders = entry["args"]
-        return [mode, [OrderRecord(**order) for order in orders]]
+        if isinstance(orders, list):  # 주문이 아니던 원소는 기록에 문자열로 남아 그대로 둔다
+            orders = [OrderRecord(**o) if isinstance(o, dict) else o for o in orders]
+        return [mode, orders]
     return entry["args"]
 
 
@@ -88,15 +93,24 @@ def _read(path) -> tuple[list[str], list[dict], bool]:
     return lines, entries, False
 
 
+def _known(recorded: dict) -> dict:
+    names = {field.name for field in fields(FleetParams)}
+    return {key: value for key, value in recorded.items() if key in names}
+
+
+def _skipped(head: dict) -> tuple:
+    return tuple(sorted(set(head["params"]) - set(_known(head["params"]))))
+
+
 def start_core(head: dict, clock) -> FleetManager:
     missing = {"robots", "params", "map"} - set(head)
     if missing:
         raise ValueError(f"the first line has no {sorted(missing)}")
     try:
-        params = FleetParams(**head["params"])
+        params = FleetParams(**{**RECORD_DEFAULTS, **_known(head["params"])})
     except TypeError as error:
         raise ValueError(f"these parameters do not fit this code: {error}") from error
-    site = LaneMap(yaml.safe_load(head["map"]), head["map"], head.get("bundle_two_way"))
+    site = site_from_text(head["map"])
     return FleetManager(site, params, head["robots"], clock)
 
 
@@ -109,23 +123,29 @@ def replay(path) -> Result:
         raise ValueError("no inputs, so there is nothing to play back")
     now = [0.0]
     core = start_core(head, lambda: now[0])
+    skipped = _skipped(head)
     produced: list[str] = []
     core.record_to(produced.append)
-    for entry in rest:
+    for number, entry in enumerate(rest, start=2):
+        if "unrecordable" in entry:
+            raise ValueError(f"line {number}: this input could not be recorded "
+                             f"({entry['unrecordable']})")
         if "in" in entry:
             now[0] = entry["t"]
             getattr(core, entry["in"])(*_arguments(entry))
     counts = tuple(_count(produced, key) for key in ("in", "inside", "out"))
     if not head.get("recorded") and not any("inside" in e or "out" in e for e in rest):
-        return Result(*counts, False, True, cut_line=cut_line)
+        return Result(*counts, False, True, cut_line=cut_line, skipped=skipped)
     # 첫 줄은 코어를 만든 입력이지 코어의 판단이 아니라 제외한다.
     for number, (old, new) in enumerate(zip(lines[1:], produced[1:], strict=False), start=2):
         if old != new:
-            return Result(*counts, True, False, number, old, new, cut_line=cut_line)
+            return Result(*counts, True, False, number, old, new, cut_line=cut_line,
+                          skipped=skipped)
     if len(lines) > len(produced):
         return Result(*counts, True, False, len(produced) + 1, lines[len(produced)],
-                      "(nothing came out)", cut_line=cut_line)
-    return Result(*counts, True, True, uncompared=len(produced) - len(lines), cut_line=cut_line)
+                      "(nothing came out)", cut_line=cut_line, skipped=skipped)
+    return Result(*counts, True, True, uncompared=len(produced) - len(lines), cut_line=cut_line,
+                  skipped=skipped)
 
 
 def main() -> int:
@@ -133,9 +153,12 @@ def main() -> int:
     parser.add_argument("record", help="the JSONL file the fleet manager node wrote with --record")
     try:
         result = replay(parser.parse_args().record)
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, NoZoneTraffic) as error:
         print(f"cannot play this back: {error}")
         return 2
+    if result.skipped:
+        print(f"warning: skipped {len(result.skipped)} parameters this code no longer has: "
+              f"{', '.join(result.skipped)}")
     print(f"{result.inputs} inputs, {result.inside} inside calls, {result.commands} commands")
     if result.cut_line:
         print("the last line was cut off and left out")

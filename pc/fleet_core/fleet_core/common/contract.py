@@ -1,7 +1,4 @@
-"""인터페이스 계약(토픽, 액션, 서비스의 이름, 타입, QoS)을 읽는다.
-
-노드는 `key`로 찾으므로 이름이나 QoS는 contract.yaml만 고치면 된다. ROS 없이 pytest에서 돈다.
-"""
+# ---- 토픽, 액션, 서비스 이름과 QoS 계약 읽기 ----
 from __future__ import annotations
 
 import itertools
@@ -12,8 +9,9 @@ from pathlib import Path
 import yaml
 
 
+# ---- 계약 데이터 구조 ----
 class ContractError(ValueError):
-    """계약 파일이 잘못됐거나 항목을 잘못 요청했다."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -26,7 +24,7 @@ class QosSpec:
 @dataclass(frozen=True)
 class Entry:
     key: str
-    kind: str  # topic, action, service 중 하나
+    kind: str
     template: str
     type: str
     qos_name: str | None
@@ -43,10 +41,12 @@ class ExpandedEntry:
     qos: QosSpec | None
 
 
+# ---- 이름 템플릿 필드 추출 ----
 def _fields(template: str) -> list[str]:
     return [f for _, f, _, _ in string.Formatter().parse(template) if f]
 
 
+# ---- Contract: 계약 항목 등록과 이름, 타입, QoS 조회 ----
 class Contract:
     def __init__(self, data: dict):
         self.placeholders = {k: list(v) for k, v in (data.get("placeholders") or {}).items()}
@@ -98,8 +98,8 @@ class Contract:
             raise ContractError(f"{key}: {entry.kind} entries have no QoS profile")
         return self.profiles[entry.qos_name]
 
+    # ---- 템플릿을 인스턴스별 이름으로 펼치기 ----
     def expanded(self, include_real_only: bool = True) -> list[ExpandedEntry]:
-        """실제 이름마다 하나씩 돌려준다. 실행 중인 시스템 점검용."""
         out = []
         for entry in self.entries.values():
             if entry.real_only and not include_real_only:
@@ -113,12 +113,12 @@ class Contract:
         return out
 
 
+# ---- 계약 파일 읽기와 ROS QoS 변환 ----
 def load_contract(path) -> Contract:
     return Contract(yaml.safe_load(Path(path).read_text(encoding="utf-8")))
 
 
 def to_ros_qos(spec: QosSpec):
-    """rclpy QoSProfile을 만든다. pytest에 rclpy가 없어도 되게 여기서 import한다."""
     from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
 
     return QoSProfile(

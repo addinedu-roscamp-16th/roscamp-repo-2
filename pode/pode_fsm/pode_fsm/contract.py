@@ -1,0 +1,49 @@
+# ---- contract.yaml에서 토픽 이름과 QoS 읽기 ----
+from __future__ import annotations
+
+from pathlib import Path
+from typing import NamedTuple
+
+import yaml
+
+
+# ---- QoS 설정과 계약 항목 조회 ----
+class Qos(NamedTuple):
+    reliability: str
+    durability: str
+    depth: int
+
+
+class Contract:
+    def __init__(self, data: dict):
+        self._profiles = {name: Qos(p["reliability"], p["durability"], int(p["depth"]))
+                          for name, p in (data.get("qos_profiles") or {}).items()}
+        self._entries = {}
+        for section in ("topics", "actions", "services"):
+            for raw in data.get(section) or []:
+                self._entries[raw["key"]] = raw
+
+    def name(self, key: str, **subs: str) -> str:
+        return self._entries[key]["name"].format(**subs)
+
+    def qos(self, key: str) -> Qos:
+        return self._profiles[self._entries[key]["qos"]]
+
+
+# ---- 계약 파일 불러오기와 ROS QoSProfile 변환 ----
+def load_contract(path: str | Path) -> Contract:
+    with open(path, encoding="utf-8") as f:
+        return Contract(yaml.safe_load(f))
+
+
+def default_contract_path() -> Path:
+    from ament_index_python.packages import get_package_share_directory
+    return Path(get_package_share_directory("fleet_interfaces")) / "contract.yaml"
+
+
+def to_ros_qos(spec: Qos):
+    from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
+
+    return QoSProfile(history=HistoryPolicy.KEEP_LAST, depth=spec.depth,
+                      reliability=ReliabilityPolicy[spec.reliability.upper()],
+                      durability=DurabilityPolicy[spec.durability.upper()])

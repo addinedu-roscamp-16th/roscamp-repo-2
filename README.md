@@ -7,13 +7,13 @@
 ```text
 interfaces/fleet_interfaces/  msg·srv·action, contract.yaml(인터페이스 원본)
 config/                       로봇 목록
-pc/                           관제 PC: central, fleet_core, fleet_manager
+pc/                           관제 PC: central, fms_core, fms_pinky
 pinky/                        핑키 Pi: pinky_fsm, pinky_dock, pinky_nav_config
 arm/                          팔 PC: arm_control, arm_vision
-sim/                          시험: fake_robots, fleet_gz_sim
+sim/                          시험
 bringup/iponic_bringup/       장치별 launch
 tools/, scripts/              시험 도구, 계약 검사
-docs/                         빌드·실행 규칙, 관제가 주고받는 것
+docs/                         빌드·실행 규칙
 ```
 
 ## 연결

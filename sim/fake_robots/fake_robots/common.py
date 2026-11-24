@@ -6,15 +6,14 @@ from pathlib import Path
 
 import yaml
 from fleet_core.common.contract import load_contract
-from fleet_core.traffic.lane_map import DEFAULT_MAP, load_lane_map
+from fleet_core.common.params import DEFAULT_PARAMS
+from fleet_core.traffic.site import load_site
 
 from fake_robots.scenario import load_scenario
 
 # 계약에 일부러 넣지 않은 가짜 내부 토픽.
 STOCK_TOPIC = "/sim/stock/{arm}"  # 팔 하나의 실제 재고(JSON)
 TRUTH_TOPIC = "/sim/truth/{robot}"  # 심판용 잡음 없는 자세
-
-DEFAULT_PARAMS = DEFAULT_MAP.parent / "fleet_params.yaml"
 
 
 def node_name(prefix: str, key: str, overrides) -> str:
@@ -34,17 +33,23 @@ def load_contract_param(node):
     return load_contract(path)
 
 
-def load_lane_map_param(node):
+def load_site_param(node):
+    """map_file 파라미터의 지도. 비면 기본 배치."""
     node.declare_parameter("map_file", "")
-    return load_lane_map(node.get_parameter("map_file").value or None)
+    return load_site(node.get_parameter("map_file").value or None)
 
 
-def load_scenario_param(node, lane_map):
-    node.declare_parameter("scenario_file", "")
+def load_scenario_param(node, site):
+    """scenario_seed: random 블록을 풀 seed. -1(기본)이면 파일의 seed. 같은 파일을 읽는 노드는
+    모두 같은 값을 받아야 같은 시간표를 본다."""
+    for name, default in (("scenario_file", ""), ("scenario_seed", -1)):
+        if not node.has_parameter(name):
+            node.declare_parameter(name, default)
     path = node.get_parameter("scenario_file").value
     if not path:
         raise ValueError("parameter scenario_file is required")
-    return load_scenario(path, lane_map)
+    seed = int(node.get_parameter("scenario_seed").value)
+    return load_scenario(path, site, None if seed < 0 else seed)
 
 
 def load_fleet_params(path=None) -> dict:
@@ -66,7 +71,7 @@ def station_with_action(site, action: str):
 
 
 def split_fake_arms(text: str, site) -> tuple[bool, list[str], list[str]]:
-    """launch 인자 fake_arms를 (가짜 작업셀 실행 여부, 비전 팔, 교체 팔)로 푼다.
+    """launch 인자 fake_arms를 (가짜 작업셀 실행 여부, 채움 팔, 교체 팔)로 푼다.
 
     arm1과 arm2는 채움 서버 하나를 같이 쓰므로 함께 가짜로 만들거나 둘 다 안 만든다.
     """

@@ -1,0 +1,158 @@
+# ---- 도크 대기 줄과 차례, 갈 곳 후보 믹스인 ----
+from __future__ import annotations
+
+import math
+
+from fleet_core.fleet_map import AT_DOCK, LANE
+from fleet_core.traffic.mission import TO_OUTBOUND, TO_WORK
+
+
+# ---- 스테이션 도크, 대기 지점, 주차 지점 후보 내기 ----
+class Turns:
+    def _candidates(self, m):
+        site = self.site
+        if m.phase in (TO_WORK, TO_OUTBOUND):
+            station = site.stations[m.dest]
+            if self._is_next(m, station.id) and self._dock_free(m, station.dock):
+                yield station.dock, False
+                if self._may_stay(m):
+                    return
+            elif m.node in station.queue and self._on_node(m):
+                step = self._line_step(m, station)
+                if step is None:
+                    self._stay(m, station)
+                    return
+                yield step, True
+                return
+            for spot in self._open_spots(m, station):
+                yield spot, True
+            if self._may_stay(m):
+                self._stay(m, station)
+                return
+        cost = self._cost(m)
+        free = [spot for spot in site.parking if self.grants.node_holder(spot) in ("", m.name)]
+        for spot in sorted(free, key=lambda spot: (self._price(m, spot, cost), spot)):
+            yield spot, False
+
+    def _station_spots(self, m):
+        station = self.site.stations[m.dest]
+        if self._is_next(m, station.id) and self._dock_free(m, station.dock):
+            yield station.dock, False
+        for spot in self._open_spots(m, station):
+            yield spot, True
+
+    def _price(self, m, spot: str, cost) -> float:
+        edges = self._way(m, spot)
+        return math.inf if edges is None else sum(cost(edge) for edge in edges)
+
+    # ---- 줄(line) 스테이션: 빈 앞자리로 한 칸 당기기, 새 로봇은 맨 뒤 로봇 바로 뒤로 ----
+    def _line_step(self, m, station):
+        if not station.line:
+            return None
+        at = station.queue.index(m.node)
+        if at == 0 or self.grants.node_holder(station.queue[at - 1]) not in ("", m.name):
+            return None
+        return station.queue[at - 1]
+
+    def _open_spots(self, m, station) -> list:
+        mine = ("", m.name)
+        if not station.line:
+            free = [spot for spot in station.queue if self.grants.node_holder(spot) in mine]
+            site = self.site
+            if not any(site.zones[site.nodes[spot].zone].kind == LANE for spot in free):
+                return free
+            cost = self._cost(m)
+            return sorted(free, key=lambda spot: self._price(m, spot, cost))
+        # 줄에 선 로봇(이 스테이션으로 가는 로봇)이 쥔 자리만 센다:
+        # 줄을 떠나는 로봇의 자리는 꼬리가 아니다
+        taken = [i for i, spot in enumerate(station.queue)
+                 if self.grants.node_holder(spot) not in mine
+                 and self._in_line(self.grants.node_holder(spot), station.id)]
+        free = [spot for spot in station.queue if self.grants.node_holder(spot) in mine]
+        return [spot for spot in station.queue[max(taken) + 1 if taken else 0:] if spot in free]
+
+    def _in_line(self, name: str, station_id: str) -> bool:
+        r = self._robots.get(name)
+        return r is not None and r.dest == station_id and r.phase in (TO_WORK, TO_OUTBOUND)
+
+    def _line_spot(self, r, station) -> int:
+        """줄 순서(앞이 0). 한 칸 당기는 로봇은 가는 자리로, 줄에 안 선 로봇은 맨 뒤 다음."""
+        route = r.route
+        if route is not None and not route.stale:
+            # 받은 구간에서 앞으로 처음 닿는 대기 자리. 지나온 자리는 세지 않는다
+            # (order 모델은 route 끝에 도크까지 붙인다)
+            spots = [edge.b for edge in route.edges[route.done:route.granted]
+                     if edge.b in station.queue]
+            if spots:
+                return station.queue.index(spots[0])
+        if r.node in station.queue:
+            return station.queue.index(r.node)
+        return len(station.queue)
+
+    # ---- 대기 지점에서 기다리기와 머물 수 있는지 판단 ----
+    def _stay(self, m, station) -> None:
+        if m.watch.wait.since is None:
+            m.watch.wait.since = self._clock()
+        m.watch.wait.key = (self.site.nodes[station.dock].zone,)
+        if not m.watch.wait.queued:
+            m.watch.wait.queued = True
+            self._event("INFO", "DOCK_QUEUED", f"{station.id} is busy, waits at {m.node}", m.name)
+
+    def _may_stay(self, m) -> bool:
+        return (self._on_node(m) and self.site.can_wait(m.node)
+                and self.site.nodes[m.node].kind != AT_DOCK and not m.avoid.retreat_to)
+
+    # ---- 같은 스테이션 앞선 로봇 순위와 다음 차례 판정 ----
+    def _is_next(self, m, station_id: str) -> bool:
+        return all(self._waits_for(other, m) for other in self._ahead(m, station_id))
+
+    def _ahead(self, m, station_id: str) -> list:
+        station = self.site.stations[station_id]
+        dock = station.dock
+
+        def spot(r) -> int:
+            return self._line_spot(r, station) if station.line else 0
+
+        def rank(r) -> tuple:
+            route = r.route
+            left = route is not None and route.turn and not route.stale and route.goal == dock
+            return (not (left or r.dock_tries), spot(r), r.asked_at or 0.0, r.asked_gap, r.name)
+
+        def first(other) -> bool:
+            # 줄: 상대 길 위의 줄 자리를 한쪽만 쥐었으면 쥔 로봇이 먼저(몸으로 앞선 로봇)
+            if station.line:
+                theirs, ours = self._blocks(other, m, station), self._blocks(m, other, station)
+                if theirs != ours:
+                    return theirs
+            return rank(other) < mine
+
+        mine = rank(m)
+        return [other for other in self._robots.values()
+                if (other is not m and other.available and other.dest == station_id
+                    and other.phase in (TO_WORK, TO_OUTBOUND) and first(other))]
+
+    def _blocks(self, a, b, station) -> bool:
+        """a가 b의 남은 길 위 줄 자리를 쥐었다."""
+        route = b.route
+        if route is None or route.stale:
+            return False
+        return any(spot in station.queue and self.grants.node_holder(spot) == a.name
+                   for spot in route.nodes_left())
+
+    def _waits_for(self, other, m) -> bool:
+        return (other.goal is None and m.goal is None and self._on_node(m)
+                and m.node in other.watch.wait.key and self.grants.node_holder(m.node) == m.name)
+
+    # ---- 도크 차례 가져가기와 도크 빈 여부 확인 ----
+    def _take_turn(self, m, route) -> None:
+        if m.phase not in (TO_WORK, TO_OUTBOUND) or route.goal != self.site.stations[m.dest].dock:
+            return
+        for other in self._ahead(m, m.dest):
+            self._event("INFO", "DOCK_TURN_TAKEN",
+                        f"goes before {other.name}, which waits for {m.node}", m.name)
+        route.turn = True
+
+    def _dock_free(self, m, dock: str) -> bool:
+        zone = self.site.nodes[dock].zone
+        return (all(name == m.name for name in self.grants.holders(zone))
+                and self.grants.node_holder(dock) in ("", m.name))

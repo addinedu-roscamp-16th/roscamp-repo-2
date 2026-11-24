@@ -1,9 +1,4 @@
-"""계약과 실행 중인 ROS 그래프를 비교한다. ROS는 import하지 않는다.
-
-그래프 없이 테스트하려고 `observed`는 순수 데이터다:
-  {"topics": {name: {"types": [...], "publishers": [QosSpec], "subscribers": [QosSpec]}},
-   "actions": {name: [types]}, "services": {name: [types]}}
-"""
+# ---- 계약과 실제 관측 결과를 비교해 문제 목록 만들기 ----
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,14 +8,14 @@ from fleet_core.common.contract import QosSpec
 
 @dataclass(frozen=True)
 class Problem:
-    kind: str  # missing, wrong_type, qos 중 하나
+    kind: str
     name: str
     detail: str
-    severity: str = "error"  # error 또는 warning
+    severity: str = "error"
 
 
+# ---- 타입 이름 비교와 QoS 차이 찾기 ----
 def _norm(type_name: str) -> str:
-    """`pkg/msg/Name`과 `pkg/Name`을 둘 다 받는다."""
     parts = type_name.split("/")
     return f"{parts[0]}/{parts[-1]}" if len(parts) == 3 else type_name
 
@@ -45,6 +40,7 @@ def _qos_problems(name: str, expected: QosSpec, role: str, specs: list[QosSpec])
     return out
 
 
+# ---- 계약 항목별 누락, 타입, QoS 비교 ----
 def compare(contract, observed: dict, include_real_only: bool = False) -> list[Problem]:
     problems: list[Problem] = []
     for entry in contract.expanded(include_real_only=include_real_only):

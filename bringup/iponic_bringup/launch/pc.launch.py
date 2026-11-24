@@ -1,14 +1,23 @@
 """PC에서 플릿 매니저를 띄운다. 가짜와 실물 장치를 섞어 쓸 수 있다.
 
-All fake:  ros2 launch iponic_bringup pc.launch.py use_fake:=true scenario:=shared_lane_failure
-Mixed:     ros2 launch iponic_bringup pc.launch.py use_fake:=true fake_robots:="pinky2 pinky3"
+All fake:  ros2 launch iponic_bringup pc.launch.py use_fake:=true scenario:=real_three_orders
+Mixed:     ros2 launch iponic_bringup pc.launch.py use_fake:=true fake_robots:="pode2 pode3"
 Real arms: ros2 launch iponic_bringup pc.launch.py use_fake:=true fake_arms:="arm3"
 All real:  ros2 launch iponic_bringup pc.launch.py use_fake:=false
+Real two-robot test (robots real, central/arms fake, PC answers docking; robots run DOCK_STUB=1):
+           ros2 launch iponic_bringup pc.launch.py use_fake:=true use_sim_clock:=false \
+               fake_robots:=none robots:="pode1 pode2" map_file:=v7 \
+               scenario:=real_two_orders dock_wait_robots:="pode1 pode2"
+Real three-robot test (same, plus pode3):
+           ros2 launch iponic_bringup pc.launch.py use_fake:=true use_sim_clock:=false \
+               fake_robots:=none robots:="pode1 pode2 pode3" map_file:=v7 \
+               scenario:=real_three_orders dock_wait_robots:="pode1 pode2 pode3"
 
 record:=PATH 는 tools/replay.py용 FMS 기록을 남긴다.
 
-fake_arms: arm1과 arm2는 함께 가짜 워크셀 서버와 비전 노드를 띄운다.
+fake_arms: arm1과 arm2는 함께 가짜 워크셀 서버를 띄운다.
 fill_basket 서버 하나가 둘을 맡으므로 하나만 적으면 오류다. arm3는 가짜 출고 팔을 띄운다.
+dock_wait_robots: 실물 로봇의 도킹을 PC가 대신 받는다(fake_robots real_dock_wait_node).
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
@@ -18,11 +27,36 @@ from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 
 
+def _scenario_map(scenario: str) -> str:
+    """시나리오 파일의 `map`이 고른 지도. 없으면 빈 값(기본 지도)."""
+    import os
+
+    from ament_index_python.packages import get_package_share_directory
+    from fake_robots.scenario import scenario_map_file
+    share = get_package_share_directory("fake_robots")
+    path = scenario if os.path.isfile(scenario) else os.path.join(
+        share, "scenarios", scenario if scenario.endswith(".yaml") else scenario + ".yaml")
+    return scenario_map_file(path) if os.path.isfile(path) else ""
+
+
+def _order_params(get) -> dict:
+    """order 모델 인자. 비워 두면 노드 파라미터를 주지 않아 params 파일의 값이 간다."""
+    out = {}
+    if get("use_order_model"):
+        out["use_order_model"] = get("use_order_model").lower() == "true"
+    if get("lookahead_s"):
+        out["lookahead_s"] = float(get("lookahead_s"))
+    return out
+
+
 def _setup(context):
     get = lambda name: LaunchConfiguration(name).perform(context)  # noqa: E731
     use_fake = get("use_fake").lower() == "true"
     use_sim_clock = use_fake and get("use_sim_clock").lower() == "true"
     record = get("record")
+    map_file = get("map_file")
+    if use_fake and not map_file:
+        map_file = _scenario_map(get("scenario"))
 
     actions = [
         Node(
@@ -34,9 +68,11 @@ def _setup(context):
             parameters=[{
                 "use_sim_time": use_sim_clock,
                 "robots": get("robots").split(),
-                "map_file": get("map_file"),
+                "map_file": map_file,
                 "params_file": get("params_file"),
                 "contract_file": get("contract_file"),
+                **_order_params(lambda name: LaunchConfiguration(name, default="").perform(
+                    context)),
             }],
         ),
     ]
@@ -50,10 +86,11 @@ def _setup(context):
                 "fake_arms": get("fake_arms"),
                 "fake_central": get("fake_central"),
                 "use_sim_clock": str(use_sim_clock).lower(),
-                "result_dir": get("result_dir"),
-                "map_file": get("map_file"),
+                "map_file": map_file,
                 "params_file": get("params_file"),
                 "contract_file": get("contract_file"),
+                "dock_wait_robots": LaunchConfiguration(
+                    "dock_wait_robots", default="").perform(context),
             }.items(),
         ))
     return actions
@@ -62,17 +99,19 @@ def _setup(context):
 def generate_launch_description():
     defaults = {
         "use_fake": "true",
-        "scenario": "basic_orders",
-        "robots": "pinky1 pinky2 pinky3",
-        "fake_robots": "pinky1 pinky2 pinky3",
+        "scenario": "real_three_orders",
+        "robots": "pode1 pode2 pode3",
+        "fake_robots": "pode1 pode2 pode3",
         "fake_arms": "arm1 arm2 arm3",
         "fake_central": "true",
         "use_sim_clock": "true",
-        "result_dir": "/tmp/iponic_result",
         "map_file": "",
         "params_file": "",
         "contract_file": "",
         "record": "",
+        "use_order_model": "",  # true/false. 비우면 params 파일의 값
+        "lookahead_s": "",  # 초. 비우면 params 파일의 값
+        "dock_wait_robots": "",  # PC가 도킹을 대신 받을 실물 로봇
     }
     declared = [DeclareLaunchArgument(k, default_value=v) for k, v in defaults.items()]
     return LaunchDescription([*declared, OpaqueFunction(function=_setup)])

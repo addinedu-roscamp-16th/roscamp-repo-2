@@ -1,0 +1,145 @@
+# ---- 멈춤, 구역 밖, 근접, 교착 감시 믹스인 ----
+from __future__ import annotations
+
+import math
+
+from fleet_core.fleet_map import NAV_GOAL, SHARED
+from fleet_core.traffic.deadlock import choose_retreat
+from fleet_core.traffic.mission import (
+    BLOCKED,
+    DOCK,
+    LOCALIZING,
+    MOVE,
+    RUN,
+    SELF_RECOVERING,
+    STALLED,
+)
+
+from .routes import Route
+
+
+# ---- goal 중 움직임이 없으면 멈춤 처리 ----
+class Watch:
+    def _watch_stall(self, m, now: float) -> None:
+        p = self.params
+        waiting = m.move_order is not None and m.move_order.waiting
+        rests = m.report.robot_state in (BLOCKED, SELF_RECOVERING)
+        if (m.goal is None or self._run_mode != RUN or m.arrival_by is not None or waiting
+                or (rests and m.goal.kind != DOCK) or m.report.robot_state == LOCALIZING):
+            self._reset_stall(m)
+            return
+        here, ep = (m.x, m.y), m.watch.stall
+        if ep.xy is None or math.dist(ep.xy, here) >= p.stall_move_m:
+            ep.xy, ep.since = here, now
+            return
+        limit = p.dock_stall_s if m.goal.kind == DOCK else p.stall_s
+        if now - ep.since < limit:
+            return
+        self._event("WARN", "GOAL_STALLED",
+                    f"{m.goal.kind} goal {m.goal.id} open, no movement for {limit:.0f} s", m.name)
+        self._reset_stall(m)
+        goal, end = m.goal, self._stands_at_end(m)
+        self._cancel_goal(m)
+        if end is not None:
+            self._arrived_anyway(m, STALLED, end, goal)
+            m.retry_at = now + p.arrival_settle_s
+        else:
+            self._goal_failed(m, STALLED)
+
+    # ---- 잡은 구역 밖 로봇 경고와 그 자리 구역 잡기 ----
+    def _watch_outside(self, m) -> None:
+        p, ep = self.params, m.watch.outside
+        held = self.grants.held_by(m.name)
+        gap = min((self.site.distance_to_zone(m.x, m.y, zone) for zone in held), default=0.0)
+        if gap <= p.outside_zone_m:
+            ep.clear()
+            return
+        ep.count += 1
+        if ep.count < p.outside_zone_samples:
+            return
+        self._event_once(ep, "WARN", "OUTSIDE_ZONE", f"at ({m.x:.2f}, {m.y:.2f}), {gap:.2f} m "
+                         f"outside {list(held)} for {ep.count} reports", m.name)
+        self._take_where_it_stands(m)
+
+    def _take_where_it_stands(self, m) -> None:
+        zone = self.site.zone_at(m.x, m.y)
+        if zone is None or self.site.zones[zone].kind != SHARED:
+            return
+        if m.goal is not None and self._mode(m) != NAV_GOAL:
+            return
+        if self.grants.force(m.name, [zone], []):
+            if m.goal is None:
+                inside = self.site.nodes_in(zone)
+                m.node = self.site.nearest_node(m.x, m.y, inside) or m.node
+            self._event("WARN", "OUTSIDE_ZONE", f"takes {zone} where it stands", m.name)
+
+    # ---- NAV_GOAL로 붙어서 멈춘 두 로봇 떼어 놓기 ----
+    def _watch_near(self, now: float) -> None:
+        p = self.params
+
+        # LOCALIZING 로봇의 자세는 묵은 값이라 뺀다
+        def roams(m) -> bool:
+            return (m.available and m.goal is not None and m.goal.kind == MOVE
+                    and self._mode(m) == NAV_GOAL and not self._localizing(m))
+
+        moving = [m for m in self._robots.values() if roams(m)]
+        seen = set()
+        for index, a in enumerate(moving):
+            for b in moving[index + 1:]:
+                spots = ((a.x, a.y), (b.x, b.y))
+                if math.dist(*spots) > p.near_m or not (roams(a) and roams(b)):
+                    continue
+                key = (a.name, b.name)
+                seen.add(key)
+                since, before = self._near.get(key, (now, spots))
+                if any(math.dist(old, new) >= p.stall_move_m
+                       for old, new in zip(before, spots, strict=True)):
+                    since, before = now, spots
+                self._near[key] = (since, before)
+                if now - since >= p.near_stuck_s:
+                    low, other = sorted((a, b), key=lambda m: (self._priority(m), m.name))
+                    self._cancel_goal(low)
+                    self._stand_aside(low, other, now)
+                    del self._near[key]
+        for key in [key for key in self._near if key not in seen]:
+            del self._near[key]
+
+    # ---- 대기 순환 찾아 한 로봇 비키게 하기 ----
+    def _watch_deadlock(self, now: float) -> frozenset:
+        watch = self._deadlock
+        rest = list(watch.due(now))
+        while rest and not watch.acted:
+            victim = choose_retreat(rest, lambda name: self._priority(self._robots[name]))
+            watch.acted = self._evade(self._robots[victim])
+            rest.remove(victim)
+        # 늘 빈 집합이다. 지운 자유바닥 교통 층은 대기 순환에 든 로봇을 돌려주어 그 tick에
+        # tick_pick이 고르지 않고 step이 걷지 않게 했다("robots of a wait cycle stand still").
+        # 구역 교통은 순환을 _evade(한 대를 주차 자리로)로만 풀고 세울 로봇을 고르지 않는다.
+        # 순환의 로봇은 구역을 잡지 못해 이미 기다리는 중이다. tick_progress의 반환값과
+        # tick_pick(stopped)는 TrafficApi의 공개 모양이라 그대로 둔다.
+        return frozenset()
+
+    # ---- 주차 지점으로 비키기 ----
+    def _evade(self, m) -> bool:
+        return self._to_parking(m, "WARN", "DEADLOCK_SEEN", f"{m.name} gives way to")
+
+    def _to_parking(self, m, level: str, code: str, why: str, clear_of=None) -> bool:
+        # step을 거치지 않는 길: LOCALIZING 로봇에는 보내지 않는다
+        if m.goal is not None or self._localizing(m):
+            return False
+        waited = self.grants.waiting().get(m.name)
+        free = [spot for spot in self.site.parking
+                if self.grants.node_holder(spot) in ("", m.name)
+                and (clear_of is None or self._gap(m, spot) < self._gap(clear_of, spot))]
+        for spot in sorted(free, key=lambda spot: (self._gap(m, spot), spot)):
+            edges = self._way(m, spot)
+            if not edges:
+                continue
+            route = Route(spot, edges)
+            if self._take(m, route) is None:
+                m.route = route
+                self._event(level, code, f"{why} {spot}", m.name)
+                self._send(m)
+                return True
+        self.grants.note_waiting(m.name, waited)
+        return False

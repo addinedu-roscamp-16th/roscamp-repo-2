@@ -1,6 +1,6 @@
-"""traffic 패키지는 orders 없이 쓸 수 있어야 한다. 레인과 로봇만 알고 바구니는 모른다.
+"""traffic 패키지는 orders 없이 쓸 수 있어야 한다. 구역과 로봇만 알고 바구니는 모른다.
 
-모듈 이름은 fleet_core 안의 점 경로다: `traffic.controller`, `orders.orchestrator`,
+모듈 이름은 fleet_core 안의 점 경로다: `traffic.modes`, `orders.orchestrator`,
 `common.commands`, `manager`.
 """
 import ast
@@ -11,23 +11,33 @@ import fleet_core
 PACKAGE = Path(fleet_core.__file__).parent
 
 
-def _package(name):
-    """패키지 자신(__init__.py)과 그 안의 모듈."""
-    return [name] + sorted(f"{name}.{p.stem}" for p in (PACKAGE / name).glob("*.py")
-                           if p.stem != "__init__")
+def _package(name, root=PACKAGE):
+    """패키지 자신과 그 아래 모든 모듈. 하위 패키지도 들어간다."""
+    found = set()
+    for path in (root / name).rglob("*.py"):
+        parts = path.relative_to(root).with_suffix("").parts
+        found.add(".".join(parts[:-1] if parts[-1] == "__init__" else parts))
+    return sorted(found)
 
 
 TRAFFIC = _package("traffic")
 ORDERS = _package("orders")
+ARM = _package("arm")
+ARM_GOAL_NAMES = {"FillCmd", "SwapCmd", "CancelCmd"}  # what only the arm side sends
 ORDER_SIDE_NAMES = {
     "OrderRecord", "FillCmd", "SwapCmd", "ReportOrderCmd", "SHIPPED", "PARTIAL", "HELD",
     "OrderOrchestrator", "FleetManager",
 }
 ORDER_SIDE_ATTRIBUTES = {"basket", "order", "orders", "placed_items", "last_order_id", "arm"}
 # traffic이 commands.py에서 가져올 수 있는 이름. 허용 목록이라 추가는 결정 사항이다.
+# 1단계에서 레인 제어기를 지워 남은 모듈은 일부만 쓴다. 나머지는 3단계 교통 층의 몫이다.
+# MoveOrderCmd와 SegmentOut은 order 모델(VDA 5050의 order: 이동 하나의 조각 목록)의 명령이다.
+# 주문(OrderRecord)과는 다른 것이라 교통 층의 어휘에 넣었다.
 TRAFFIC_VOCABULARY = {
     "CancelCmd", "DispatchFeedback", "DispatchResult", "DockCmd", "EventOut", "MoveCmd",
-    "NO_ROBOT", "ZoneView",
+    "MoveOrderCmd", "NO_ROBOT", "RetreatCmd", "RobotIsolated", "SegmentOut", "ZoneView",
+    # 막힘 처리 보완: 관제가 로봇에게 묻는 CheckClear와 그 답
+    "BLOCKED_AT", "CLEAR", "CheckClearCmd", "NO_ANSWER",
 }
 
 
@@ -50,6 +60,10 @@ def _order_side(module):
 
 def _traffic_side(module):
     return module == "traffic" or module.startswith("traffic.")
+
+
+def _arm_side(module):
+    return module == "arm" or module.startswith("arm.")
 
 
 def _tree(module):
@@ -112,8 +126,8 @@ def _closure(*modules):
 
 
 def test_the_traffic_package_is_found():
-    assert {"traffic.controller", "traffic.mission", "traffic.recovery",
-            "traffic.zones"} <= set(TRAFFIC)
+    assert {"traffic.modes", "traffic.api", "traffic.mission", "traffic.zone.controller",
+            "traffic.zone.base"} <= set(TRAFFIC)
 
 
 def test_traffic_does_not_reach_the_order_side_through_any_import():
@@ -131,7 +145,7 @@ def test_traffic_takes_only_its_own_vocabulary_from_commands():
         for node in ast.walk(_tree(module)):
             if isinstance(node, ast.ImportFrom) and (node.module or "").endswith("commands"):
                 taken.update(alias.name for alias in node.names)
-    assert taken == TRAFFIC_VOCABULARY
+    assert taken and taken <= TRAFFIC_VOCABULARY
 
 
 def test_traffic_has_no_order_or_basket_field():
@@ -145,11 +159,11 @@ def test_traffic_has_no_order_or_basket_field():
 
 
 def test_the_checks_above_can_fail():
-    """반례는 orchestrator다. 그 이름과 필드에 실제로 닿는다."""
-    assert "basket" in {n.attr for n in ast.walk(_tree("orders.orchestrator"))
-                        if isinstance(n, ast.Attribute)}
-    assert _package_imports("orders.orchestrator")[1] & ORDER_SIDE_NAMES
-    assert {"traffic.controller", "orders.orchestrator"} <= _closure("manager")
+    """반례는 FleetManager다. 주문 쪽 이름과 필드에 실제로 닿는다."""
+    assert ORDER_SIDE_ATTRIBUTES & {n.attr for n in ast.walk(_tree("manager"))
+                                    if isinstance(n, ast.Attribute)}
+    assert _package_imports("manager")[1] & ORDER_SIDE_NAMES
+    assert {"traffic.modes", "orders.orchestrator"} <= _closure("manager")
 
 
 def test_every_spelling_of_an_import_is_seen():
@@ -158,37 +172,130 @@ def test_every_spelling_of_an_import_is_seen():
          "orders.orchestrator"),
         ("from fleet_core.orders import orchestrator", "", "orders.orchestrator"),
         ("import fleet_core.orders.orchestrator", "", "orders.orchestrator"),
-        ("from ..orders.orchestrator import OrderOrchestrator", "traffic.controller",
+        ("from ..orders.orchestrator import OrderOrchestrator", "traffic.modes",
          "orders.orchestrator"),
-        ("from ..orders import orchestrator", "traffic.controller", "orders.orchestrator"),
+        ("from ..orders import orchestrator", "traffic.modes", "orders.orchestrator"),
         ("from .manager import FleetManager", "probe", "manager"),  # 최상위 모듈
         ("from . import manager", "probe", "manager"),
         ("from fleet_core import orders", "", "orders"),  # 패키지 자체
-        ("from .. import orders", "traffic.controller", "orders"),
+        ("from .. import orders", "traffic.modes", "orders"),
         ("import fleet_core.orders", "", "orders"),
     ):
         assert module in _imports_of(ast.parse(source), here)[0], source
     assert "OrderOrchestrator" in _imports_of(ast.parse(
-        "from ..orders.orchestrator import OrderOrchestrator"), "traffic.controller")[1]
+        "from ..orders.orchestrator import OrderOrchestrator"), "traffic.modes")[1]
 
 
 def test_a_package_import_counts_as_the_order_side_and_can_be_followed():
     assert _order_side("orders") and not _order_side("traffic")
     assert "orders" in _closure("orders")  # `orders.py`가 아니라 `__init__.py`를 통해 읽는다
-    assert "traffic.controller" in _imports_of(ast.parse("from . import controller"), "traffic")[0]
+    assert "traffic.modes" in _imports_of(ast.parse("from . import modes"), "traffic")[0]
 
 
 def test_orders_do_not_import_traffic():
     """둘은 FleetManager가 실어 나르는 명령으로만 대화한다."""
     assert not {m for m in _closure(*ORDERS) if _traffic_side(m)}
 
+
 def test_a_module_brings_in_the_packages_above_it():
     """서브모듈을 임포트하면 위 패키지의 __init__.py도 실행된다. 맨 위 fleet_core는 ""."""
-    assert {"traffic", ""} <= _closure("traffic.controller")
+    assert {"traffic", ""} <= _closure("traffic.modes")
     assert "" in _closure("manager")
 
 
 def test_both_sides_include_their_package_init():
     assert "traffic" in TRAFFIC and "orders" in ORDERS
-    assert _traffic_side("traffic") and _traffic_side("traffic.zones")
+    assert _traffic_side("traffic") and _traffic_side("traffic.zone.base")
     assert not _traffic_side("orders") and not _traffic_side("")
+
+
+def test_modules_in_a_subpackage_are_found(tmp_path):
+    for rel in ("traffic/__init__.py", "traffic/zones.py", "traffic/sub/__init__.py",
+                "traffic/sub/deep.py"):
+        (tmp_path / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / rel).write_text("", encoding="utf-8")
+    assert _package("traffic", tmp_path) == ["traffic", "traffic.sub", "traffic.sub.deep",
+                                             "traffic.zones"]
+
+
+# ---- the arm side: asked by the orders through FleetManager, like traffic ---------------------
+
+
+def test_the_arm_package_is_found():
+    assert {"arm", "arm.jobs"} <= set(ARM)
+
+
+def test_the_arm_reaches_neither_the_orders_nor_traffic():
+    reached = _closure(*ARM)
+    assert not {m for m in reached if _order_side(m) or _traffic_side(m)}
+
+
+def test_orders_and_traffic_do_not_import_the_arm():
+    assert not {m for m in _closure(*ORDERS, *TRAFFIC) if _arm_side(m)}
+
+
+def test_orders_send_no_arm_goal_themselves():
+    """The orders ask with ArmFillCmd and ArmSwapCmd; goals and cancels are the arm side's."""
+    for module in ORDERS:
+        assert not _package_imports(module)[1] & ARM_GOAL_NAMES, module
+    assert _package_imports("arm.jobs")[1] >= ARM_GOAL_NAMES
+
+
+# ---- 시뮬은 교통 내부를 읽지 않는다 ----
+SIM_ROOT = Path(__file__).resolve().parents[3] / "sim"
+
+
+def _sim_files():
+    return sorted(SIM_ROOT.glob("*/*/**/*.py"))
+
+
+def _inside_traffic(source):
+    """시뮬 소스가 traffic.zone 안쪽 모듈을 가져오는 줄과 교통 객체의 밑줄 속성을 읽는 줄."""
+    found = []
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.ImportFrom) and (
+                (node.module or "").startswith("fleet_core.traffic.zone")
+                or node.module == "fleet_core.traffic"
+                and any(a.name == "zone" for a in node.names)):
+            found.append(node.lineno)
+        elif isinstance(node, ast.Import) and any(
+                a.name.startswith("fleet_core.traffic.zone") for a in node.names):
+            found.append(node.lineno)
+        elif isinstance(node, ast.Attribute) and node.attr.startswith("_") and (
+                isinstance(node.value, ast.Name) and node.value.id == "traffic"
+                or isinstance(node.value, ast.Attribute) and node.value.attr == "traffic"):
+            found.append(node.lineno)
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+              and node.func.id in ("getattr", "setattr") and len(node.args) > 1
+              and isinstance(node.args[0], (ast.Name, ast.Attribute))
+              and "traffic" in ast.unparse(node.args[0])
+              and isinstance(node.args[1], ast.Constant)
+              and str(node.args[1].value).startswith("_")):
+            found.append(node.lineno)
+    return found
+
+
+def test_the_sim_files_are_found():
+    assert any(p.name == "planner.py" for p in _sim_files())
+
+
+def test_the_sim_does_not_reach_into_the_traffic_internals():
+    bad = {f"{p.relative_to(SIM_ROOT)}:{n}" for p in _sim_files()
+           for n in _inside_traffic(p.read_text(encoding="utf-8"))}
+    assert not bad, sorted(bad)
+
+
+def test_the_sim_check_can_fail():
+    assert _inside_traffic("from fleet_core.traffic.zone.routes import x\n") == [1]
+    assert _inside_traffic("a = self.world.traffic._blocked\n") == [1]
+    assert _inside_traffic("a = getattr(traffic, '_marks', {})\n") == [1]
+    assert _inside_traffic("from fleet_core.traffic import zone\n") == [1]
+    assert _inside_traffic("from fleet_core.traffic import zone as z\n") == [1]
+    assert not _inside_traffic("from fleet_core.traffic import api\n")
+    assert not _inside_traffic("from fleet_core.traffic.api import keys_at\n")
+
+
+def test_common_stands_alone_below_the_other_packages():
+    """common은 맨 아래 층이다: fleet_core의 다른 패키지를 가져오지 않는다."""
+    reached = _closure(*_package("common"))
+    assert {m for m in reached if m and m.split(".")[0] != "common"} == set()
