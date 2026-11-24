@@ -1,9 +1,4 @@
-"""하네스의 ZoneTraffic.tick과 운영 FleetManager.tick이 교통 결과를 같게 내는지 본다.
-
-하네스의 교통 전용 시나리오에는 주문 층과 팔의 일이 없으므로 두 순서의 차이(_pump로 같은 틱
-안에 주문 층과 팔이 교통에 답하는 것)가 드러날 길이 없다. 그 전제가 깨지면 이 시험이 먼저 알려 준다.
-아래쪽 시험은 운영 순서에서 입력 경계와 틱 경계가 실제로 어디인지 매니저 입력 함수를 거쳐 고정한다.
-"""
+"""하네스의 ZoneTraffic.tick과 운영 FleetManager.tick이 교통 결과를 같게 내는지 본다. 아래쪽 시험은 운영 순서의 입력 경계와 틱 경계를 매니저 입력 함수로 고정한다."""
 from __future__ import annotations
 
 import os
@@ -151,7 +146,7 @@ def _items(world: Harness, kind) -> list:
 
 def test_in_production_an_arm_timeout_is_an_arm_fault_inside_the_same_tick():
     world = _filling_world()
-    limit = world.params.fill_timeout_s + world.params.arm_cancel_wait_s + 120.0
+    limit = world.params.fill_timeout_s + world.params.robot_timeout_settle_s + 120.0
     # 하네스는 팔에 답하지 않으므로 채우기는 끝내 시간이 다 된다
     assert world.run_until(lambda: _seen(world, ArmFault), limit), "\n".join(world.log[-20:])
     [(_, asked_n, asked)] = _items(world, ArmFillCmd)

@@ -1,8 +1,6 @@
 """ReportTripCmd: 주문 코어가 운반 건의 진행 단계를 노드에 알리는 명령.
 
-기준은 팀 레포 docs/design 브랜치 `주문_흐름_1차_인터페이스.md` 4.4 ①이다. 끝 상태(SHIPPED,
-PARTIAL, CANCELED, HELD)는 지금처럼 ReportOrderCmd가 맡고, 번호와 시각은 노드 한 곳에서
-붙인다(IR-22). 주문 코어가 이 명령을 언제 내는지는 통합 관제의 몫이다(orders/).
+끝 상태는 ReportOrderCmd가 맡고, 번호와 시각은 노드에서 붙인다(IR-22).
 """
 import dataclasses
 import json
