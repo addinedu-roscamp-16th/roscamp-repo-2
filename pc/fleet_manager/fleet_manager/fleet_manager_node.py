@@ -45,7 +45,7 @@ from std_msgs.msg import Header
 
 from fleet_manager import adapters
 from fleet_manager.goal_tracker import GoalTracker, ReportOutbox
-from fleet_manager.order_goals import FeedbackFilter, apply_overrides
+from fleet_manager.order_goals import apply_overrides
 
 
 # ---- 강제 출고 인터페이스: 주문 담당이 정의한다 ----
@@ -98,7 +98,6 @@ class FleetManagerNode(Node):
 
         self._goals = GoalTracker()
         self._reports = ReportOutbox()
-        self._order_feedback = FeedbackFilter()
         self._reached = set()
         self._last_zones = None
         self._last_assignments = None
@@ -324,9 +323,7 @@ class FleetManagerNode(Node):
 
     # ---- 액션 goal 보내기와 feedback, 수락, 결과 받기 ----
     def _on_move_feedback(self, key, msg) -> None:
-        values = adapters.move_feedback(msg.feedback)
-        if self._order_feedback.changed(key, values):
-            self.core.on_move_feedback(key[0], key[1], *values)
+        self.core.on_move_feedback(key[0], key[1], *adapters.move_feedback(msg.feedback))
 
     def _send(self, client, goal, key, on_result, on_rejected, feedback=None) -> None:
         if not client.server_is_ready():
@@ -357,7 +354,6 @@ class FleetManagerNode(Node):
             partial(self._goal_result, key, on_result, on_rejected))
 
     def _goal_result(self, key, on_result, on_rejected, future) -> None:
-        self._order_feedback.forget(key)
         try:
             result = adapters.goal_result(future.result())
         except Exception as exc:

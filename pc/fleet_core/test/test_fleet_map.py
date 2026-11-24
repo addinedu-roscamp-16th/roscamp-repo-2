@@ -305,6 +305,64 @@ def test_bounds_and_shelves_are_kept_for_the_world_builders():
     assert site.name == "small"
 
 
+def test_sim_shelves_default_to_the_shelves():
+    assert build().sim_shelves == ((0.5, 0.75, 1.5, 0.8),)
+
+
+def test_sim_shelves_change_only_the_sim_copy():
+    site = build(sim_shelves=[[0.5, 0.75, 1.5, 0.79]])
+    assert site.sim_shelves == ((0.5, 0.75, 1.5, 0.79),)
+    assert site.shelves == ((0.5, 0.75, 1.5, 0.8),)
+
+
+@pytest.mark.parametrize("raw", [[], [[0.5, 0.75, 1.5, 0.79], [0.1, 0.1, 0.2, 0.2]],
+                                 [[0.5, 0.8, 1.5, 0.75]], 1, "0.5 0.75 1.5 0.79",
+                                 {"a": [0.5, 0.75, 1.5, 0.79]}])
+def test_sim_shelves_need_one_rectangle_per_shelf(raw):
+    with pytest.raises(FleetMapError, match="sim shel"):
+        build(sim_shelves=raw)
+
+
+def test_sim_shelves_written_without_a_value_are_refused():
+    # `sim_shelves:`만 쓰고 값을 빠뜨리면 YAML은 null이다. 없는 키처럼 실측 진열대로 넘어가지 않는다
+    data = copy.deepcopy(SMALL)
+    data["sim_shelves"] = None
+    with pytest.raises(FleetMapError, match="sim shel"):
+        FleetMap(data)
+
+
+SECOND_SHELF = [0.8, 0.3, 1.2, 0.35]  # 고정 경로가 없는 마당 가운데
+
+
+def test_sim_shelves_in_another_order_are_refused():
+    shelves = [[0.5, 0.75, 1.5, 0.8], SECOND_SHELF]
+    assert build(shelves=shelves, sim_shelves=shelves).sim_shelves == tuple(map(tuple, shelves))
+    with pytest.raises(FleetMapError, match="sim shelves: rectangle 1"):
+        build(shelves=shelves, sim_shelves=shelves[::-1])
+
+
+def test_a_sim_shelf_must_overlap_its_own_shelf():
+    with pytest.raises(FleetMapError, match="sim shelves: rectangle 1"):
+        build(sim_shelves=[SECOND_SHELF])
+
+
+def test_sim_shelves_swapped_between_overlapping_shelves_are_refused():
+    # 진열대끼리 겹쳐도 순서가 바뀐 목록을 거른다: 자기 짝과 가장 많이 겹쳐야 한다
+    shelves = [[0.5, 0.75, 1.5, 0.8], [0.7, 0.3, 1.1, 0.35], [0.9, 0.3, 1.3, 0.35]]
+    assert build(shelves=shelves, sim_shelves=shelves).sim_shelves == tuple(map(tuple, shelves))
+    swapped = [shelves[0], shelves[2], shelves[1]]
+    with pytest.raises(FleetMapError, match="sim shelves: rectangle 2"):
+        build(shelves=shelves, sim_shelves=swapped)
+
+
+def test_a_sim_shelf_overlapping_two_shelves_equally_is_refused():
+    # 두 진열대와 같은 넓이로 겹치면 짝을 가릴 수 없다: 순서가 바뀌어도 모르니 거절한다
+    shelves = [[0.5, 0.75, 1.5, 0.8], [0.7, 0.3, 1.1, 0.35], [0.9, 0.3, 1.3, 0.35]]
+    both = [0.95, 0.3, 1.05, 0.35]  # 둘이 겹친 띠(0.9~1.1) 안
+    with pytest.raises(FleetMapError, match="sim shelves: rectangle 2"):
+        build(shelves=shelves, sim_shelves=[shelves[0], both, shelves[2]])
+
+
 # ---- 자리 묻기 ------------------------------------------------------------------------------
 
 

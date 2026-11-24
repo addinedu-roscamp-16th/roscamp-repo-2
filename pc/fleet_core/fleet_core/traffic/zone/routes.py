@@ -9,6 +9,8 @@ from fleet_core.common.commands import MoveCmd, RetreatCmd
 from fleet_core.fleet_map import FOLLOW_PATH, NAV_GOAL, RETREAT, SHARED, Edge, distance
 
 ON_NODE_M = 0.03
+# Nav2 goal 끝 보정의 뜻: 다음 조각으로 넘어갈 때까지, 끝 노드에 닿을 때까지, 끝에 설 때까지
+PASS, ARRIVE, STOP = "pass", "arrive", "stop"
 
 
 # ---- edge 목록과 진행 위치를 담은 route ----
@@ -83,16 +85,21 @@ def _pieces(edge) -> list:
             if math.dist(a, b) > 0.0]
 
 
-def along(edge, x: float, y: float) -> float:
-    best, best_gap, start = 0.0, math.inf, 0.0
-    for (ax, ay), (bx, by) in _pieces(edge):
+def _nearest(pieces, x: float, y: float) -> tuple[int, float]:
+    best, best_gap, start = (0, 0.0), math.inf, 0.0
+    for index, ((ax, ay), (bx, by)) in enumerate(pieces):
         span = math.dist((ax, ay), (bx, by))
-        t = ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / (span * span)
+        t = ((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / (span * span) if span else 0.0
         t = min(max(t, 0.0), 1.0)
         gap = math.hypot(x - ax - t * (bx - ax), y - ay - t * (by - ay))
         if gap < best_gap - 1e-12:
-            best, best_gap = start + t * span, gap
+            best, best_gap = (index, start + t * span), gap
         start += span
+    return best
+
+
+def along(edge, x: float, y: float) -> float:
+    _, best = _nearest(_pieces(edge), x, y)
     return min(max(best, 0.0), edge.length)
 
 
@@ -172,20 +179,63 @@ def back_edge(site, x: float, y: float, node: str, zones, via: str = "", bends=(
 
 
 # ---- 속도와 남은 주행 시간 계산 ----
+# 길 비용(route 고르기)용 속도. 비율을 곱하지 않는다
 def speed(params, mode: str) -> float:
     if mode == NAV_GOAL:
         return params.nav_speed_mps
     return params.follow_speed_mps if mode == FOLLOW_PATH else params.retreat_speed_mps
 
 
+# ETA(남은 시간)용 속도. Nav2 goal만 nav_eta_speed_ratio를 곱한다
+def eta_speed(params, mode: str) -> float:
+    if mode == NAV_GOAL:
+        return params.nav_speed_mps * params.nav_eta_speed_ratio
+    return speed(params, mode)
+
+
 def travel_s(params, edges) -> float:
-    return sum(edge.length / speed(params, edge.mode) for edge in edges)
+    return sum(edge.length / eta_speed(params, edge.mode) for edge in edges)
+
+
+def nav_stretch(edges) -> int:
+    end = 1
+    while end < len(edges) and edges[end].mode == NAV_GOAL and edges[end].a == edges[end - 1].b:
+        end += 1
+    return end
 
 
 def left_s(params, edges, x: float, y: float) -> float:
     if not edges:
         return 0.0
     first = edges[0]
-    here = (math.dist((x, y), first.points[-1]) if first.mode == NAV_GOAL
-            else first.length - along(first, x, y))
-    return here / speed(params, first.mode) + travel_s(params, edges[1:])
+    if first.mode != NAV_GOAL:
+        here = first.length - along(first, x, y)
+        return here / eta_speed(params, first.mode) + travel_s(params, edges[1:])
+    end = nav_stretch(edges)
+    pieces = [(edge.points[0], edge.points[-1]) for edge in edges[:end]]
+    index, _ = _nearest(pieces, x, y)
+    here = math.dist((x, y), pieces[index][1])
+    return here / eta_speed(params, NAV_GOAL) + travel_s(params, edges[index + 1:])
+
+
+# ---- Nav2 goal 끝: 다음 조각으로 넘어가는 거리, 서서 끝 방향으로 도는 시간 ----
+def nav_end_s(params, site, edges, end: int, x: float, y: float, yaw: float,
+              ending: str = PASS) -> float:
+    if ending == ARRIVE:
+        return 0.0
+    after = edges[end] if end < len(edges) else None
+    if ending == PASS and after is not None and after.mode in (NAV_GOAL, FOLLOW_PATH):
+        return -params.nav_pass_m / eta_speed(params, NAV_GOAL)
+    if params.nav_turn_rps <= 0.0:
+        return 0.0
+    node = site.nodes[edges[end - 1].b]
+    approach = heading(edges[end - 1].points[0], (node.x, node.y))
+    if node.yaw is not None:
+        end_yaw = node.yaw
+    elif after is not None and after.mode == FOLLOW_PATH:
+        end_yaw = heading(*_pieces(after)[0])
+    else:
+        end_yaw = approach
+    at_end = math.dist((x, y), (node.x, node.y)) <= params.nav_goal_tolerance_m
+    facing = yaw if at_end else approach
+    return abs(math.remainder(end_yaw - facing, math.tau)) / params.nav_turn_rps
