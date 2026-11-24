@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import math
 
+from fleet_core.common.commands import CancelCmd
 from fleet_core.fleet_map import NAV_GOAL
 from fleet_core.traffic.mission import (
     AT_STATION,
     DOCK,
+    GOAL_RESULT_LOST,
     HEARTBEAT_LOST,
     LOCALIZING,
     MOVE,
@@ -14,6 +16,9 @@ from fleet_core.traffic.mission import (
     NOT_AT_TARGET,
     PATH_NOT_CONNECTED,
     RETREAT,
+    ROBOT_DOCKED,
+    ROBOT_IDLE,
+    ROBOT_TIMEOUT,
 )
 
 from .robots import ORDER, Goal
@@ -33,8 +38,9 @@ class Results:
         if m is not None and m.move_order is not None and self._old_goal_result(m, goal_id, reason):
             return
         m = self._active(robot, goal_id, MOVE)
-        if m is None:
+        if m is None or self._past_unknown(m):
             return
+        m.result_lost_at = None  # 늦게 온 결과가 결과 모름을 정한다
         if m.move_order is not None and self._order_result(m, reason, last_done_seq):
             return
         if success:
@@ -45,8 +51,9 @@ class Results:
     # ---- 물러나기 결과와 도킹 결과 ----
     def on_retreat_result(self, robot, goal_id, success, reason="") -> None:
         m = self._active(robot, goal_id, RETREAT)
-        if m is None:
+        if m is None or self._past_unknown(m):
             return
+        m.result_lost_at = None
         if success:
             m.avoid.behind_since = None
             self._succeeded(m)
@@ -56,7 +63,7 @@ class Results:
     def on_dock_result(self, robot, goal_id, success, error_x_cm=0.0, error_y_cm=0.0,
                        error_yaw_deg=0.0) -> None:
         m = self._active(robot, goal_id, DOCK)
-        if m is None:
+        if m is None or self._past_unknown(m):
             return
         self._clear_goal(m)
         if not success:
@@ -92,9 +99,49 @@ class Results:
                         m.name)
 
     def on_goal_lost(self, robot, goal_id) -> None:
+        mo = getattr(self._robots.get(robot), "move_order", None)
+        if mo is not None and mo.before is not None and mo.before[0] == goal_id:
+            mo.before_lost = goal_id  # 갱신이 실패해 되살리면 결과 모름으로 둔다
+            return
         m = self._active(robot, goal_id, MOVE, RETREAT, DOCK)
-        if m is not None and not self._update_unclear(m, "the goal was lost"):
-            self._forget_goal(m)
+        if m is None or self._update_unclear(m, "the goal was lost"):
+            return
+        if m.result_lost_at is None:
+            self._lose_result(m, goal_id)
+
+    def _lose_result(self, m, goal_id) -> None:
+        # IR-62: 실패가 아니라 결과 모름. goal과 구역을 쥔 채 상태 보고로 정한다
+        m.result_lost_at = self._clock()
+        settle = self.params.robot_timeout_settle_s
+        self._event("WARN", ROBOT_TIMEOUT,
+                    f"{m.goal.kind} goal {goal_id} lost its result: result unknown, holds its "
+                    f"zones, settles from the state report within {settle:.0f} s", m.name)
+
+    # ---- 결과 모름 정하기: 끝에서 IDLE이면 완료, 다른 곳 IDLE이면 실패, 도킹은 다시, 시간이 지나면 격리 ----
+    def _settle_lost(self, m, now: float, state: str = "") -> None:
+        """state는 지금 들은 상태 보고. 비면 기한만 본다."""
+        if now - m.result_lost_at >= self.params.robot_timeout_settle_s:
+            self._fail(m, ROBOT_TIMEOUT)
+            self._cancel_goal(m)  # 이미 고장이던 로봇은 _fail이 취소하지 않는다
+            return
+        dock = m.goal.kind == DOCK
+        idle = state == ROBOT_IDLE or (dock and state == ROBOT_DOCKED)
+        if idle:
+            self._out.append(CancelCmd(m.name, m.goal.id))  # 노드가 쥔 goal을 놓게 한다
+        if idle and dock:
+            # 보고에는 도킹 오차가 없고 IDLE은 성공·실패를 가르지 못해 다시 도킹해 잰다
+            self._clear_goal(m)
+            self._dock_failed(m, GOAL_RESULT_LOST)
+        elif idle:
+            self._move_failed(m, GOAL_RESULT_LOST)
+
+    # ---- 기다림이 끝난 결과 모름이면 먼저 정한다. 늦게 온 결과는 버린다 ----
+    def _past_unknown(self, m) -> bool:
+        now = self._clock()
+        if m.result_lost_at is None or now - m.result_lost_at < self.params.robot_timeout_settle_s:
+            return False
+        self._settle_lost(m, now)
+        return True
 
     # ---- 도착 확인과 구간 완료 ----
     def _succeeded(self, m) -> None:

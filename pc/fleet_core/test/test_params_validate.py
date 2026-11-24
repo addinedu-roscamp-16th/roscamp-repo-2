@@ -307,3 +307,12 @@ def test_the_cancel_warning_waits_as_long_as_the_core_waits_for_an_arm():
     params = load_params()
     shortest = params.cancel_warn_after * params.cancel_retry_s * (1.0 - RETRY_JITTER)
     assert shortest >= params.arm_cancel_wait_s
+    # 시간 초과한 팔은 결과 모름으로 robot_timeout_settle_s까지 기다린다(IR-62)
+    assert shortest >= params.robot_timeout_settle_s
+
+
+def test_the_settle_time_of_a_timeout_is_no_shorter_than_a_plain_cancel_wait():
+    """IR-62의 결과 모름 시간은 정지 취소를 기다리는 arm_cancel_wait_s보다 짧지 않다."""
+    params = load_params()
+    assert params.robot_timeout_settle_s == 30.0
+    assert params.robot_timeout_settle_s >= params.arm_cancel_wait_s

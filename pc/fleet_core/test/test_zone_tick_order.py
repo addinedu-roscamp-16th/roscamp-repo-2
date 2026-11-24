@@ -151,7 +151,7 @@ def _items(world: Harness, kind) -> list:
 
 def test_in_production_an_arm_timeout_is_an_arm_fault_inside_the_same_tick():
     world = _filling_world()
-    limit = world.params.fill_timeout_s + world.params.arm_cancel_wait_s + 120.0
+    limit = world.params.fill_timeout_s + world.params.robot_timeout_settle_s + 120.0
     # 하네스는 팔에 답하지 않으므로 채우기는 끝내 시간이 다 된다
     assert world.run_until(lambda: _seen(world, ArmFault), limit), "\n".join(world.log[-20:])
     [(_, asked_n, asked)] = _items(world, ArmFillCmd)

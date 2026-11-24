@@ -222,6 +222,8 @@ class FleetManagerNode(Node):
 
     def _retry_cancels(self, now: float) -> None:
         params = self.core.params
+        # 코어가 취소하지 않고 정한 결과 잃은 goal의 handle은 정하는 시간의 두 배 뒤 놓는다
+        self._goals.drop_stale_lost(now, 2 * params.robot_timeout_settle_s)
         for server, goal_id in self._goals.retry_cancels(now, params.cancel_retry_s,
                                                          params.cancel_warn_after):
             waited = params.cancel_warn_after * params.cancel_retry_s
@@ -389,6 +391,11 @@ class FleetManagerNode(Node):
             self.get_logger().error(f"goal {key} lost its result: {exc}")
             if on_rejected == self._robot_rejected and self._goals.canceling(key):
                 self._goals.lost(key)
+                return
+            if on_rejected == self._robot_rejected:
+                # 받아들인 로봇 goal의 결과를 잃음은 거절이 아니라 결과 모름(IR-62). 취소할 handle은 쥔다
+                self._goals.result_lost(key)
+                self.core.on_goal_lost(key[0], key[1])
                 return
             self._goals.finished(key)
             on_rejected(key)
