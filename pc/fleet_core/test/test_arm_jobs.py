@@ -1,4 +1,4 @@
-"""ArmJobs alone: what it sends to the station servers and what it reports back."""
+"""ArmJobs 단독: 작업셀 서버에 보내는 것과 되돌려 보고하는 것."""
 import pytest
 from core_helpers import cmds, codes
 from fleet_core.arm.jobs import ArmJobs
@@ -232,7 +232,7 @@ def test_the_arm_ignores_a_robot_it_does_not_know():
     assert jobs.take_output() == [] and jobs.attempts("ghost") == 0
 
 
-# ---- a swap that is running: what comes out, in order --------------------------------------
+# ---- 진행 중인 바구니 바꾸기: 나오는 것과 순서 ----
 
 
 def test_a_swap_that_took_the_basket_and_failed_passes_the_take_on_before_the_retry_warning():

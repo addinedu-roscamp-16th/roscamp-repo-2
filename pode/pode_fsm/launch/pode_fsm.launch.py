@@ -1,13 +1,8 @@
-"""Pode 한 대의 FSM. 실물에서는 Pode Pi에서, 시뮬에서는 Gazebo 시뮬레이션 launch가 띄운다.
+"""Pode 한 대의 FSM을 띄운다. namespace가 robot_id가 된다.
 
   ros2 launch pode_fsm pode_fsm.launch.py namespace:=pode1
 
-namespace가 robot_id가 된다. TF는 Nav2와 같이 namespace의 tf, tf_static을 쓴다.
-
-동작 없음(설계 4.5): no_motion:=true면 Nav2 없이 혼자 돈다. 목표는 정해진 시간 뒤 성공하고
-자세는 목표로 옮긴다. 시작 자세는 initial_x/y/yaw.
-
-  ros2 launch pode_fsm pode_fsm.launch.py namespace:=pode1 no_motion:=true
+no_motion:=true면 Nav2 없이 혼자 돌고 목표는 정해진 시간 뒤 성공한다. 시작 자세는 initial_x/y/yaw.
 """
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument

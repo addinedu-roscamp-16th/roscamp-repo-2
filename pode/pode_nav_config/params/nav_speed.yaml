@@ -1,4 +1,2 @@
-# Pode 주행 최고 속도의 단일 출처(m/s, 사용자 결정 2026-11-22: 모두 0.12).
-# 이 값만 바꾼다. 따르는 곳: 가짜 Pode(sim/fake_robots/fake_robots/nav_speed.py),
-# nav2_params.yaml·avoidance.yaml의 desired_linear_vel, 실물은 tools/real_pode/make_params.py --speed
+# Pode 주행 최고 속도의 단일 출처(m/s). 이 값만 바꾼다.
 nav_speed_mps: 0.12

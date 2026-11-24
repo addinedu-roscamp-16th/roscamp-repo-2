@@ -38,11 +38,7 @@ def test_a_robot_reporting_from_a_taken_node_is_refused_once_and_placed_where_it
 
 
 def beside_a_taken_node(gap_m: float, hold_m: float = 0.05):
-    """pode1이 대기 자리 W_Q를 쥐었고, pode2의 첫 보고는 W_Q에서 남쪽으로 gap_m이다.
-
-    남쪽이면 W_Q가 가장 가까운 지점이다(N_W와 P-1은 0.25 m 넘게 떨어진다). pode1은 W_Q에서
-    북쪽으로 hold_m에 서 있다.
-    """
+    """pode1이 대기 자리 W_Q를 쥐고, pode2의 첫 보고는 W_Q에서 남쪽으로 gap_m이다."""
     world = Harness(starts={"pode1": "W_Q", "pode2": "P-2", "pode3": "P-3"})
     x, y = world.site.node_pose("W_Q")[:2]
     world.bots["pode1"].y = y + hold_m
@@ -53,9 +49,7 @@ def beside_a_taken_node(gap_m: float, hold_m: float = 0.05):
 
 
 def test_a_robot_beside_a_taken_node_in_the_yard_is_placed_in_the_yard():
-    """재시작 시험에서 나왔다: 새 관제가 받은 첫 보고 하나가 W_Q에서 0.15 m 안이었고(실제 약
-    0.2 m), 그 자리는 먼저 오른 로봇이 쥐고 있었다. 지점에는 한 대만 서지만 그 옆의 넓은 구역에는
-    설 수 있다."""
+    """첫 보고 하나가 W_Q에서 0.15 m 안이어도 그 자리를 먼저 오른 로봇이 쥐고 있으면 옆 넓은 구역에 올린다."""
     world = beside_a_taken_node(0.13)
     view = world.view("pode2")
     assert view["on_map"] and "HALL" in view["held"] and "W_Q" not in view["nodes"]
@@ -83,8 +77,7 @@ def test_two_robots_reporting_the_same_spot_beside_a_node_are_still_a_conflict()
 
 
 def test_a_robot_beside_a_taken_node_is_not_put_on_a_free_node_of_another_zone():
-    """N_W 옆인데 급행 입구 X_W도 0.15 m 안인 자리다. 선 곳은 마당이므로 마당을 쥔다: X_W에
-    올리면 갈림목만 쥐고, 실제로 서 있는 마당은 쥐지 않는다."""
+    """N_W 옆이고 X_W도 0.15 m 안인 자리는 선 곳이 마당이므로 마당을 쥔다."""
     world = Harness(starts={"pode1": "N_W", "pode2": "P-2", "pode3": "P-3"})
     x, y = world.site.node_pose("N_W")[:2]
     world.bots["pode1"].y = y - 0.05

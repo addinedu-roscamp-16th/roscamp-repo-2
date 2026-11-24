@@ -1,4 +1,4 @@
-"""래퍼의 goal 관리. 순수 파이썬이라 ROS 없이도 돈다."""
+"""래퍼의 goal 관리 시험(ROS 없이 돈다)."""
 from fleet_manager.goal_tracker import GoalTracker, ReportOutbox
 
 RETRY_S = 1.0
@@ -73,7 +73,7 @@ def test_a_goal_is_canceling_from_the_cancel_until_its_end():
 
 
 def test_a_lost_cancel_is_warned_about_once_and_then_dropped():
-    """결과를 잃은 취소는 결과가 다시 오지 않는다. 경고까지만 다시 보내고 그만둔다."""
+    """결과를 잃은 취소는 경고까지만 다시 보내고 그만둔다."""
     goals, handle = running()
     goals.cancel("k", 0.0)
     goals.lost("k")
@@ -84,7 +84,7 @@ def test_a_lost_cancel_is_warned_about_once_and_then_dropped():
 
 
 def test_a_dropped_lost_cancel_is_handed_out_once_so_the_core_can_hear_of_it():
-    """그만둔 취소는 한 번 돌려준다. 노드가 코어에 on_goal_lost로 알린다."""
+    """그만둔 취소는 한 번 돌려주고 노드가 코어에 알린다."""
     goals, handle = running()
     goals.cancel("k", 0.0)
     goals.lost("k")
