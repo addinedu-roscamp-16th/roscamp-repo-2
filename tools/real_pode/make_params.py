@@ -21,7 +21,7 @@ from pathlib import Path
 import yaml
 
 HERE = Path(__file__).resolve().parent
-MAX_SPEED = 0.25  # 저장소 값
+MAX_SPEED = 0.25  # 속도 상한
 NAV2_NAME = "nav2_params.yaml"
 AVOID_NAME = "avoidance.yaml"
 NAV2_REL = Path("pode") / "pode_nav_config" / "params" / NAV2_NAME
@@ -60,7 +60,7 @@ def _text(value: float) -> str:
 def replace_values(text: str, targets, value, note=None) -> str:
     """targets 경로의 스칼라 값 줄만 바꾼다. 경로마다 정확히 한 번 바뀌어야 한다."""
     if note is None:
-        note = f"make_params.py --speed (저장소 {MAX_SPEED})"
+        note = f"make_params.py --speed (상한 {MAX_SPEED})"
     shown = _text(value) if isinstance(value, float) else str(value).lower()
     lines = text.splitlines(keepends=True)
     stack = []  # (들여쓰기, 키)
