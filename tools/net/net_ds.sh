@@ -7,7 +7,8 @@
 #   SUPER=1 source net_ds.sh                                  ros2 명령 · RViz 터미널 (앞의 값과 같이 붙여도 됨)
 #
 # 값은 같은 줄에서 source 앞에 붙인다. export하면 셸에 남아 다음 source에도 적용된다.
-# 도메인이 6이 아닌데 FLEET_LOCAL=1도 FLEET_DS도 없으면, 또는 FLEET_DS가 빈 값이면 실패한다(설정 안 바꿈).
+# 도메인이 6이 아닌데 FLEET_LOCAL=1도 FLEET_DS도 없으면, FLEET_DS가 빈 값이면, 도메인이 6이 아닌데
+# FLEET_DS에 실물 망 서버가 있으면 실패한다(설정 안 바꿈. 이전 값이 남으므로 source … && ros2 launch …로 쓴다).
 
 # ---- 실물 망 서버 (순서 = 서버 번호. 모든 장치가 같아야 함, 여기만 고친다) ----
 DS_FLEET=192.168.0.252:11811   # 0번: fleet(관제) PC
@@ -23,6 +24,9 @@ if [ "${FLEET_LOCAL:-0}" = 1 ]; then
   fi
 elif [ "${FLEET_DS+set}" = set ] && [ -z "$FLEET_DS" ]; then
   echo "net_ds.sh: FLEET_DS가 빈 값입니다. 시험용 서버 목록을 따옴표로 넘기세요 (설정 안 바꿈)" >&2
+  unset _nd_dom DS_FLEET DS_CENTRAL; return 1
+elif [ "$_nd_dom" != 6 ] && printf '%s' "${FLEET_DS:-}" | grep -q '192\.168\.0\.252:11811'; then
+  echo "net_ds.sh: 도메인 $_nd_dom 인데 FLEET_DS에 실물 망 서버(192.168.0.252:11811)가 있습니다. 도메인이 달라도 실물 망과 섞입니다 (설정 안 바꿈)" >&2
   unset _nd_dom DS_FLEET DS_CENTRAL; return 1
 elif [ "$_nd_dom" != 6 ] && [ -z "${FLEET_DS:-}" ]; then
   echo "net_ds.sh: 도메인 $_nd_dom 인데 서버 목록이 없습니다. 운영 서버에 붙으면 도메인이 달라도 실물 망과 섞입니다." >&2
@@ -43,7 +47,7 @@ else
   export ROS_DISCOVERY_SERVER=${FLEET_DS:-$DS_FLEET${DS_CENTRAL:+;$DS_CENTRAL}}
   if [ "${SUPER:-0}" = 1 ]; then export ROS_SUPER_CLIENT=TRUE; fi
 fi
-if [ -n "${FASTRTPS_DEFAULT_PROFILES_FILE:-}${FASTDDS_DEFAULT_PROFILES_FILE:-}" ]; then
-  echo "net_ds.sh: Fast DDS XML 설정 변수가 있습니다. 디스커버리 설정을 덮을 수 있습니다" >&2
+if [ -n "${FASTRTPS_DEFAULT_PROFILES_FILE:-}${FASTDDS_ENVIRONMENT_FILE:-}${FASTDDS_DEFAULT_PROFILES_FILE:-}" ]; then
+  echo "net_ds.sh: Fast DDS 설정 변수(FASTRTPS_DEFAULT_PROFILES_FILE · FASTDDS_ENVIRONMENT_FILE)가 있습니다. 디스커버리 설정을 덮을 수 있습니다" >&2
 fi
 unset DS_FLEET DS_CENTRAL
