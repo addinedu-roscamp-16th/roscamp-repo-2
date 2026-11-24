@@ -28,6 +28,9 @@ AVOIDANCE_FILE = PKG.parent / "pode_avoidance" / "params" / "avoidance.yaml"
 AVOIDANCE = yaml.safe_load(AVOIDANCE_FILE.read_text(encoding="utf-8"))
 # 로봇이 받는 설정: 주행 담당 파일에 회피 담당 파일을 넣은 것(nav2.launch.py가 하는 그대로)
 PARAMS = owners.with_avoidance(copy.deepcopy(USER), AVOIDANCE)
+# 주행 최고 속도의 단일 출처
+NAV_SPEED = yaml.safe_load(
+    (PKG / "params" / "nav_speed.yaml").read_text(encoding="utf-8"))["nav_speed_mps"]
 BT_FILE = PKG / "bt" / "navigate_to_pose_w_replanning_and_recovery_goal.xml"
 BT = ET.parse(BT_FILE)
 # Nav2 Jazzy's own tree, the original of BT_FILE (only there when ROS 2 Jazzy is installed)
@@ -51,7 +54,7 @@ def test_controller_uses_rpp_with_the_agreed_start_values():
     assert rpp["use_rotate_to_heading"] is True and rpp["allow_reversing"] is False
     assert (rpp["lookahead_dist"], rpp["min_lookahead_dist"], rpp["max_lookahead_dist"]) == (
         0.10, 0.10, 0.25)
-    assert rpp["desired_linear_vel"] == 0.25
+    assert rpp["desired_linear_vel"] == NAV_SPEED
     assert rpp["use_collision_detection"] is True
     assert rpp["max_allowed_time_to_collision_up_to_carrot"] == 0.6
 
@@ -667,3 +670,13 @@ def test_recovery_clear_nodes_have_their_own_longer_server_timeout():
     for node in clears:
         assert int(node.get("server_timeout", "0")) >= 500, node.get("name")
     assert params("bt_navigator")["default_server_timeout"] == 20
+
+
+def test_the_nav2_and_avoidance_speeds_follow_the_one_source():
+    c = params("controller_server")
+    copies = {
+        "nav2 FollowPath": c["FollowPath"]["desired_linear_vel"],
+        "nav2 FollowPathThrough": c["FollowPathThrough"]["desired_linear_vel"],
+        "avoidance FollowPathGoal": AVOIDANCE["follow_path_goal"]["desired_linear_vel"],
+    }
+    assert {name: value for name, value in copies.items() if value != NAV_SPEED} == {}
