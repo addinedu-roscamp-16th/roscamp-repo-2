@@ -1,6 +1,6 @@
 # ROS 2 QoS 호환과 통신 안내
 
-- 버전 v2.0 (2026-11-24) · 대상: ROS 2를 처음 쓰는 개발자 · ROS 2 Jazzy, rclpy 기준 (프로젝트는 Jazzy, IR-80. Humble은 다른 곳만 표시)
+- 버전 v2.1 (2026-11-24) · 대상: ROS 2를 처음 쓰는 개발자 · ROS 2 Jazzy, rclpy 기준 (프로젝트는 Jazzy, IR-80. Humble은 다른 곳만 표시)
 - **원본은 이 파일입니다.** Confluence "ROS2 QoS 호환과 통신 안내"(https://iphonic.atlassian.net/wiki/x/EwBV)는 이 파일을 옮긴 것입니다. 고칠 때는 이 파일을 고치고 맨 아래 변경 이력에 적은 뒤 Confluence에 다시 옮깁니다.
 - 이 문서는 ROS 2 통신의 개념과 사례를 설명하는 **해설서**입니다. 우리 프로젝트의 규칙은 [통신 규칙](통신_규칙.md)(`IR-nn`)이 정하고, 이름 · 타입 · QoS의 원본은 `interfaces/fleet_interfaces/contract.yaml`입니다. **두 문서가 다르면 통신 규칙을 따릅니다.**
 - v2.0부터 본문의 바른 예 · 기억할 규칙을 통신 규칙에 맞췄습니다. 일반론과 프로젝트 방식이 다른 곳에는 "이 프로젝트에서는"을 적었습니다.
@@ -642,17 +642,19 @@ ros2 run camera_pkg camera_node   # 640x480 원본 이미지, 30 Hz를 Wi-Fi로 
 #### ✅ 바른 예 (이 프로젝트)
 
 ```bash
-# 1) 로봇 네트워크 (운영): 모든 PC에서 같은 값
-export ROS_DOMAIN_ID=6
+# 1) 로봇 네트워크 (운영): 도메인 6 + 디스커버리 서버. 모든 장치가 같은 파일을 씀
+source "$IPONIC_REPO/tools/net/net_ds.sh" && ros2 launch <패키지> <launch 파일>
 
-# 2) 혼자 하는 시험: 다른 도메인 번호 + 이 PC 안에서만 (그 터미널에서만)
-export ROS_DOMAIN_ID=43
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # Jazzy
-# export ROS_LOCALHOST_ONLY=1                    # Humble
+# 2) 혼자 하는 시험: 다른 도메인 번호 + 이 PC 안에서만 + 서버 없음 (그 터미널에서만)
+#    앞에서 운영 설정을 한 셸이어도 서버 값을 지우고 다시 설정함
+FLEET_DOMAIN_ID=43 FLEET_LOCAL=1 source "$IPONIC_REPO/tools/net/net_ds.sh" && ros2 launch <패키지> <launch 파일>
+# (net_ds.sh 없이 직접 할 때: unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT 뒤
+#  ROS_DOMAIN_ID=43, ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST. Humble은 ROS_LOCALHOST_ONLY=1)
 ```
 
-- 로봇 네트워크는 `ROS_DOMAIN_ID=6`입니다. 시험은 반드시 다른 도메인 번호와 `LOCALHOST`로 띄웁니다(IR-81, `docs/개발_규칙.md`).
-- 로봇 장치와 함께 하는 연동 시험은 다른 PC와 통신해야 해서 `LOCALHOST`를 쓸 수 없습니다. 이 예외는 설계 검토 사항에서 정한 뒤 따르고(IR-93), 정해지기 전에는 IR-81을 따릅니다.
+- 로봇 네트워크는 `ROS_DOMAIN_ID=6`이고, 모든 장치가 디스커버리 서버로 서로 찾습니다. 시험은 반드시 다른 도메인 번호와 `LOCALHOST`, 서버 없음으로 띄웁니다(IR-81 · IR-82, [디스커버리 서버 안내](디스커버리_서버_안내.md)).
+- 같은 서버에 붙으면 도메인 번호가 달라도 서로 보입니다. 서버 설정이 남은 터미널에서 도메인만 바꾸면 실물 망에 섞입니다.
+- 로봇 장치와 함께 하는 연동 시험은 다른 PC와 통신해야 해서 `LOCALHOST`를 쓸 수 없습니다. 이때 쓸 시험용 서버는 설계 검토 사항 Q-18에서 정한 뒤 따르고(IR-93), 정해지기 전에는 IR-81을 따릅니다.
 - localhost 제한은 `~/.bashrc`에 넣지 않습니다. 그 PC의 모든 노드가 다른 PC에서 안 보이게 됩니다. (기술 상세 G-8)
 - 이미지는 로봇에서 처리하고, 결과(인식 결과, 좌표)만 보냅니다.
 - 영상이 꼭 필요하면 ROS 2 밖의 별도 경로로 보냅니다(IR-10).
@@ -665,7 +667,7 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # Jazzy
 - 이 프로젝트의 비상정지는 central · fleet과 따로 도는 estop 노드가 모든 로봇을 멈추고, 로봇이 해제 신호까지 스스로 멈춤을 유지하는 방식입니다(기능 목록 COM-02, `design/diagrams/IFP_다이어그램.drawio`의 6-11 탭). 신호 · 상태 정의는 아직 인터페이스 명세에 없습니다. PC · Wi-Fi가 죽으면 위 하트비트 규칙으로 로봇이 스스로 섭니다.
 - 통신이 끊기거나 허가 응답이 오지 않을 때, 로봇의 기본 동작은 "진행하지 않음"으로 정합니다.
 
-**기억할 규칙: Wi-Fi로는 결과만 보낸다. 운영은 도메인 6, 시험은 다른 번호로**
+**기억할 규칙: Wi-Fi로는 결과만 보낸다. 운영은 도메인 6 + 디스커버리 서버, 혼자 하는 시험은 다른 번호 + LOCALHOST + 서버 없음으로**
 
 네트워크 구성, 탐색(discovery) 문제, 점검 명령 → 기술 상세 G
 
@@ -707,6 +709,8 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # Jazzy
 #### Wi-Fi로 통신할 때
 
 * [ ] 운영은 `ROS_DOMAIN_ID=6`, 시험은 다른 번호를 쓰나요? (IR-81)
+* [ ] 실물 망 노드를 `tools/net/net_ds.sh`를 `source`한 터미널(또는 그 값을 넣은 systemd · docker)에서 띄웠나요? (IR-81 · IR-82)
+* [ ] 혼자 하는 시험 터미널에서 `echo $ROS_DISCOVERY_SERVER`가 비어 있나요? (서버 값이 남으면 도메인이 달라도 실물 망에 섞임)
 * [ ] Wi-Fi로 원본 이미지나 포인트클라우드를 보내고 있지 않나요?
 * [ ] "메시지 크기 × 초당 개수 × 로봇 수"를 계산해 보았나요?
 * [ ] 관제 → 로봇 방향도 하트비트로 감시하나요? 신호가 끊기면 로봇이 스스로 멈추나요?
@@ -718,6 +722,9 @@ export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # Jazzy
 
 * [ ] `ros2 topic info -v <토픽>`로 양쪽 QoS를 비교했나요?
 * [ ] 같은 `ROS_DOMAIN_ID`와 같은 탐색 범위 설정을 쓰나요?
+* [ ] 양쪽이 같은 디스커버리 서버 목록(순서까지)을 쓰나요? 서버를 쓰는 노드와 안 쓰는 노드는 서로 못 찾습니다. (IR-82)
+* [ ] 디스커버리 서버가 켜져 있나요? 서버가 꺼진 동안 새로 뜬 노드는 상대를 못 찾습니다.
+* [ ] 확인 터미널을 super client(`SUPER=1`)로 열고 `ros2 daemon`을 다시 띄웠나요? 보통 노드 설정의 `ros2 topic list`는 일부만 보입니다.
 
 ## 3부. 기술 상세
 
@@ -932,12 +939,15 @@ Wi-Fi는 유선보다 느리고, 손실이 있고, 여러 장비가 나눠 씁�
 
 #### 3. 도메인 ID로 시스템 분리
 
-- 같은 도메인 ID를 쓰는 노드끼리만 서로를 찾습니다.
+- 멀티캐스트로 찾을 때(기본)는 같은 도메인 ID를 쓰는 노드끼리만 서로를 찾습니다.
+- **디스커버리 서버를 쓰면 다릅니다.** 같은 서버에 붙은 노드는 도메인 ID가 달라도 서로 보입니다. 갈라지는 단위는 서버(주소:포트)입니다(2026-11-24 실측, [디스커버리 서버 안내](디스커버리_서버_안내.md) 8절).
 - 기본값은 0입니다. 기본값을 쓰면 같은 공유기의 다른 시스템과 섞입니다.
 - 시스템마다 다른 번호를 정하고, 그 시스템의 모든 PC에 같은 값을 넣습니다. 0 ~ 101 사이 번호를 권장합니다. ([Domain ID 문서](https://docs.ros.org/en/jazzy/Concepts/Intermediate/About-Domain-ID.html))
-- **이 프로젝트에서는:** 로봇 네트워크는 `ROS_DOMAIN_ID=6`, 시험은 다른 번호입니다(IR-81, `docs/개발_규칙.md`).
+- **이 프로젝트에서는:** 로봇 네트워크는 `ROS_DOMAIN_ID=6` + 디스커버리 서버, 혼자 하는 시험은 다른 번호 + LOCALHOST + 서버 없음입니다(IR-81 · IR-82, `docs/개발_규칙.md`). 도메인만 바꾸는 것으로는 실물 망과 갈라지지 않습니다.
 
 #### 4. 탐색(discovery) 문제
+
+> **이 프로젝트에서는:** 실물 망은 Fast DDS 디스커버리 서버가 기본입니다(IR-81). 2026-11-23 실물 시험에서 멀티캐스트로는 늦게 합류한 Pode가 격리되고 먼저 뜬 Pode가 멈췄고, 서버로는 주문이 모두 출고됐습니다. 서버는 fleet PC(0번 `192.168.0.252:11811`)와 central PC(1번, 주소 미정 Q-20) 두 대이고, 설정은 `tools/net/net_ds.sh` 한 곳입니다. 역할 · 순서 · 문제 찾기는 [디스커버리 서버 안내](디스커버리_서버_안내.md)를 봅니다. 아래는 일반 설명입니다.
 
 - DDS는 기본적으로 multicast로 다른 노드를 찾습니다.
 - Wi-Fi 공유기는 multicast를 느리게 보내거나 막는 경우가 있습니다.
@@ -960,6 +970,7 @@ multicast가 잘 안 되면 아래 방법을 검토합니다.
 ([Discovery Server 문서](https://docs.ros.org/en/jazzy/Tutorials/Advanced/Discovery-Server/Discovery-Server.html))
 
 ```bash
+# 일반 예 (주소는 예시. 이 프로젝트는 tools/net/discovery_server.sh · net_ds.sh를 씀)
 # 서버 PC에서 Discovery Server 실행
 fastdds discovery -i 0
 
@@ -967,8 +978,9 @@ fastdds discovery -i 0
 export ROS_DISCOVERY_SERVER=192.168.0.10:11811
 ```
 
-Discovery Server를 쓰면 `ros2 topic list` 같은 CLI 명령에 추가 설정이 필요합니다.
-공식 문서의 "ROS 2 CLI" 부분을 참고하세요.
+Discovery Server를 쓰면 보통 노드는 자기가 주고받는 상대만 알기 때문에, `ros2 topic list` 같은 CLI 명령은 일부만 보이거나 비어 보입니다. 전체를 볼 터미널은 super client(`ROS_SUPER_CLIENT=TRUE`, 이 프로젝트에서는 `SUPER=1 source tools/net/net_ds.sh`)로 열고, 설정을 바꾼 뒤에는 `ros2 daemon stop; ros2 daemon start`로 CLI 데몬을 다시 띄웁니다. 공식 문서의 "ROS 2 CLI" 부분도 참고하세요.
+
+서버를 여러 대 둘 때(`ROS_DISCOVERY_SERVER="주소0;주소1"`)는 목록의 순서가 서버 번호(`-i`)입니다. 모든 PC가 같은 순서를 써야 하고, 순서가 다른 노드는 서버에 붙지 못합니다.
 어느 방법을 쓸지는 팀에서 하나로 정해 모든 PC에 똑같이 적용해야 합니다.
 
 #### 5. QoS 운영
@@ -1010,10 +1022,10 @@ localhost 제한은 Wi-Fi 부담을 줄여 주지만, 잘못 쓰면 "토픽이 �
 | 상황 | 무슨 일이 생기나 | 이렇게 합니다 |
 | --- | --- | --- |
 | localhost 제한을 `~/.bashrc`에 넣음 | 그 PC의 모든 노드가 다른 PC에서 안 보입니다. | 다른 PC와 통신이 전혀 없는 실행에만, 그 터미널이나 launch 파일에서만 설정합니다. |
-| 같은 PC에서 설정이 섞임 | 설정이 다른 노드끼리 못 찾을 수 있습니다. `ros2 topic list`도 비어 보일 수 있습니다. | 함께 통신하는 노드와 CLI는 같은 설정을 씁니다. 설정을 바꾼 뒤에는 `ros2 daemon stop`으로 CLI 데몬을 다시 시작합니다. |
+| 같은 PC에서 설정이 섞임 | 설정이 다른 노드끼리 못 찾을 수 있습니다. 디스커버리 서버를 쓰는 노드와 쓰지 않는 노드(LOCALHOST · 멀티캐스트)도 서로 못 찾습니다. `ros2 topic list`도 비어 보일 수 있습니다. | 함께 통신하는 노드와 CLI는 같은 설정을 씁니다. 설정을 바꾼 뒤에는 `ros2 daemon stop`으로 CLI 데몬을 다시 시작합니다. |
 | Humble + CycloneDDS에서 `ROS_LOCALHOST_ONLY=1` | 환경에 따라 loopback(`lo`)에 multicast가 꺼져 있어 탐색이 실패합니다. | `ip link show lo`에 MULTICAST가 있는지 확인합니다. 없으면 `sudo ip link set lo multicast on` (재부팅하면 다시 꺼짐) |
 | Jazzy에서 `ROS_LOCALHOST_ONLY` 사용 | 동작은 하지만 지원 중단 예정 경고가 나옵니다. | `ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST`로 바꿉니다. |
-| Docker 컨테이너 안에서 `localhost` | 컨테이너 안의 localhost는 컨테이너 자신입니다. 호스트의 노드나 서버가 아닙니다. 공유 메모리 전송도 기본 설정으로는 막힙니다. | ROS 2 노드는 컨테이너에 넣지 않거나, 넣는다면 host 네트워크 · IPC 설정을 팀 표준으로 정합니다. (웹 · DB는 정상 운영에서 docker로 따로 운영합니다) |
+| Docker 컨테이너 안에서 `localhost` | 컨테이너 안의 localhost는 컨테이너 자신입니다. 호스트의 노드나 서버가 아닙니다. 공유 메모리 전송도 기본 설정으로는 막힙니다. | ROS 2 노드는 컨테이너에 넣지 않거나, 넣는다면 host 네트워크 · IPC 설정을 팀 표준으로 정합니다. 실물 망에 붙는 컨테이너에는 `net_ds.sh`와 같은 값(도메인 · `RMW_IMPLEMENTATION` · `ROS_DISCOVERY_SERVER`)도 넣습니다. (웹 · DB는 정상 운영에서 docker로 따로 운영합니다) |
 | 같은 PC의 HTTP · WebSocket 서버(예: 브리지 REST)를 `localhost`로 호출 | 환경에 따라 연결이 느려질 수 있습니다. 팀에서도 `127.0.0.1`로 바꾸자 빨라진 사례가 있었습니다. `localhost`는 IPv6 주소(`::1`)로 먼저 풀릴 수 있습니다. 서버가 IPv4(`127.0.0.1`)에서만 받고 있으면, 클라이언트가 `::1` 연결에 실패한 뒤 IPv4로 다시 시도합니다. 실패 응답이 바로 오면 지연이 작지만, 응답 없이 버려지는 환경에서는 시간이 걸립니다. 이름을 주소로 바꾸는 단계(DNS · hosts 조회)가 느린 환경에서도 지연이 생깁니다. | 같은 PC 안의 호출은 `http://127.0.0.1:포트`처럼 IP로 씁니다. 또는 서버가 IPv4와 IPv6를 모두 받도록 설정합니다. 주소는 설정 파일 한 곳에 두고 함께 씁니다. |
 | 다른 PC에 보내는 주소에 `localhost` · `127.0.0.1` | 받는 PC가 자기 자신을 가리키게 됩니다. 이미지 URL, `ROS_STATIC_PEERS`, `ROS_DISCOVERY_SERVER` 모두 해당합니다. | 다른 PC가 접근할 수 있는 실제 IP나 호스트 이름을 씁니다. (항목 7) |
 
@@ -1050,7 +1062,9 @@ localhost 제한은 "한 PC 안에서만 주고받는 것이 확실한 실행"�
 - **느린 구독자 (slow subscriber)** — 메시지가 들어오는 속도보다 처리하는 속도가 느린 구독자입니다.
 - **탐색 (discovery)** — 노드들이 네트워크에서 서로를 찾는 과정입니다.
 - **multicast** — 한 번 보내서 여러 장비가 함께 받는 전송 방식입니다. DDS가 탐색에 씁니다.
-- **ROS_DOMAIN_ID** — ROS 2 통신 그룹 번호입니다. 같은 번호끼리만 서로를 찾습니다.
+- **ROS_DOMAIN_ID** — ROS 2 통신 그룹 번호입니다. 멀티캐스트로 찾을 때는 같은 번호끼리만 서로를 찾습니다. 디스커버리 서버를 쓰면 같은 서버에 붙은 노드는 번호가 달라도 보입니다.
+- **디스커버리 서버 (discovery server)** — 노드들이 멀티캐스트 대신 정해진 서버에 자기를 알리고, 서버가 통신할 상대를 알려 주는 Fast DDS 방식입니다. 찾는 일만 돕고 데이터는 노드끼리 바로 주고받습니다.
+- **super client** — 디스커버리 서버에서 전체 노드 목록을 받는 클라이언트입니다. `ros2` 명령 · RViz 터미널에 씁니다.
 - **대역폭 (bandwidth)** — 1초에 보낼 수 있는 데이터 양입니다. 보통 Mbps로 나타냅니다.
 
 ## 5부. 참고 자료
@@ -1074,6 +1088,7 @@ localhost 제한은 "한 PC 안에서만 주고받는 것이 확실한 실행"�
 
 | 날짜 | 버전 | 내용 |
 |---|---|---|
+| 2026-11-24 | v2.1 | 디스커버리 서버 반영(IR-81 · IR-82): 항목 10(실물 망 서버, 같은 서버면 도메인으로 갈라지지 않음, 연동 시험 예외를 Q-18로) · 기억할 규칙 · 체크리스트(서버 설정 · 서버 목록 순서 · 서버 켜짐 · super client) · 기술 상세 G-3(도메인 ID 설명 정정) · G-4(이 프로젝트 기본은 서버, CLI super client, 여러 서버 순서) · G-8(서버 섞임 · docker) · 항목 10 예제를 `net_ds.sh` 호출로(검토 의견: 운영 다음 시험 설정을 같은 셸에서 하면 서버 값이 남음) · 용어집(ROS_DOMAIN_ID 정정, 디스커버리 서버 · super client 추가). 디스커버리 서버 안내 링크 |
 | 2026-11-24 | v2.0 | **저장소로 옮김** (원본을 이 파일로, Confluence는 옮긴 판). 통신 규칙(IR)에 맞춰 본문 정정: 항목 1을 "토픽 + ACK"에서 `Report*` 서비스 + 같은 번호로 다시 보내기로 · 항목 2를 위치 / 작업 상태 토픽 둘에서 STATE 주기 상태 + `Report*` 진행 보고로, 하트비트 타입을 contract의 `std_msgs/Header`로 · 항목 4의 다시 보내기를 "상태 조회 뒤"에서 "같은 `request_id`로 그대로"로, 끝내 응답이 없으면 "결과 모름"(IR-62) · 항목 5 · 6 예제를 프로젝트 토픽 · contract 읽기로 · 항목 8 서버 중복 확인을 0.6 `order_id` · `order_update_id` 기준으로(같은 번호는 거절하지 않고 같은 결과) · 항목 10 도메인 6과 시험 도메인, 비상정지(estop 노드) · 항목 3 서비스 QoS를 contract 서비스 줄과, 항목 7 영상 경로를 IR-10과 맞춤 · 체크리스트 · 기술 상세 A · C · F · G-3 · G-5 · G-7 · 용어집을 같은 기준으로. 하트비트 메시지 타입을 contract에 맞춤(`Empty` → `std_msgs/Header`). 검수 3명(ROS 2 기술 · 프로젝트 규칙 대조 · 처음 읽는 사람) 의견 반영: 예제 재시도 코드(동시 요청 · 간격 늘리기 · Lock), `Duration` 비교, 느린 구독자와 RELIABLE의 관계, executor 처리 순서, 호환 표의 deadline · liveliness, IP 단편화, 목차 · 읽는 법 · 용어집, 용어 통일 |
 | 2026-11-23 | v1.1 | (Confluence 판 4) 통신 규칙 게시에 맞춰 "이 프로젝트에 적용할 때" · "이 프로젝트에서는" 안내 상자 추가: 맨 앞, 항목 1 · 2 · 4 · 6 · 10, 체크리스트, 기술 상세 G-5 |
 | 2026-11-06 | v1.0 | (Confluence 판 1 ~ 3) 처음 작성: 사례 10개, 체크리스트, 기술 상세 A ~ G, 용어집, 참고 자료. 판 사이 세부 이력은 남아 있지 않음 |

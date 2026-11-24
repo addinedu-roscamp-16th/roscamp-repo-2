@@ -1,0 +1,20 @@
+# Fast DDS 디스커버리 서버 (systemd 예시). @ 뒤가 서버 번호: fleet PC는 0, central PC는 1
+#   sudo cp iponic-discovery@.service /etc/systemd/system/
+#   sudo systemctl edit iponic-discovery@0   # 아래 User · IPONIC_REPO를 자기 값으로
+#   sudo systemctl enable --now iponic-discovery@0
+[Unit]
+Description=iponic Fast DDS discovery server %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=iponic
+Environment=IPONIC_REPO=/home/iponic/gg_ws/src/roscamp-repo-2
+ExecStart=/bin/bash -c 'exec "$IPONIC_REPO/tools/net/discovery_server.sh" %i'
+# fastdds는 sh · python · 서버 프로그램이 겹쳐 있어 묶음 전체를 끈다
+KillMode=control-group
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
