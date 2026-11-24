@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 디스커버리 서버 두 대(이 PC, 127.0.0.1) 시험. 실물 망(도메인 6, 192.168.0.252)과 섞이지 않게
-# 서버는 127.0.0.1에서만 듣고, 포트 11921/11922, 도메인 81~89를 쓴다.
+# 서버는 127.0.0.1에서만 듣고, 포트 11921/11922, 도메인 79 ~ 89를 쓴다.
 # 결과 해석: docs/설계/디스커버리_서버_안내.md 8절. 실행: tools/net/test_two_servers.sh [결과 폴더] (약 2분)
 set +u
 source /opt/ros/jazzy/setup.bash
@@ -49,12 +49,11 @@ run_pair C4_listener_swapped 84 "$LIST" "$SWAP"
 echo "== C5 서버 둘 다 켬, 통신 중 서버 0 끔 (이미 찾은 노드)"
 run_pair C5_kill_server0_midway 85 "$LIST" "$LIST" "$S0"
 
-echo "== C6 서버 1만, 노드 하나는 서버 0만 아는 목록 (한쪽 서버만 공유하지 않음)"
-S0=$(start_server 0 $P0); sleep 2; stop_server "$S1"; sleep 1
-run_pair C6_talker_list_server1only 86 ";127.0.0.1:$P1" "127.0.0.1:$P0"
+S0=$(start_server 0 $P0); sleep 2
+echo "== C6 서버 둘 다 켬, talker는 서버 1만 · listener는 서버 0만 앎 (공통 서버 없음)"
+run_pair C6_disjoint_both_up 86 ";127.0.0.1:$P1" "127.0.0.1:$P0"
 
 echo "== C7 super client가 전체 그래프를 보나 (서버 둘 다)"
-S1=$(start_server 1 $P1); sleep 2
 ( clean_env; export ROS_DOMAIN_ID=87 ROS_DISCOVERY_SERVER="$LIST"; exec timeout 14 ros2 run demo_nodes_cpp talker >"$OUT/C7.talker.log" 2>&1 ) & tp=$!
 sleep 4
 plain=$( (clean_env; export ROS_DOMAIN_ID=87 ROS_DISCOVERY_SERVER="$LIST"; timeout 8 ros2 topic list --no-daemon 2>&1) | grep -c chatter)
@@ -66,5 +65,16 @@ echo "== C8 · C9 한쪽은 서버 0만 아는 옛 설정 (이미 배포된 장�
 run_pair C8_listener_old_single_server0 88 "$LIST" "127.0.0.1:$P0"
 run_pair C9_talker_old_single_server0 89 "127.0.0.1:$P0" "$LIST"
 
-stop_server "$S0"; stop_server "$S1"; sleep 1
+echo "== C10 통신 중 서버 두 대 모두 끔 (이미 찾은 노드)"
+( clean_env; export ROS_DOMAIN_ID=80 ROS_DISCOVERY_SERVER="$LIST"; exec timeout 16 ros2 run demo_nodes_cpp listener >"$OUT/C10.listener.log" 2>&1 ) & lp=$!
+sleep 2
+( clean_env; export ROS_DOMAIN_ID=80 ROS_DISCOVERY_SERVER="$LIST"; exec timeout 12 ros2 run demo_nodes_cpp talker >"$OUT/C10.talker.log" 2>&1 ) & tp=$!
+sleep 4; stop_server "$S0"; stop_server "$S1"; echo "  (C10: 4초 뒤 서버 0 · 1 모두 끔)"
+wait $tp; wait $lp
+printf '%-34s 보냄 %2s  받음 %2s  마지막 받은 것: %s\n' C10_kill_both_midway "$(grep -c Publishing "$OUT/C10.talker.log")" "$(grep -c 'I heard' "$OUT/C10.listener.log")" "$(grep 'I heard' "$OUT/C10.listener.log" | tail -1 | sed 's/.*\[Hello/[Hello/')"
+
+echo "== C11 서버 두 대가 모두 꺼진 뒤 새로 띄운 노드"
+run_pair C11_both_down_new_nodes 79 "$LIST" "$LIST"
+
+sleep 1
 ports_free && echo "정리: 서버 포트 비었음" || { echo "경고: 포트 남음"; ss -ulnp | grep -E ":($P0|$P1)\b"; }

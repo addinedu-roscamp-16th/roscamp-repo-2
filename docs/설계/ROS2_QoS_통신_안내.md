@@ -642,14 +642,14 @@ ros2 run camera_pkg camera_node   # 640x480 원본 이미지, 30 Hz를 Wi-Fi로 
 #### ✅ 바른 예 (이 프로젝트)
 
 ```bash
-# 1) 로봇 네트워크 (운영): 모든 PC에서 같은 값 + 디스커버리 서버 (실제로는 tools/net/net_ds.sh로)
-export ROS_DOMAIN_ID=6
-export ROS_DISCOVERY_SERVER=192.168.0.252:11811
+# 1) 로봇 네트워크 (운영): 도메인 6 + 디스커버리 서버. 모든 장치가 같은 파일을 씀
+source "$IPONIC_REPO/tools/net/net_ds.sh" && ros2 launch <패키지> <launch 파일>
 
-# 2) 혼자 하는 시험: 다른 도메인 번호 + 이 PC 안에서만 (그 터미널에서만)
-export ROS_DOMAIN_ID=43
-export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST   # Jazzy
-# export ROS_LOCALHOST_ONLY=1                    # Humble
+# 2) 혼자 하는 시험: 다른 도메인 번호 + 이 PC 안에서만 + 서버 없음 (그 터미널에서만)
+#    앞에서 운영 설정을 한 셸이어도 서버 값을 지우고 다시 설정함
+FLEET_DOMAIN_ID=43 FLEET_LOCAL=1 source "$IPONIC_REPO/tools/net/net_ds.sh" && ros2 launch <패키지> <launch 파일>
+# (net_ds.sh 없이 직접 할 때: unset ROS_DISCOVERY_SERVER ROS_SUPER_CLIENT 뒤
+#  ROS_DOMAIN_ID=43, ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST. Humble은 ROS_LOCALHOST_ONLY=1)
 ```
 
 - 로봇 네트워크는 `ROS_DOMAIN_ID=6`이고, 모든 장치가 디스커버리 서버로 서로 찾습니다. 시험은 반드시 다른 도메인 번호와 `LOCALHOST`, 서버 없음으로 띄웁니다(IR-81 · IR-82, [디스커버리 서버 안내](디스커버리_서버_안내.md)).
@@ -1088,7 +1088,7 @@ localhost 제한은 "한 PC 안에서만 주고받는 것이 확실한 실행"�
 
 | 날짜 | 버전 | 내용 |
 |---|---|---|
-| 2026-11-24 | v2.1 | 디스커버리 서버 반영(IR-81 · IR-82): 항목 10(실물 망 서버, 같은 서버면 도메인으로 갈라지지 않음, 연동 시험 예외를 Q-18로) · 기억할 규칙 · 체크리스트(서버 설정 · 서버 목록 순서 · 서버 켜짐 · super client) · 기술 상세 G-3(도메인 ID 설명 정정) · G-4(이 프로젝트 기본은 서버, CLI super client, 여러 서버 순서) · G-8(서버 섞임 · docker) · 용어집(ROS_DOMAIN_ID 정정, 디스커버리 서버 · super client 추가). 디스커버리 서버 안내 링크 |
+| 2026-11-24 | v2.1 | 디스커버리 서버 반영(IR-81 · IR-82): 항목 10(실물 망 서버, 같은 서버면 도메인으로 갈라지지 않음, 연동 시험 예외를 Q-18로) · 기억할 규칙 · 체크리스트(서버 설정 · 서버 목록 순서 · 서버 켜짐 · super client) · 기술 상세 G-3(도메인 ID 설명 정정) · G-4(이 프로젝트 기본은 서버, CLI super client, 여러 서버 순서) · G-8(서버 섞임 · docker) · 항목 10 예제를 `net_ds.sh` 호출로(검토 의견: 운영 다음 시험 설정을 같은 셸에서 하면 서버 값이 남음) · 용어집(ROS_DOMAIN_ID 정정, 디스커버리 서버 · super client 추가). 디스커버리 서버 안내 링크 |
 | 2026-11-24 | v2.0 | **저장소로 옮김** (원본을 이 파일로, Confluence는 옮긴 판). 통신 규칙(IR)에 맞춰 본문 정정: 항목 1을 "토픽 + ACK"에서 `Report*` 서비스 + 같은 번호로 다시 보내기로 · 항목 2를 위치 / 작업 상태 토픽 둘에서 STATE 주기 상태 + `Report*` 진행 보고로, 하트비트 타입을 contract의 `std_msgs/Header`로 · 항목 4의 다시 보내기를 "상태 조회 뒤"에서 "같은 `request_id`로 그대로"로, 끝내 응답이 없으면 "결과 모름"(IR-62) · 항목 5 · 6 예제를 프로젝트 토픽 · contract 읽기로 · 항목 8 서버 중복 확인을 0.6 `order_id` · `order_update_id` 기준으로(같은 번호는 거절하지 않고 같은 결과) · 항목 10 도메인 6과 시험 도메인, 비상정지(estop 노드) · 항목 3 서비스 QoS를 contract 서비스 줄과, 항목 7 영상 경로를 IR-10과 맞춤 · 체크리스트 · 기술 상세 A · C · F · G-3 · G-5 · G-7 · 용어집을 같은 기준으로. 하트비트 메시지 타입을 contract에 맞춤(`Empty` → `std_msgs/Header`). 검수 3명(ROS 2 기술 · 프로젝트 규칙 대조 · 처음 읽는 사람) 의견 반영: 예제 재시도 코드(동시 요청 · 간격 늘리기 · Lock), `Duration` 비교, 느린 구독자와 RELIABLE의 관계, executor 처리 순서, 호환 표의 deadline · liveliness, IP 단편화, 목차 · 읽는 법 · 용어집, 용어 통일 |
 | 2026-11-23 | v1.1 | (Confluence 판 4) 통신 규칙 게시에 맞춰 "이 프로젝트에 적용할 때" · "이 프로젝트에서는" 안내 상자 추가: 맨 앞, 항목 1 · 2 · 4 · 6 · 10, 체크리스트, 기술 상세 G-5 |
 | 2026-11-06 | v1.0 | (Confluence 판 1 ~ 3) 처음 작성: 사례 10개, 체크리스트, 기술 상세 A ~ G, 용어집, 참고 자료. 판 사이 세부 이력은 남아 있지 않음 |
