@@ -298,3 +298,9 @@ def test_the_settle_time_of_a_timeout_is_no_shorter_than_a_plain_cancel_wait():
     params = load_params()
     assert params.robot_timeout_settle_s == 30.0
     assert params.robot_timeout_settle_s >= params.arm_cancel_wait_s
+
+
+@pytest.mark.parametrize("bad", [-1.0, 0.0, float("inf")])
+def test_the_lost_dock_heading_tolerance_is_a_positive_angle(tmp_path, bad):
+    with pytest.raises(ValueError, match="lost_dock_yaw_deg"):
+        load_params(write(tmp_path, {**SHIPPED, "lost_dock_yaw_deg": bad}))
