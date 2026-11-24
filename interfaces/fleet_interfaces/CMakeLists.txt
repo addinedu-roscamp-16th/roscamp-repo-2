@@ -18,6 +18,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
       "msg/ZoneStateArray.msg"
       "msg/FleetEvent.msg"
       "msg/Segment.msg"
+      "msg/SystemMode.msg"
       "action/MoveTo.action"
       "action/Dock.action"
       "action/FillBasket.action"
@@ -27,6 +28,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
       "srv/ConfirmClear.srv"
       "srv/Reinstate.srv"
       "srv/CheckClear.srv"
+      "srv/SubmitTrip.srv"
+      "srv/Hello.srv"
+      "srv/ReportTrip.srv"
       DEPENDENCIES geometry_msgs nav_msgs builtin_interfaces)
 install(FILES contract.yaml DESTINATION share/${PROJECT_NAME})
 ament_export_dependencies(rosidl_default_runtime)
