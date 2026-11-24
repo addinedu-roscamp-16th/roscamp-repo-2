@@ -96,6 +96,16 @@ def test_report_order_matches_the_contract_0_6_text():
     assert srv.read_text(encoding="utf-8") == REPORT_ORDER_0_6
 
 
-def test_the_contract_is_version_0_6():
+def test_the_contract_is_version_0_7():
     import yaml
-    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.6
+    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.7
+
+
+# ---- 계약 0.7: 주문 흐름 1차 (SubmitTrip · Hello · ReportTrip · SystemMode) ----
+def test_order_flow_names_are_in_the_contract():
+    contract = load_contract(CONTRACT)
+    assert contract.name("submit_trip") == "/central/submit_trip"
+    assert contract.name("hello") == "/bridge/hello"
+    assert contract.name("report_trip") == "/bridge/report_trip"
+    assert contract.name("system_mode") == "/system/mode"
+    assert contract.qos("system_mode").durability == "transient_local"

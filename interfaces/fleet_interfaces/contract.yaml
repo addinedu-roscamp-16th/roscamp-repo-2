@@ -1,6 +1,7 @@
 # ---- 관제와 로봇 사이 연결의 이름, 타입, QoS 원본 ----
 
-version: 0.6
+version: 0.7
+# 0.7 (2026-11-24): 주문 흐름 1차 — /central/submit_trip · /bridge/hello · /bridge/report_trip 서비스, /system/mode 토픽 추가.
 
 # ---- 이름 틀에 채울 로봇과 팔 이름 ----
 placeholders:
@@ -23,6 +24,7 @@ topics:
   - {key: heartbeat, name: "/fleet/heartbeat", type: std_msgs/msg/Header, qos: HEARTBEAT}
   - {key: zones, name: "/fleet/zones", type: fleet_interfaces/msg/ZoneStateArray, qos: LATCHED}
   - {key: events, name: "/central/events", type: fleet_interfaces/msg/FleetEvent, qos: EVENT}
+  - {key: system_mode, name: "/system/mode", type: fleet_interfaces/msg/SystemMode, qos: LATCHED}
 
 # ---- 액션 ----
 actions:
@@ -40,3 +42,6 @@ services:
   - {key: confirm_clear, name: "/fleet/confirm_clear", type: fleet_interfaces/srv/ConfirmClear}
   - {key: reinstate, name: "/fleet/reinstate", type: fleet_interfaces/srv/Reinstate}
   - {key: check_clear, name: "/{pode}/check_clear", type: fleet_interfaces/srv/CheckClear, real_only: true}
+  - {key: submit_trip, name: "/central/submit_trip", type: fleet_interfaces/srv/SubmitTrip}
+  - {key: hello, name: "/bridge/hello", type: fleet_interfaces/srv/Hello}
+  - {key: report_trip, name: "/bridge/report_trip", type: fleet_interfaces/srv/ReportTrip}
