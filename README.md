@@ -1,6 +1,6 @@
 # GG (Give Gift)
 
-심화 16기 2팀 GG 프로젝트 저장소입니다. 관제 PC, 핑키 3대(pinky1~3), 로봇팔 3대(작업공간 arm1·arm2, 출고 arm3)의 ROS 2 Jazzy 패키지를 둡니다. 핑키 제조사 패키지는 `iponic.repos`로 따로 받습니다.
+심화 16기 2팀 GG 프로젝트 저장소입니다. 관제 PC, 핑키 3대(pinky1~3), 로봇팔 3대(작업공간 arm_left·arm_right, 출고 arm_ship)의 ROS 2 Jazzy 패키지를 둡니다. 핑키 제조사 패키지는 `iponic.repos`로 따로 받습니다.
 
 ## 폴더
 
@@ -36,7 +36,7 @@ flowchart TB
     av["arm_vision ×2"]
   end
   subgraph armo["팔 PC: 출고 (유선)"]
-    a3["arm_control (arm3)"]
+    a3["arm_control (arm_ship)"]
   end
   web -.- central
   central -- "/central/orders" --> fm
@@ -52,18 +52,18 @@ flowchart TB
   nav -- "/cmd_vel" --> bring
   bring -- "/scan, /odom" --> nav
   fm == "/workcell/fill_basket" ==> wc
-  fm == "/arm3/swap_basket" ==> a3
+  fm == "/arm_ship/swap_basket" ==> a3
   av -- "/armN/vision/items" --> wc
   wc == "follow_joint_trajectory" ==> ac
-  ac -- "/arm1/state, /arm2/state" --> central
-  a3 -- "/arm3/state" --> central
+  ac -- "/arm_left/state, /arm_right/state" --> central
+  a3 -- "/arm_ship/state" --> central
 ```
 
 실선은 토픽, 점선은 서비스(화면과 central 사이는 ROS 밖), 굵은 선은 액션.
 
 ## 인터페이스
 
-원본은 `interfaces/fleet_interfaces/contract.yaml`. `{pinky}`는 pinky1~3, `{arm}`은 arm1~3.
+원본은 `interfaces/fleet_interfaces/contract.yaml`. `{pinky}`는 pinky1~3, `{arm}`은 arm_left · arm_right · arm_ship.
 
 토픽
 
@@ -77,7 +77,7 @@ flowchart TB
 | `/fleet/heartbeat` | `std_msgs/Header` | STATE | FMS → 핑키 |
 | `/{pinky}/state` | `RobotState` | STATE | 핑키 → FMS |
 | `/{arm}/state` | `ArmState` | STATE | 팔 → central |
-| `/{arm}/vision/items` (arm1, arm2) | `ItemArray` | LATCHED | 비전 → 작업공간 서버 |
+| `/{arm}/vision/items` (arm_left, arm_right) | `ItemArray` | LATCHED | 비전 → 작업공간 서버 |
 
 액션
 
@@ -85,8 +85,8 @@ flowchart TB
 |---|---|---|
 | `/{pinky}/move_to` | `MoveTo` | FMS → 핑키 |
 | `/{pinky}/dock` | `Dock` | FMS → 핑키 |
-| `/workcell/fill_basket` | `FillBasket` | FMS → 작업공간 서버(arm1·arm2) |
-| `/arm3/swap_basket` | `SwapBasket` | FMS → arm3 |
+| `/workcell/fill_basket` | `FillBasket` | FMS → 작업공간 서버(arm_left·arm_right) |
+| `/arm_ship/swap_basket` | `SwapBasket` | FMS → arm_ship |
 | `/{pinky}/navigate_to_pose` | `nav2_msgs/NavigateToPose` | 핑키 안(`pinky_fsm` → Nav2) |
 
 서비스

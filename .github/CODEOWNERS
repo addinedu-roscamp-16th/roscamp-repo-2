@@ -11,6 +11,6 @@
 # /pode/pode_peer_obstacles/          <fleet>
 # /pode/pode_nav_config/              <slam-nav2>
 # /pode/pode_scan_filter/             <slam-nav2>
-# /arm/arm_control/                   <arm-control>   (/workcell/fill_basket, /arm3/swap_basket 서버)
+# /arm/arm_control/                   <arm-control>   (/workcell/fill_basket, /arm_ship/swap_basket 서버)
 # /arm/arm_vision/                    <arm-vision>
 # /interfaces/                        <fleet> <pinky-control> <central>
