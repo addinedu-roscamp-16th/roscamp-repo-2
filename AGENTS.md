@@ -11,6 +11,7 @@
 | 서비스 브리지 · central 호출 · `ReportTrip` 처리 · 재시도 · 재시작 (주문 흐름 구현과 그 논의) | `docs/설계/서비스_브리지_기술_조사.md` 7장 (`SB-nn`. "제안"이면 그 안으로 논의하고, 코드에 넣기 전에 사용자에게 확정을 물음) |
 | 기능 번호(`SCR` · `OMS` · `BRG` · `CEN` · `FLT` · `PDE` · `PHD` · `PHN` · `COM`-nn)의 뜻 · 범위 확인 | `docs/기능_목록/기능_목록.csv` (원본은 Google 시트, 이 파일은 사본. 고칠 일이 있으면 사용자에게 시트 수정을 요청) |
 | 브랜치 · PR · 병합 · 버전 · 태그 | `docs/브랜치_운영_안내.md` (기준 브랜치 `dev`, PR로만 병합) |
+| 실물 망 통신 설정 · 디스커버리 서버 · 도메인 | `docs/설계/디스커버리_서버_안내.md` (설정은 `tools/net/net_ds.sh` 한 곳) |
 | 빌드 · 실행 · ROS 도메인 | `docs/개발_규칙.md` |
 | 화면 · 다이어그램 · 스토리보드 | `design/README.md` |
 | 주문 DB | `docs/superpowers/specs/2026-11-18-order-db-design.md`, `design/db/README.md` |

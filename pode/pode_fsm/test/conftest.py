@@ -26,8 +26,11 @@ def rclpy_session():
     pytest.importorskip("nav2_msgs.action")
     # 이 노드는 실제 로봇처럼 /pode1/state를 발행하고 /pode1/move_to를 받는다.
     if (os.environ.get("ROS_DOMAIN_ID", "") in ("", "6")
-            or os.environ.get("ROS_AUTOMATIC_DISCOVERY_RANGE") != "LOCALHOST"):
-        pytest.skip("set ROS_DOMAIN_ID (not 6) and ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST first")
+            or os.environ.get("ROS_AUTOMATIC_DISCOVERY_RANGE") != "LOCALHOST"
+            or os.environ.get("ROS_DISCOVERY_SERVER")):
+        # 서버 설정이 남아 있으면 도메인이 달라도 실물 망에 섞인다 (IR-81 · IR-82)
+        pytest.skip("set ROS_DOMAIN_ID (not 6), ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST and no "
+                    "ROS_DISCOVERY_SERVER first (FLEET_LOCAL=1 source tools/net/net_ds.sh)")
     rclpy.init()
     yield rclpy
     rclpy.shutdown()
