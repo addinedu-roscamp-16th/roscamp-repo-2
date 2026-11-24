@@ -8,6 +8,7 @@
 | 인터페이스 구현 · 변경 (이름 · 타입 · 칸) | `docs/설계/인터페이스_명세.md`와 `interfaces/fleet_interfaces/contract.yaml` (contract가 원본, 기준 버전은 명세 머리 참고) |
 | 관제(fleet) · central · `fleet_interfaces`를 명세에 맞추는 작업 | `docs/설계/fleet_작업_목록.md` (`W-nn`) |
 | 미확정 항목에 걸림 | `docs/설계/설계_검토_사항.md` (`Q-nn`. "열림"이면 짐작해 구현하지 말고 사용자에게 물음) |
+| 서비스 브리지 · central 호출 · `ReportTrip` 처리 · 재시도 · 재시작 (주문 흐름 구현과 그 논의) | `docs/설계/서비스_브리지_기술_조사.md` 7장 (`SB-nn`. "제안"이면 그 안으로 논의하고, 코드에 넣기 전에 사용자에게 확정을 물음) |
 | 빌드 · 실행 · ROS 도메인 | `docs/개발_규칙.md` |
 | 화면 · 다이어그램 · 스토리보드 | `design/README.md` |
 | 주문 DB | `docs/superpowers/specs/2026-11-18-order-db-design.md`, `design/db/README.md` |
