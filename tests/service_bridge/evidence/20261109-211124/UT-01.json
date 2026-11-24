@@ -1,0 +1,81 @@
+{
+  "id": "UT-01",
+  "result": "통과",
+  "reason": "",
+  "run_id": "20261109-211124",
+  "run_kind": "공식",
+  "started": 1794226285.5505316,
+  "finished": 1794226285.5516725,
+  "devices": "2대",
+  "two_device_check": null,
+  "conditions": {},
+  "observations": {
+    "rejected_transitions": [
+      "PENDING->DONE",
+      "DONE->SENT",
+      "REJECTED->ACCEPTED",
+      "ACCEPTED->SENT"
+    ]
+  },
+  "notes": [],
+  "params": {
+    "it01": {
+      "response_delay_s": 3.0,
+      "timer_period_ms": 200,
+      "min_ticks": 5,
+      "deadline_s": 5.0,
+      "blocking_wait_timeout_s": 10.0,
+      "fms_timeout_margin_s": 5.0,
+      "exec_time_s": 0.5
+    },
+    "it02": {
+      "status_period_ms": 100,
+      "alert_delay_s": 1.0,
+      "max_gap_ms": 500,
+      "observe_s": 6.0,
+      "alerts": 3,
+      "alert_rate_hz": 5,
+      "resend_interval_s": 30.0
+    },
+    "it03": {
+      "fms_timeout_s": 2.0,
+      "query_retry_s": 0.5,
+      "exec_time_s": 1.0,
+      "deadline_s": 30.0
+    },
+    "it04": {
+      "discovery_timeout_s": 10.0,
+      "observe_s": 5.0,
+      "publish_count": 20,
+      "rate_hz": 10
+    },
+    "lt01": {
+      "count": 1000,
+      "ignore_first_ack_every": 100,
+      "resend_interval_s": 2.0,
+      "resend_deadline_s": 60.0
+    },
+    "lt02": {
+      "queue_cap": 50,
+      "robots": 10,
+      "publish_hz": 200,
+      "client_read_delay_s": 0.05,
+      "duration_s": 10.0,
+      "last_state_deadline_s": 5.0
+    },
+    "lt03": {
+      "before_disconnect": 30,
+      "received_before_disconnect": 20,
+      "during_replay": 20,
+      "deadline_s": 20.0,
+      "rate_hz": 20,
+      "replay_delay_s": 1.0,
+      "status_robots": 3,
+      "status_period_ms": 100
+    },
+    "bridge": {
+      "http_port": 8765,
+      "outbox_period_ms": 100
+    }
+  }
+}
