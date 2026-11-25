@@ -102,5 +102,7 @@ def test_real_only_entries_are_skipped_unless_asked(contract):
     obs = healthy(contract)
     assert compare(contract, obs) == []
     names = {p.name for p in compare(contract, obs, include_real_only=True)}
-    assert names == {f"/pode{i}/{action}" for i in (1, 2, 3)
-                     for action in ("navigate_to_pose", "follow_path", "check_clear")}
+    robots = ("pode1", "pode2", "pode3", "arm_left", "arm_right", "arm_ship")
+    assert names == ({f"/pode{i}/{action}" for i in (1, 2, 3)
+                      for action in ("navigate_to_pose", "follow_path", "check_clear")}
+                     | {f"/{robot}/set_mode" for robot in robots})

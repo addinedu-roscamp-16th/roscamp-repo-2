@@ -37,7 +37,7 @@ from fleet_interfaces.msg import (
     SystemMode,
     ZoneStateArray,
 )
-from fleet_interfaces.srv import CheckClear, ConfirmClear, Reinstate, ReportOrder
+from fleet_interfaces.srv import CheckClear, ConfirmClear, Reinstate, ReportOrder, SetMode
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.action import ActionClient
 from rclpy.clock import Clock, ClockType
@@ -47,6 +47,7 @@ from std_msgs.msg import Header
 
 from fleet_manager import adapters
 from fleet_manager.goal_tracker import GoalTracker, ReportOutbox
+from fleet_manager.mode_sync import ModeSync
 from fleet_manager.order_goals import apply_overrides
 
 
@@ -142,8 +143,12 @@ class FleetManagerNode(Node):
         self._events_pub = self.create_publisher(FleetEvent, name("events"), self._qos("events"))
         self.create_subscription(
             OrderBoard, name("order_board"), self._on_order_board, self._qos("order_board"))
-        # 운영 모드(F-13): 이번 주는 바뀔 때 로그만. 모드가 다를 때 처리(IR-73)는 다음 주
-        self._system_mode = ""
+        # 운영 모드(F-13, IR-73): 받으면 Pode마다 set_mode, 받기 전에는 아무것도 하지 않는다
+        # TODO(Q-24): 연결 거부 기준, 모드 전 목표 거절(IR-72), 팔, 관리자 알림
+        self._mode_sync = ModeSync(robots)
+        self._set_mode = {r: self.create_client(SetMode, name("robot_set_mode", robot=r))
+                          for r in robots}
+        self._mode_futures = {}
         self.create_subscription(
             SystemMode, name("system_mode"), self._on_system_mode, self._qos("system_mode"))
         self._move = {}
@@ -176,6 +181,7 @@ class FleetManagerNode(Node):
 
     # ---- 토픽과 서비스 수신 콜백 ----
     def _on_robot_state(self, robot, msg: RobotState) -> None:
+        self._mode_sync.on_state(robot, msg.mode, msg.boot_id, time.monotonic())
         if not self.silent() and self._reachable(robot):
             self.core.on_robot_state(robot, *adapters.robot_report(msg),
                                      adapters.robot_report_id(msg),
@@ -189,10 +195,8 @@ class FleetManagerNode(Node):
         return robot in self._reached
 
     def _on_system_mode(self, msg: SystemMode) -> None:
-        # TODO(Q-nn): IR-73 모드가 다르면 연결 거부·알림, 로봇 set_mode, 안 맞으면 배정 제외
-        if msg.mode != self._system_mode:
-            self._system_mode = msg.mode
-            self.get_logger().info(f"system mode {msg.mode}")
+        if self._mode_sync.on_system_mode(msg.mode):
+            self.get_logger().info(f"system mode {msg.mode}, telling the robots")
 
     def _on_order_board(self, msg: OrderBoard) -> None:
         self.core.on_order_board(adapters.order_board_mode(msg), adapters.order_board_orders(msg))
@@ -214,11 +218,46 @@ class FleetManagerNode(Node):
         now = self._now()
         if now <= 0.0 or self.silent():
             return
+        self._sync_modes(time.monotonic())
         for command in self.core.tick():
             self._dispatch(command, now)
         self._retry_cancels(now)
         self._flush_reports(now)
         self._publish_snapshots(now)
+
+    # ---- 운영 모드: set_mode 부르기, 모드가 다른 Pode를 코어에 알리기 ----
+    def _sync_modes(self, now: float) -> None:
+        mode = self._mode_sync.system_mode
+        missing = set(self._mode_sync.no_server)
+        ready = lambda r: self._set_mode[r].service_is_ready()  # noqa: E731
+        calls = self._mode_sync.due(now, ready)
+        for robot in self._mode_sync.expired:
+            old = self._mode_futures.pop(robot, None)
+            if old is not None and not old.done():
+                self._set_mode[robot].remove_pending_request(old)
+        for robot, request_id in calls:
+            client = self._set_mode[robot]
+            old = self._mode_futures.pop(robot, None)
+            if old is not None and not old.done():
+                client.remove_pending_request(old)
+            future = client.call_async(SetMode.Request(request_id=request_id, mode=mode))
+            future.add_done_callback(partial(self._mode_answered, robot, request_id))
+            self._mode_futures[robot] = future
+        for robot in sorted(self._mode_sync.no_server - missing):
+            self.get_logger().warning(f"{robot} has no set_mode server, mode {mode} not told")
+        for robot, blocked, detail in self._mode_sync.changes():
+            self.core.set_mode_blocked(robot, blocked, detail)
+
+    def _mode_answered(self, robot, request_id, future) -> None:
+        self._mode_sync.on_answer(robot, request_id)
+        try:
+            reply = future.result()
+        except Exception as exc:  # noqa: BLE001
+            self.get_logger().warning(f"set_mode on {robot} failed: {exc}")
+            return
+        if not reply.accepted:
+            self.get_logger().warning(
+                f"{robot} refused mode: {reply.reason} {reply.detail}".rstrip())
 
     def _retry_cancels(self, now: float) -> None:
         params = self.core.params
@@ -443,7 +482,7 @@ def main() -> None:
     rclpy.init()
     node = FleetManagerNode(record=args.record)
     try:
-        # TODO(Q-nn): IR-30 예외. 단일 스레드, call_async만 쓰고 콜백에서 기다리지 않음
+        # TODO(Q-23): IR-30 예외. 단일 스레드, call_async만 쓰고 콜백에서 기다리지 않음
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass

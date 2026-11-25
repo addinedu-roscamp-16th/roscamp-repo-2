@@ -93,9 +93,17 @@ def test_report_order_matches_the_contract_0_6_text():
     assert srv.read_text(encoding="utf-8") == REPORT_ORDER_0_6
 
 
-def test_the_contract_is_version_0_7():
+def test_the_contract_is_version_0_8():
     import yaml
-    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.7
+    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.8
+
+
+# ---- 계약 0.8: 로봇 운영 모드 (SetMode, IR-73) ----
+def test_every_robot_has_a_set_mode_service(contract):
+    robots = ("pode1", "pode2", "pode3", "arm_left", "arm_right", "arm_ship")
+    assert contract.placeholders["robot"] == list(robots)
+    assert contract.name("robot_set_mode", robot="pode2") == "/pode2/set_mode"
+    assert contract.type("robot_set_mode") == "fleet_interfaces/srv/SetMode"
 
 
 # ---- 계약 0.7: 주문 흐름 1차 (SubmitTrip · Hello · ReportTrip · SystemMode) ----
