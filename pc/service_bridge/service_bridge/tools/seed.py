@@ -1,4 +1,4 @@
-"""시험 데이터: 상품 A ~ D(재고 20, 원장 입고)와 시험 계정 (설계 8.1)."""
+# ---- 시험 데이터: 상품 A ~ D(재고 20, 원장 입고)와 시험 계정 ----
 import psycopg
 
 KINDS = ("A", "B", "C", "D")  # sim/fake_robots/scenarios와 같은 이름

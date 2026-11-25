@@ -1,9 +1,10 @@
-"""간이 central의 주문판 상태. ROS에 의존하지 않는다 (설계 7절)."""
+# ---- 간이 central의 메모리 주문판 (ROS 의존 없음, 재시작하면 비어 있음) ----
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 INVALID_REQUEST = "INVALID_REQUEST"
+# ReportOrder 끝 상태. ReportOrder 철자는 CANCELED(ReportTrip · DB는 CANCELLED)
 FINAL_STATUSES = frozenset({"SHIPPED", "PARTIAL", "CANCELED", "HELD"})
 
 
@@ -14,10 +15,13 @@ class BoardEntry:
     created_at: object
 
 
+# ---- 접수 · 빼기 · 조회 ----
 class Board:
     def __init__(self):
         self._entries: list[BoardEntry] = []
-        self._answers: dict[str, tuple[bool, str]] = {}  # trip_id -> 처음의 확정 응답
+        # trip_id -> 처음의 확정 응답(접수 · 거절). 같은 trip_id가 다시 오면 그대로 준다 (SB-06).
+        # NOT_READY는 기억하지 않는다(이번 조각에는 내는 경우가 없음)
+        self._answers: dict[str, tuple[bool, str]] = {}
         self._finished: dict[str, str] = {}  # 주문판에서 뺀 trip_id -> 끝 상태
 
     def submit(self, trip_id: str, items: dict, created_at: object) -> tuple[bool, str]:

@@ -1,4 +1,4 @@
-"""브리지 노드: /system/mode 발행, DB 준비 뒤 Hello · ReportTrip 서버 (설계 6.1 ~ 6.5)."""
+# ---- 브리지 노드: /system/mode 발행, DB 준비 뒤 Hello · ReportTrip 서버 ----
 from __future__ import annotations
 
 import time
@@ -20,11 +20,12 @@ from service_bridge.core.reports import apply_report
 from service_bridge.ros import convert
 
 MODES = (SystemMode.MODE_NORMAL, SystemMode.MODE_TEST)
-REQUEST_BUDGET_SEC = 2.5   # 요청 마감 = 받은 시각 + 2.5초
-DB_PROBE_PERIOD_SEC = 0.5
+REQUEST_BUDGET_SEC = 2.5   # 요청 마감 = 받은 시각 + 2.5초 (fleet 호출 한도 3초보다 짧게)
+DB_PROBE_PERIOD_SEC = 0.5  # DB 첫 연결 확인 주기
 DB_PROBE_TIMEOUT_SEC = 0.2  # 실행기 스레드를 오래 잡지 않게 짧게
 
 
+# ---- 노드 만들기와 켜질 때 순서 ----
 class BridgeNode(Node):
     def __init__(self, pool: ConnectionPool, **kwargs):
         super().__init__("service_bridge", **kwargs)
@@ -41,9 +42,11 @@ class BridgeNode(Node):
         self._mode_pub.publish(SystemMode(mode=self._mode, stamp=self.get_clock().now().to_msg()))
         self.get_logger().info(f"system mode {self._mode} 발행")
 
-        # 2. DB 첫 연결이 될 때까지 확인. 되면 3 · 4
+        # 2. DB 첫 연결이 될 때까지 확인. 되면 3 · 4.
+        # 서버가 없는 동안 fleet은 시간 초과 뒤 다시 보내므로 잃는 보고가 없다
         self._probe_timer = self.create_timer(DB_PROBE_PERIOD_SEC, self._probe_db)
 
+    # 기본값 없는 필수 매개변수: 빠지거나 NORMAL · TEST가 아니면 켜지지 않는다
     def _read_mode(self) -> str:
         try:
             self.declare_parameter(
@@ -74,7 +77,8 @@ class BridgeNode(Node):
         for node, epoch, boot_id, hello_at in sessions:
             self.get_logger().info(
                 f"bridge_session node={node} epoch={epoch} boot_id={boot_id} hello_at={hello_at}")
-        # 4. 서버 (각자 MutuallyExclusive 그룹)
+        # 4. 서버. 각자 MutuallyExclusive 그룹이라 Hello와 보고는 서로 막지 않고,
+        # 같은 서버의 요청은 하나씩 처리된다. 실행기 스레드 4개는 풀 크기와 같다(main.py)
         self._services = [
             self.create_service(
                 Hello, self._contract.name("hello"), self._on_hello,
@@ -88,13 +92,16 @@ class BridgeNode(Node):
         self._probe_timer = None
         self.get_logger().info("DB 연결됨, Hello · ReportTrip 서버 열림")
 
+    # ---- 끌 때 ----
     def close_servers(self) -> None:
         """끌 때 실행기를 멈추기 전에 서버부터 없앤다 (설계 6.1)."""
         for srv in self._services:
             self.destroy_service(srv)
         self._services = []
 
-    # 서버 콜백: 다른 서비스를 부르거나 기다리지 않음 (IR-31). 어떤 예외도 밖으로 내보내지 않음.
+    # ---- 서버 콜백 ----
+    # 다른 서비스를 부르거나 기다리지 않음 (IR-31). 커밋한 뒤 답함 (IR-12).
+    # 예외를 밖으로 내보내면 실행기가 멈추므로 모두 잡아 accepted=false로 답한다
     def _on_hello(self, request, response):
         deadline = time.monotonic() + REQUEST_BUDGET_SEC
         try:

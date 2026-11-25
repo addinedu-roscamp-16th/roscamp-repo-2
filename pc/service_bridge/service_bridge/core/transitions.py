@@ -1,20 +1,25 @@
-"""운반 건 허용 전이 표(SB-03)와 주문 상태 요약 규칙. DB 없이 동작하는 순수 함수."""
+# ---- 운반 건 허용 전이 표와 주문 상태 요약 규칙 (DB 없는 순수 함수) ----
 
+# ---- 상태 묶음 ----
 STATUSES = frozenset({
     "RECEIVED", "ASSIGNED", "FILLING", "FILLING_PAUSE", "TRANSPORTING",
     "SHIPPED", "PARTIAL", "HELD", "CANCELLED",
 })
+# fleet이 진행 중인 건(fleet 재시작 때 HELD로 보류할 대상)
 ACTIVE = frozenset({"ASSIGNED", "FILLING", "FILLING_PAUSE", "TRANSPORTING"})
 TERMINAL = frozenset({"SHIPPED", "PARTIAL", "CANCELLED"})
 
-# status_history CHECK(ck_status_history_reason)와 같은 13개
+# status_history CHECK(ck_status_history_reason)와 같은 13개. 밖의 값은 이력 reason에 못 쓴다
 TRIP_REASONS = frozenset({
     "OUT_OF_STOCK", "PICK_FAILED", "RECOGNITION_ERROR", "ROBOT_FAULT", "ARM_FAULT",
     "FLEET_RESTART", "USER_CANCEL", "NOTHING_TO_FILL", "STOCK_RECHECK", "FORCED_SHIP",
     "FORCED_PARTIAL", "REASSIGN", "RETURNED_TO_SHELF",
 })
 
-# 주문 DB 설계 5장 "허용 전이" 표 (같은 상태는 is_allowed가 따로 허용)
+# ---- 허용 전이 표 (SB-03, 주문 DB 설계 5절) ----
+# 단계를 건너뛰는 전진은 허용(보고를 최신 상태로 합쳐 보내면 중간 단계가 빠짐).
+# 끝난 상태에서 다른 상태로는 불허. 접수됨 복귀는 번호 비교가 가린다.
+# 같은 상태는 is_allowed가 따로 허용
 _ALLOWED = {
     "RECEIVED": frozenset({"ASSIGNED", "FILLING", "FILLING_PAUSE", "TRANSPORTING", "SHIPPED",
                            "PARTIAL", "HELD", "CANCELLED"}),
@@ -40,6 +45,7 @@ def is_allowed(current: str, new: str) -> bool:
     return current == new or new in _ALLOWED[current]
 
 
+# ---- 주문 상태 요약 (주문 DB 설계 4.4) ----
 def order_summary(trip_statuses: list[str]) -> str:
     """운반 건 상태들로 주문 상태를 계산한다 (주문 DB 설계 4.4 규칙 1 ~ 4).
 
@@ -59,9 +65,11 @@ def order_summary(trip_statuses: list[str]) -> str:
     # 규칙 3: 끝나지 않은 건 중 보류
     if "HELD" in statuses:
         return "HELD"
-    # 규칙 4: 시작한 주문의 남은 접수됨은 배정됨으로 센다 (여기 오면 접수됨 아닌 건이 있다)
+    # 규칙 4: 가장 덜 진행된 단계를 따른다(모두 운반 중일 때만 운반 중).
+    # 시작한 주문의 남은 접수됨은 배정됨으로 센다(여기 오면 접수됨 아닌 건이 있다)
     stages = {_STAGE[s] if s in _STAGE else 0 for s in statuses - TERMINAL}
-    behind = min(stages)  # '가장 늦은' = 가장 덜 진행된 단계 (모두 운반 중일 때만 운반 중)
+    behind = min(stages)
+    # 같은 단계에 담는 중과 담기 일시 중지가 섞이면 일시 중지
     if behind == 1:
         return "FILLING_PAUSE" if "FILLING_PAUSE" in statuses else "FILLING"
     return "TRANSPORTING" if behind == 2 else "ASSIGNED"

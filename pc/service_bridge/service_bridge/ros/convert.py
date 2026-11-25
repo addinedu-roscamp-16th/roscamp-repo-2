@@ -1,4 +1,4 @@
-"""ROS 메시지 ↔ core 자료형 변환."""
+# ---- ROS 메시지 ↔ core 자료형 변환 ----
 from fleet_interfaces.msg import OrderItem
 from fleet_interfaces.srv import Hello, ReportTrip
 

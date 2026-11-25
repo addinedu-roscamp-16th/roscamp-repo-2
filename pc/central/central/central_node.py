@@ -1,4 +1,4 @@
-"""간이 central: SubmitTrip 서버 · 주문판 발행 · ReportOrder 서버 (F-04 · F-05 · F-10)."""
+# ---- 간이 central: SubmitTrip 서버 · 주문판 발행 · ReportOrder 서버 (F-04 · F-05 · F-10) ----
 from __future__ import annotations
 
 import rclpy
@@ -11,6 +11,7 @@ from rclpy.node import Node
 from central.board import FINAL_STATUSES, Board
 
 
+# ---- 요청 품목 합치기 ----
 def sum_items(items) -> dict:
     """같은 kind는 합친다. 개수나 kind가 잘못된 항목이 있으면 빈 목록으로 거절시킨다."""
     out: dict = {}
@@ -21,6 +22,7 @@ def sum_items(items) -> dict:
     return out
 
 
+# ---- 노드 만들기 ----
 class CentralNode(Node):
     def __init__(self):
         super().__init__("central")
@@ -35,9 +37,10 @@ class CentralNode(Node):
         self.create_subscription(
             SystemMode, contract.name("system_mode"), self._on_system_mode,
             to_ros_qos(contract.qos("system_mode")))
-        self.create_timer(1.0, self._publish)
+        self.create_timer(1.0, self._publish)  # 바뀔 때 말고도 1초마다 다시 발행
         self._publish()
 
+    # ---- 서버 콜백 ----
     def _submit(self, request, response):
         before = len(self._board.entries())
         response.accepted, response.reason = self._board.submit(
@@ -47,6 +50,7 @@ class CentralNode(Node):
         return response
 
     def _report(self, request, response):
+        # 끝 상태가 아니면 WARN 뒤 accepted=false. 이미 뺐거나 모르는 건도 accepted=true(F-10)
         if request.status not in FINAL_STATUSES:
             self.get_logger().warn(
                 f"끝 상태가 아닌 ReportOrder 거절: order_id={request.order_id} "
@@ -59,11 +63,13 @@ class CentralNode(Node):
             self._publish()
         return response
 
+    # ---- 구독 · 발행 ----
     def _on_system_mode(self, msg: SystemMode) -> None:
         if msg.mode != self._mode:
             self._mode = msg.mode
             self.get_logger().info(f"system mode {msg.mode}")
 
+    # Order.order_id에 trip_id를 싣는다 (F-05)
     def _publish(self) -> None:
         orders = [
             Order(order_id=e.trip_id, created_at=e.created_at,
@@ -74,6 +80,7 @@ class CentralNode(Node):
             stamp=self.get_clock().now().to_msg()))
 
 
+# ---- 실행 ----
 def main(args=None):
     rclpy.init(args=args)
     node = CentralNode()

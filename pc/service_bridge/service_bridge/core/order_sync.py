@@ -1,4 +1,4 @@
-"""운반 건 상태가 바뀐 뒤 주문 요약을 다시 계산해 쓰는 공통 단계 (apply_report · apply_hello)."""
+# ---- 운반 건 상태가 바뀐 뒤 주문 요약을 다시 써 두는 공통 단계 (보고 · Hello) ----
 import psycopg
 
 from service_bridge.core.transitions import TERMINAL, order_summary
@@ -7,7 +7,7 @@ from service_bridge.core.transitions import TERMINAL, order_summary
 def recompute_order_summary(conn: psycopg.Connection, order_id: str, order_cur: str) -> None:
     """주문 요약 다시 계산 (DB 설계 4.4). 바뀌면 `orders`를 고치고 trip_id 없는 이력 한 줄을 쓴다.
 
-    호출한 쪽이 그 주문 행을 `FOR UPDATE`로 잡고 있어야 한다.
+    호출한 쪽이 그 주문 행을 `FOR UPDATE`로 잡고 있어야 한다(`order_cur`는 잠글 때 읽은 값).
     """
     statuses = [s for (s,) in conn.execute(
         "SELECT status FROM trip WHERE order_id = %s", (order_id,)).fetchall()]

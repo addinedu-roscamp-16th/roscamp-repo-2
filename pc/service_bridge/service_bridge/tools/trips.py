@@ -1,9 +1,10 @@
-"""웹 대신 주문 · 운반 건 하나를 넣는다 (설계 8.2 1). 나누지 않는다."""
+# ---- 웹 대신 주문 · 운반 건 하나를 넣는다 (주문을 운반 건으로 나누지 않음) ----
 import datetime
 
 import psycopg
 
 
+# ---- 새로 넣기 ----
 def insert_trip(conn: psycopg.Connection, account_id: int,
                 items: dict[str, int]) -> tuple[str, str]:
     """주문 · 운반 건(seq 1, RECEIVED)과 접수 이력 두 줄을 한 트랜잭션에 넣고 (order_id, trip_id).
@@ -25,6 +26,7 @@ def insert_trip(conn: psycopg.Connection, account_id: int,
         unknown = set(items) - set(products)
         if unknown:
             raise ValueError(f"모르는 상품: {sorted(unknown)}")
+        # 오늘 날짜의 다음 번호. 시험 도구라 동시에 넣는 경우는 생각하지 않는다
         last = conn.execute(
             "SELECT max(order_id) FROM orders WHERE order_id LIKE %s",
             (prefix + "%",)).fetchone()[0]
@@ -43,7 +45,7 @@ def insert_trip(conn: psycopg.Connection, account_id: int,
             conn.execute(
                 "INSERT INTO trip_item (trip_id, product_id, qty_ordered) VALUES (%s, %s, %s)",
                 (trip_id, products[kind], q))
-        for tid in (trip_id, None):  # 운반 건 · 주문
+        for tid in (trip_id, None):  # 운반 건 이력 · 주문 이력(trip_id 없음)
             conn.execute(
                 "INSERT INTO status_history (order_id, trip_id, from_status, to_status, actor, "
                 "account_id) VALUES (%s, %s, NULL, 'RECEIVED', 'USER', %s)",
@@ -51,6 +53,7 @@ def insert_trip(conn: psycopg.Connection, account_id: int,
     return order_id, trip_id
 
 
+# ---- 이미 넣은 건 읽기 ----
 def trip_items(conn: psycopg.Connection, trip_id: str) -> tuple[str, dict[str, int]]:
     """이미 넣은 운반 건의 (order_id, {kind: 주문 수}). 없으면 LookupError."""
     row = conn.execute("SELECT order_id FROM trip WHERE trip_id = %s", (trip_id,)).fetchone()

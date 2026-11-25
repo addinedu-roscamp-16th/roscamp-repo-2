@@ -1,8 +1,6 @@
-"""웹 대신 운반 건 하나를 접수하고 central에 넘긴다 (설계 8.2).
-
-    ros2 run service_bridge submit_trip --items A:1,C:1
-    ros2 run service_bridge submit_trip --trip-id O-20261125-0001-1   # DB에 넣지 않고 다시 보냄
-"""
+# ---- 웹 대신 운반 건 하나를 접수하고 central에 넘긴다 ----
+#     ros2 run service_bridge submit_trip --items A:1,C:1
+#     ros2 run service_bridge submit_trip --trip-id O-20261125-0001-1   # DB에 넣지 않고 다시 보냄
 from __future__ import annotations
 
 import argparse
@@ -32,6 +30,7 @@ GAP_SEC = 1.0
 MAX_TRIES = 5
 
 
+# ---- central에 넘기기 ----
 def submit(node: Node, contract: Contract, order_id: str, trip_id: str,
            items: dict[str, int]) -> tuple[bool, str]:
     """SubmitTrip을 부른다(trip_index 1 / trip_count 1). (accepted, reason), 응답이 없으면
@@ -42,6 +41,7 @@ def submit(node: Node, contract: Contract, order_id: str, trip_id: str,
             request = SubmitTrip.Request(
                 trip_id=trip_id, order_id=order_id, trip_index=1, trip_count=1,
                 items=to_order_items(items), submitted_at=node.get_clock().now().to_msg())
+            # 같은 trip_id로 다시 보내면 central은 처음 응답을 그대로 준다 (F-04)
             response = call_once(client, request, TIMEOUT_SEC)
             if response is not None:
                 return response.accepted, response.reason
@@ -53,6 +53,7 @@ def submit(node: Node, contract: Contract, order_id: str, trip_id: str,
         node.destroy_client(client)
 
 
+# ---- DB에 넣거나 이미 넣은 건 읽기 ----
 def _prepare(opts) -> tuple[str, str, dict[str, int]]:
     with psycopg.connect(dsn_from_env(), autocommit=True) as conn:
         if opts.trip_id:
@@ -67,6 +68,7 @@ def _prepare(opts) -> tuple[str, str, dict[str, int]]:
         return order_id, trip_id, items
 
 
+# ---- 실행 ----
 def main(args=None) -> int:
     parser = argparse.ArgumentParser(description="운반 건 하나를 접수하고 central에 넘긴다")
     group = parser.add_mutually_exclusive_group(required=True)
@@ -75,7 +77,8 @@ def main(args=None) -> int:
     ros_args = rclpy.utilities.remove_ros_args(args if args is not None else sys.argv)
     opts = parser.parse_args(ros_args[1:])
     try:
-        order_id, trip_id, items = _prepare(opts)  # 커밋한 뒤에 부른다
+        # DB 커밋을 먼저 끝낸 뒤 central을 부른다(접수되었는데 DB에 없는 건이 없게)
+        order_id, trip_id, items = _prepare(opts)
     except (ValueError, LookupError) as e:
         print(f"submit_trip: 접수 못 함: {e}")
         return 2
@@ -84,6 +87,7 @@ def main(args=None) -> int:
     node = rclpy.create_node("submit_trip")
     executor = SingleThreadedExecutor()
     executor.add_node(node)
+    # call_once는 실행기 밖 스레드에서 기다려야 하므로 실행기는 따로 돌린다
     spinner = threading.Thread(target=executor.spin, daemon=True)
     spinner.start()
     try:

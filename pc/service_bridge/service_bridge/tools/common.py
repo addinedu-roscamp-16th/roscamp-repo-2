@@ -1,4 +1,4 @@
-"""시험 도구가 같이 쓰는 것: contract 읽기, 품목 변환, 실행기 스레드를 막지 않는 서비스 호출."""
+# ---- 시험 도구 공통: contract 읽기, 품목 변환, 실행기 밖에서 기다리는 서비스 호출 ----
 from __future__ import annotations
 
 import threading
@@ -7,9 +7,10 @@ from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.contract import Contract, load_contract
 from fleet_interfaces.msg import OrderItem
 
-WAIT_SLICE_SEC = 0.05
+WAIT_SLICE_SEC = 0.05  # 기다리는 동안 stop을 확인하는 간격
 
 
+# ---- contract와 품목 ----
 def load_default_contract() -> Contract:
     return load_contract(get_package_share_directory("fleet_interfaces") + "/contract.yaml")
 
@@ -29,6 +30,7 @@ def to_order_items(items: dict[str, int]) -> list[OrderItem]:
     return [OrderItem(kind=k, count=c) for k, c in items.items()]
 
 
+# ---- 서비스 한 번 부르기 ----
 def call_once(client, request, timeout: float, stop: threading.Event | None = None):
     """요청 한 번. 응답이 오면 응답, 한도가 지나거나 stop이면 None.
 
@@ -48,6 +50,7 @@ def call_once(client, request, timeout: float, stop: threading.Event | None = No
         if done.wait(WAIT_SLICE_SEC):
             return future.result()
         waited += WAIT_SLICE_SEC
+    # 한도가 지난 요청은 대기 목록에서 빼 늦게 온 응답을 버린다
     if not future.done():
         client.remove_pending_request(future)
     return future.result() if future.done() else None
