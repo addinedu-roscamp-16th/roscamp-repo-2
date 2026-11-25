@@ -4,11 +4,12 @@ import logging
 
 import psycopg
 from psycopg.types.json import Jsonb
-from psycopg_pool import ConnectionPool, PoolClosed, PoolTimeout
+from psycopg_pool import ConnectionPool
 
-from service_bridge.core.retry import run_tx
+from service_bridge.core.order_sync import recompute_order_summary
+from service_bridge.core.retry import run_tx_guarded
 from service_bridge.core.transitions import (
-    STATUSES, TERMINAL, TRIP_REASONS, is_allowed, order_summary,
+    STATUSES, TERMINAL, TRIP_REASONS, is_allowed,
 )
 from service_bridge.core.types import ReportIn, ReportOut
 
@@ -20,12 +21,12 @@ INT_MIN, INT_MAX = -(2**31), 2**31 - 1
 
 def apply_report(pool: ConnectionPool, rep: ReportIn, deadline: float) -> ReportOut:
     """보고 하나를 반영하고 커밋한 뒤 응답 값을 돌려준다. DB 오류는 accepted=false, DB_ERROR."""
-    try:
-        return run_tx(pool, lambda conn: _apply(conn, rep), deadline)
-    except (psycopg.Error, PoolTimeout, PoolClosed) as e:
+    def on_error(e: Exception) -> ReportOut:
         log.error("보고 반영 실패 (DB 오류): %s (%s, %s) %s: %s",
                   rep.trip_id, rep.epoch, rep.n, rep.status, e)
         return ReportOut(False, reason="DB_ERROR")
+
+    return run_tx_guarded(pool, lambda conn: _apply(conn, rep), deadline, on_error)
 
 
 def _apply(conn: psycopg.Connection, rep: ReportIn) -> ReportOut:
@@ -93,19 +94,7 @@ def _apply(conn: psycopg.Connection, rep: ReportIn) -> ReportOut:
         "robot_id, actor, detail) VALUES (%s, %s, %s, %s, %s, %s, 'SYSTEM', %s)",
         (order_id, rep.trip_id, cur, rep.status, reason, robot_id, detail))
 
-    # 주문 요약 다시 계산 (DB 설계 4.4)
-    statuses = [s for (s,) in conn.execute(
-        "SELECT status FROM trip WHERE order_id = %s", (order_id,)).fetchall()]
-    order_new = order_summary(statuses)
-    if order_new != order_cur:
-        conn.execute(
-            "UPDATE orders SET status = %s, "
-            "finished_at = CASE WHEN %s THEN now() ELSE finished_at END WHERE order_id = %s",
-            (order_new, order_new in TERMINAL, order_id))
-        conn.execute(
-            "INSERT INTO status_history (order_id, trip_id, from_status, to_status, actor) "
-            "VALUES (%s, NULL, %s, %s, 'SYSTEM')",
-            (order_id, order_cur, order_new))
+    recompute_order_summary(conn, order_id, order_cur)
     return ReportOut(True, "APPLIED")
 
 
