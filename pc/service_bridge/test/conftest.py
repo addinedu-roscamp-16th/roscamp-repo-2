@@ -7,6 +7,9 @@ import uuid
 import psycopg
 import pytest
 
+# rclpy 시험은 이 컴퓨터 안에서만 찾는다 (개인 도메인은 시험마다 rclpy.init에서 줌)
+os.environ["ROS_AUTOMATIC_DISCOVERY_RANGE"] = "LOCALHOST"
+
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
 DB_DIR = REPO / "design" / "db"
@@ -14,7 +17,6 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(DB_DIR / "tests"))
 
 from helpers import make_account, make_product  # noqa: E402
-
 from service_bridge.core.db import make_pool  # noqa: E402
 
 DSN = os.environ.get("IFP_PG_DSN", "postgresql://postgres:ifp_test@localhost:55432/postgres")
