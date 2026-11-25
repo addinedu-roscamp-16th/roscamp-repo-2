@@ -1,5 +1,7 @@
 # ---- OrderOrchestrator: 주문판을 받아 로봇에 주문을 묶고 진행하는 자리 ----
-"""주문 처리. 주문판 처리(대기 주문, 용량 검사, 작업대 호출)만 채워져 있고 나머지 몸통은 비어 있다.
+"""주문 처리. 주문판 처리(대기 주문, 용량 검사, 작업대 호출), 배정 응답(`on_dispatch_result` ·
+`on_dispatch_feedback`), 조회(`order_of` · `robot_view`)만 채워져 있고
+나머지(채우기 이후, 고장 처리, 강제 출고) 몸통은 비어 있다.
 흐름은 같은 폴더의 pseudocode.md에 있다.
 
 FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르고, `take_output()`으로 명령을
