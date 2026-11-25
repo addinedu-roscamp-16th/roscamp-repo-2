@@ -1,0 +1,16 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>service_bridge</name>
+  <version>0.1.0</version>
+  <description>주문 처리 서비스 브리지: 관제 보고를 주문 DB에 반영한다</description>
+  <maintainer email="team@example.com">team-2</maintainer>
+  <license>Apache-2.0</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>fleet_interfaces</exec_depend>
+  <exec_depend>rcl_interfaces</exec_depend>
+  <exec_depend>fleet_core</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <test_depend>python3-pytest</test_depend>
+  <test_depend>central</test_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>
