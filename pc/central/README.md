@@ -1,7 +1,10 @@
 # central
 
-주문 처리(처리 순서 · 진행 상황 보고). 관제 PC에서 돈다. DB는 없고, 주문 · 재고 · 화면은 주문 관리 웹 서비스가 맡는다 (A안, `docs/superpowers/specs/2026-11-18-order-db-design.md`).
+주문 흐름 첫 조각의 간이 central. DB 없이 메모리에 주문판만 둔다. 다시 켜면 주문판 · 응답 기억이 사라진다(지원하지 않음, SB-06).
 
-- 발행: `/central/orders` (`OrderBoard`), `/central/events` (`FleetEvent`, FMS도 발행)
-- 서비스: `/central/submit_order` (`SubmitOrder`), `/central/set_run_mode` (`SetRunMode`), `/central/report_order` (`ReportOrder`)
-- 호출: `/fleet/confirm_clear` (`ConfirmClear`)
+- 서비스: `submit_trip` (`SubmitTrip`, 같은 `trip_id`는 처음 응답 그대로), `report_order` (`ReportOrder`, 끝 상태면 주문판에서 뺌)
+- 발행: `order_board` (`OrderBoard`, 바뀔 때마다 + 1초마다)
+- 구독: `system_mode` (`SystemMode`, 바뀔 때 로그만)
+- 이름 · QoS는 `fleet_interfaces/contract.yaml`의 키로 읽는다.
+- 실행: `ros2 run central central`
+- 설계: `docs/superpowers/specs/2026-11-25-bridge-slice1-design.md` 7절

@@ -12,6 +12,6 @@ setup(
     tests_require=['pytest'],
     zip_safe=True,
     entry_points={'console_scripts': [
-
+        'central = central.central_node:main',
     ]},
 )
