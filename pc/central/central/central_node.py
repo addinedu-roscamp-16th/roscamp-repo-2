@@ -8,7 +8,7 @@ from fleet_interfaces.msg import Order, OrderBoard, OrderItem, SystemMode
 from fleet_interfaces.srv import ReportOrder, SubmitTrip
 from rclpy.node import Node
 
-from central.board import Board
+from central.board import FINAL_STATUSES, Board
 
 
 def sum_items(items) -> dict:
@@ -47,7 +47,11 @@ class CentralNode(Node):
         return response
 
     def _report(self, request, response):
-        if not self._board.knows(request.order_id):
+        if request.status not in FINAL_STATUSES:
+            self.get_logger().warn(
+                f"끝 상태가 아닌 ReportOrder 거절: order_id={request.order_id} "
+                f"status={request.status} (ReportOrder 철자는 CANCELED)")
+        elif not self._board.knows(request.order_id):
             self.get_logger().warn(f"모르는 order_id 보고: {request.order_id}")
         before = len(self._board.entries())
         response.accepted = self._board.report(request.order_id, request.status)

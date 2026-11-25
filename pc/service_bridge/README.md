@@ -1,13 +1,13 @@
 # service_bridge
 
-주문 흐름의 서비스 브리지(1차 조각). 웹이 낸 주문을 DB에 두고, central에 `CreateTrip`을 부르고, fleet이 보내는 `ReportTrip`을 받아 주문 상태에 반영합니다.
+주문 흐름의 서비스 브리지(1차 조각). fleet의 `Hello`와 `ReportTrip` 서버(보고를 DB 주문 상태에 반영)이고 `/system/mode`를 발행합니다. central에 운반 건을 넘기는 `SubmitTrip`은 이번 조각에서는 시험 명령 `submit_trip`이 하며, 브리지가 직접 부르는 길은 다음 조각입니다.
 
 - `service_bridge/core/`: ROS 없는 판단 코드(DB 트랜잭션, 상태 전이, 재시도). `pytest`만으로 시험합니다.
 - `service_bridge/ros/`: rclpy 노드와 어댑터.
 - `service_bridge/main.py`: `bridge` 진입점.
 - `service_bridge/tools/`: 시험 도구(`setup_db`, `submit_trip`, `fake_fleet`).
 
-central 쪽 `CreateTrip` 처리는 `pc/central`에 있습니다.
+central 쪽 `SubmitTrip` 처리는 `pc/central`에 있습니다.
 
 ## 실행 · 시험
 

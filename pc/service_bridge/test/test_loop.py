@@ -60,6 +60,7 @@ def test_full_loop(pool, conn, seeded):
         assert count(conn, "status_history where trip_id=%s", trip_id) == 5
         assert boards[-1].orders == []
         assert fleet.duplicates == 4
+        assert fleet.order_reports == 1
     finally:
         ex.shutdown(timeout_sec=2.0)
         if thread is not None:

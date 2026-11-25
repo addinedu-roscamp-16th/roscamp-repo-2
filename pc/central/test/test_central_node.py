@@ -69,3 +69,34 @@ def test_submit_sums_same_kind_and_report_removes():
         peer.destroy_node()
     finally:
         rclpy.shutdown()
+
+
+def test_report_with_non_final_status_is_rejected_and_warned():
+    rclpy.init(domain_id=57)
+    try:
+        node = CentralNode()
+        warns = []
+
+        class _Log:
+            def warn(self, msg):
+                warns.append(msg)
+
+            def info(self, msg):
+                pass
+
+        node.get_logger = lambda: _Log()
+        peer = rclpy.create_node("central_test_peer")
+        ex = SingleThreadedExecutor()
+        ex.add_node(node)
+        ex.add_node(peer)
+        report = peer.create_client(ReportOrder, "/central/report_order")
+        assert report.wait_for_service(timeout_sec=5)
+        bad = ReportOrder.Request(order_id="t9", status="CANCELLED")  # 철자 오류(CANCELED가 맞음)
+        assert _call(ex, report, bad).accepted is False
+        assert len(warns) == 1
+        assert "t9" in warns[0] and "CANCELLED" in warns[0] and "CANCELED" in warns[0]
+        assert not any("모르는 order_id" in w for w in warns)
+        node.destroy_node()
+        peer.destroy_node()
+    finally:
+        rclpy.shutdown()

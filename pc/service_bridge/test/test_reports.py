@@ -145,7 +145,8 @@ def test_exclusive_7001_gives_db_error_within_deadline(pool, conn, seeded):  # R
         holder.execute("select pg_advisory_xact_lock(7001)")
         start = time.monotonic()
         assert apply_report(pool, rep(1, "ASSIGNED"), D()) == ReportOut(False, reason="DB_ERROR")
-        assert time.monotonic() - start < 2.5
+        elapsed = time.monotonic() - start
+        assert 0.9 <= elapsed < 2.5  # 한 번 다시 시도했음
         holder.rollback()
     assert apply_report(pool, rep(1, "ASSIGNED"), D()) == ReportOut(True, "APPLIED")
 
