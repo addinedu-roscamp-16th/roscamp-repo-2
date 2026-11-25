@@ -12,7 +12,7 @@
 
 ## 데이터 흐름 (시험이 확인하는 것)
 
-보고서 항목과 모을 근거는 `reports/주문_배정_연동_테스트_메모.md`에 있습니다. 이 계획은 그 메모의 T-03 ~ T-09를 시험으로 확인할 수 있게 만듭니다.
+보고서 항목과 모을 근거는 `reports/스프린트_3회차/주문_배정_연동_테스트_메모.md`에 있습니다. 이 계획은 그 메모의 T-03 ~ T-09를 시험으로 확인할 수 있게 만듭니다.
 
 | # | 데이터 | 보내는 곳 → 받는 곳 | 시험에서 보는 값 |
 |---|---|---|---|
@@ -69,7 +69,7 @@
 | `pc/fleet_core/test/test_orders_skeleton.py` (고침) | 아직 빈 입력만 "출력 없음"으로 남김 |
 | `pc/fleet_core/test/test_orders_dispatch.py` (새로) | 주문 코어 단위 시험 |
 | `pc/fleet_core/test/test_order_flow.py` (새로) | 코어 통합 시험(FleetManager + 교통 층 + 주문 코어) |
-| `reports/주문_배정_연동_테스트_메모.md` (고침) | 끝에 "모은 근거" 절을 더함 |
+| `reports/스프린트_3회차/주문_배정_연동_테스트_메모.md` (고침) | 끝에 "모은 근거" 절을 더함 |
 
 ---
 
@@ -406,7 +406,7 @@ git commit -m "test(orders): 주문판에서 Pode 배정까지 코어 통합 시
 ### Task 4: 보고서 근거 모으기 · PR
 
 **Files:**
-- Modify: `reports/주문_배정_연동_테스트_메모.md` (끝에 "모은 근거" 절)
+- Modify: `reports/스프린트_3회차/주문_배정_연동_테스트_메모.md` (끝에 "모은 근거" 절)
 
 - [ ] **Step 1: 근거 모으기**
 
@@ -425,7 +425,7 @@ Task 3 Step 4의 세 결과 줄(fleet_core · fleet_manager 통과 수, ruff)도
 - [ ] **Step 3: 커밋**
 
 ```bash
-git add reports/주문_배정_연동_테스트_메모.md docs/superpowers/plans/order-core-dispatch.md
+git add reports/스프린트_3회차/주문_배정_연동_테스트_메모.md docs/superpowers/plans/order-core-dispatch.md
 git commit -m "docs: 주문 코어 배정 단계 계획과 연동 테스트 근거"
 ```
 
