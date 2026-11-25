@@ -1,5 +1,6 @@
-# ---- OrderOrchestrator: 주문판을 받아 로봇에 주문을 묶고 진행하는 자리(뼈대) ----
-"""주문 처리의 뼈대. 몸통은 비어 있고 흐름은 같은 폴더의 pseudocode.md에 있다.
+# ---- OrderOrchestrator: 주문판을 받아 로봇에 주문을 묶고 진행하는 자리 ----
+"""주문 처리. 주문판 처리(대기 주문, 용량 검사, 작업대 호출)만 채워져 있고 나머지 몸통은 비어 있다.
+흐름은 같은 폴더의 pseudocode.md에 있다.
 
 FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르고, `take_output()`으로 명령을
 가져간다. 이름과 시그니처는 FleetManager와 맞물려 있으니 바꾸지 않는다.
@@ -7,7 +8,13 @@ FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르
 """
 from __future__ import annotations
 
-from fleet_core.common.commands import FORCE_NOT_IMPLEMENTED
+from fleet_core.common.commands import (
+    FILL,
+    FORCE_NOT_IMPLEMENTED,
+    CancelDispatchCmd,
+    DispatchCmd,
+    EventOut,
+)
 
 # ---- 다른 모듈이 가져다 쓰는 상태 이름 ----
 FILLING = "FILLING"
@@ -32,6 +39,15 @@ class OrderOrchestrator:
         self._stations = stations
         self._clock = clock
         self._names = tuple(robots)
+        # ---- 주문판과 작업대 호출 ----
+        self._work = next(sid for sid, st in stations.items() if st.action == FILL)
+        self._run_mode = "RUN"
+        self._board = []
+        self._over_capacity = set()  # 용량 초과를 이미 알린 주문 id
+        self._open_calls = []  # 열어 둔 WORK 호출 id, 연 순서
+        self._next_call = 1
+        self._bound = {name: None for name in robots}  # 로봇 -> 묶인 OrderRecord
+        self._out = []
 
     # ---- 주문판, 배차, 팔 보고 입력 ----
     def on_order_board(self, run_mode, orders) -> None:
@@ -40,6 +56,19 @@ class OrderOrchestrator:
         run_mode: "RUN", "PAUSE", "STOP". orders: OrderRecord 목록이고 목록 순서가 우선순위다.
         낼 수 있는 출력: DispatchCmd(로봇 이름 없이 WORK를 부르는 열린 호출), CancelDispatchCmd.
         """
+        self._run_mode = run_mode
+        self._board = list(orders)
+        # ---- 용량 초과 기록: 새 주문판에 남아 있고 여전히 넘는 id만 ----
+        capacity = self.params.basket_capacity
+        over = {o.order_id for o in self._board if sum(o.items.values()) > capacity}
+        for order in self._board:
+            if order.order_id in over and order.order_id not in self._over_capacity:
+                n = sum(order.items.values())
+                self._out.append(EventOut(
+                    "WARN", "ORDER_OVER_CAPACITY",
+                    f"{order.order_id}: {n} items exceed the basket capacity of {capacity}"))
+        self._over_capacity = over
+        self._match_calls()
 
     def on_dispatch_feedback(self, goal_id, robot_id, phase) -> None:
         """교통 층이 호출의 진행을 알릴 때 불린다.
@@ -106,7 +135,25 @@ class OrderOrchestrator:
     # ---- 출력과 조회 ----
     def take_output(self) -> list:
         """쌓아 둔 명령 목록을 주고 비운다. FleetManager가 입력을 넣은 뒤마다 부른다."""
-        return []
+        out, self._out = self._out, []
+        return out
+
+    # ---- 대기 주문과 열린 호출 ----
+    def _waiting_orders(self) -> list:
+        """주문판 순서대로, 로봇에 묶이지 않았고 용량 안인 주문."""
+        bound = {o.order_id for o in self._bound.values() if o is not None}
+        return [o for o in self._board
+                if o.order_id not in bound and o.order_id not in self._over_capacity]
+
+    def _match_calls(self) -> None:
+        """열린 WORK 호출 수를 대기 주문 수에 맞춘다. 넘치면 나중에 연 것부터 거둔다."""
+        want = len(self._waiting_orders())
+        while len(self._open_calls) < want:
+            self._open_calls.append(self._next_call)
+            self._out.append(DispatchCmd(self._next_call, self._work))
+            self._next_call += 1
+        while len(self._open_calls) > want:
+            self._out.append(CancelDispatchCmd(self._open_calls.pop()))
 
     def order_of(self, robot) -> str:
         """로봇에 묶인 주문 id. 없거나 모르는 로봇이면 ""."""

@@ -1,5 +1,5 @@
 """주문 처리 자리의 약속: FleetManager가 기대는 이름과 조회 모양, 그리고 아무 출력도 없음."""
-from fleet_core.common.commands import FILL, ArmDeclined, ArmFault, OrderRecord
+from fleet_core.common.commands import FILL, ArmDeclined, ArmFault
 from fleet_core.common.params import load_params
 from fleet_core.orders.orchestrator import FILLING, SWAPPING, OrderOrchestrator
 from stations import STATIONS
@@ -9,12 +9,9 @@ def make():
     return OrderOrchestrator(STATIONS, load_params(), ["r1"], lambda: 0.0)
 
 
-def test_no_input_gives_any_output():
+def test_inputs_outside_this_scope_give_no_output():
     orders = make()
-    for feed in (lambda: orders.on_order_board("RUN", [OrderRecord("O-001", {"A": 1})]),
-                 lambda: orders.on_dispatch_feedback(1, "r1", "NO_ROBOT"),
-                 lambda: orders.on_dispatch_result(1, True, "r1"),
-                 lambda: orders.on_arm_report(ArmDeclined("r1")),
+    for feed in (lambda: orders.on_arm_report(ArmDeclined("r1")),
                  lambda: orders.on_arm_report(ArmFault("r1", FILL, "workcell", "x")),
                  lambda: orders.on_robot_removed("r1"),
                  lambda: orders.on_robot_reinstated("r1", "EMPTY"),
