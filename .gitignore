@@ -11,3 +11,5 @@ __pycache__/
 *.mcap
 *.pt
 *.onnx
+
+bags/
