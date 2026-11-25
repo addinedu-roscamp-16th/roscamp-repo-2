@@ -1,4 +1,4 @@
-"""주문판에서 Pode 배정까지: 실제 교통 층과 주문 코어를 FleetManager로 묶어 데이터가 오가는지 본다."""
+"""주문판에서 Pode 배정까지: 실제 교통 층과 주문 코어를 FleetManager로 묶어 본다."""
 import json
 
 from fleet_core.common.commands import AssignmentView, OrderRecord
