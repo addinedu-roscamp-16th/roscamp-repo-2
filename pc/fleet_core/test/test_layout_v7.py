@@ -15,9 +15,7 @@ from fleet_core.fleet_map import (
 from fleet_core.fleet_map.model import FOLLOW_PATH, NAV_GOAL, RETREAT
 
 # 자유바닥 저장소 sites/arena_v7.yaml의 실측 치수(진열대 A, 진열대 둘)
-SHELVES = [(0.65, 0.77, 1.56, 0.803), (0.70, 0.365, 0.99, 0.405), (1.25, 0.365, 1.56, 0.405)]
-# 시뮬(Gazebo 월드, 시뮬 지도)만 진열대 A 급행 쪽 면을 2 cm 물린다
-SIM_SHELF_A = (0.65, 0.77, 1.56, 0.783)
+SHELVES = [(0.65, 0.735, 1.56, 0.775), (0.70, 0.3475, 0.99, 0.3875), (1.25, 0.3475, 1.56, 0.3875)]
 # 시뮬 바퀴 충돌 구: 중심에서 바깥 끝 거리(pinky.urdf.xacro)
 SIM_WHEEL_OUTER_M = 0.04855 + 0.028
 # 칸막이 둘(칸막이 3은 없다)
@@ -28,9 +26,8 @@ REAL_NORTH_WALL_Y = 0.975
 # AMCL 지도의 동쪽, 북쪽 벽: 벽 쪽 몸 여유는 이 면으로 잰다
 AMCL_EAST_WALL_X = 1.965
 AMCL_NORTH_WALL_Y = 0.965
-# 급행 줄 y: 실측 띠 가운데에서 2 cm 남쪽
+# 급행 줄 y: 실측 띠 가운데보다 조금 남쪽
 LANE_Y = 0.868
-WALL_SHIFT_M = 0.02
 # 급행 들머리 원호(W_X 다음 네 점, 끝점이 줄 위)
 EXPRESS_ARC = [(1.78, 0.8466), (1.7547, 0.8584), (1.7278, 0.8656), (1.7, LANE_Y)]
 BODY_HALF_M = 0.056          # local footprint 반폭(nav2_params)
@@ -56,18 +53,23 @@ def test_v7_dimensions(site):
     assert [round(b[0] - a[2], 3) for a, b in pairwise(DIVIDERS)] == [0.24]
     assert round(DIVIDERS[0][0], 3) == 0.24
     assert round(SHELVES[2][0] - SHELVES[1][2], 3) == 0.26
-    assert round(NORTH_WALL_Y - SHELVES[0][3], 3) == 0.177  # 지도 벽 기준
-    assert round(REAL_NORTH_WALL_Y - SHELVES[0][3], 3) == 0.172  # 실측 벽 기준
+    assert round(NORTH_WALL_Y - SHELVES[0][3], 3) == 0.205  # 지도 벽 기준
+    assert round(REAL_NORTH_WALL_Y - SHELVES[0][3], 3) == 0.2  # 실측 벽 기준
     # 진열대 A는 폭 0.91, 동쪽 끝 1.56
     assert round(SHELVES[0][2] - SHELVES[0][0], 3) == 0.91 and SHELVES[0][2] == 1.56
+    # 세 진열대 모두 두께 0.04이고, 급행을 뺀 나머지를 아래 통로 둘이 같은 폭으로 나눈다
+    assert {round(s[3] - s[1], 4) for s in SHELVES} == {0.04}
+    south, middle = SHELVES[1][1], SHELVES[0][1] - SHELVES[1][3]
+    assert round(south, 4) == round(middle, 4) == 0.3475
+    assert SHELVES[1][1:4:2] == SHELVES[2][1:4:2]
     # 진열대 자리는 어느 구역도 아니고 그 서쪽 띠는 HALL이다
-    assert site.zone_at(0.66, 0.79) is None and site.zone_at(0.59, 0.79) == "HALL"
+    for y in (0.74, 0.755, 0.772):
+        assert site.zone_at(0.66, y) is None and site.zone_at(0.59, y) == "HALL", y
 
 
-def test_v7_sim_shelf_a_is_2cm_thinner_on_the_express_side(site):
+def test_v7_sim_shelves_are_the_measured_shelves(site):
     assert list(site.shelves) == SHELVES + DIVIDERS
-    assert list(site.sim_shelves) == [SIM_SHELF_A] + SHELVES[1:] + DIVIDERS
-    assert round(SHELVES[0][3] - SIM_SHELF_A[3], 3) == 0.02
+    assert list(site.sim_shelves) == SHELVES + DIVIDERS
 
 
 def test_v7_sim_wheel_spheres_clear_shelf_a_on_the_express_lane(site):
@@ -513,9 +515,9 @@ def test_v7_north_wall_is_the_slam_measurement_and_the_express_stays_open(site):
     """북쪽 벽에 붙은 구역은 지도 벽 0.98까지고 급행 줄 경로 점은 모두 띠 안쪽이다."""
     assert site.bounds()[3] == NORTH_WALL_Y
     assert site.node_pose("O") == (0.285, LANE_Y) and site.node_pose("O_X") == (0.71, LANE_Y)
-    # 줄은 실측 띠 가운데보다 2 cm 남쪽이다
+    # 줄은 실측 띠 가운데보다 1 cm 안쪽으로 남쪽이다
     middle = (REAL_NORTH_WALL_Y + SHELVES[0][3]) / 2
-    assert 0.888 <= middle <= 0.889 and LANE_Y == pytest.approx(0.888 - WALL_SHIFT_M)
+    assert middle == pytest.approx(0.875) and 0 < middle - LANE_Y < 0.01
     assert min(REAL_NORTH_WALL_Y - LANE_Y, LANE_Y - SHELVES[0][3]) > BODY_HALF_M
     # AMCL 북쪽 벽에서도 줄 위 몸 여유가 4 cm 남는다
     assert AMCL_NORTH_WALL_Y - LANE_Y - BODY_HALF_M >= 0.04
@@ -530,7 +532,15 @@ def test_v7_north_wall_is_the_slam_measurement_and_the_express_stays_open(site):
     # 구역은 진열대 면을 따른다
     assert [r[1] for r in site.zones["EXPRESS"].rects] == [SHELVES[0][3]]
     # 띠는 진열대 끝에서 몸 반폭 안까지다
-    assert [0.50, 0.77, 0.594, SHELVES[0][3]] in [list(r) for r in site.zones["HALL"].rects]
+    # 진열대 A 옆 y 범위의 서쪽 HALL은 두 띠뿐이고, 아래 띠는 서쪽 벽부터, 위 띠는 OUT_DOCK 동쪽 끝부터다
+    west = sorted(list(r) for r in site.zones["HALL"].rects
+                  if r[1] < SHELVES[0][3] and r[3] > SHELVES[0][1] and r[0] < SHELVES[0][0])
+    out_dock = site.zones["OUT_DOCK"].rects[0]
+    assert west == [[0.0, SHELVES[0][1], 0.594, out_dock[1]], [out_dock[2], out_dock[1], 0.594, SHELVES[0][3]]]
+    # 동쪽은 진열대 A 동쪽 끝부터 벽까지 한 띠이고 J_E 아래 끝에 닿는다
+    east = [list(r) for r in site.zones["HALL"].rects
+            if r[1] < SHELVES[0][3] and r[3] > SHELVES[0][1] and r[2] > SHELVES[0][2]]
+    assert east == [[SHELVES[0][2], SHELVES[0][1], 1.98, site.zones["J_E"].rects[0][1]]]
     assert round(SHELVES[0][0] - 0.594, 3) <= BODY_HALF_M
 
 
