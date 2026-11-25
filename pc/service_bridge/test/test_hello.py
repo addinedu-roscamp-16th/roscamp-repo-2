@@ -60,3 +60,28 @@ def test_restart_without_active_trips_only_bumps_epoch(pool, conn, seeded):
 def test_bad_hello_rejected(pool, conn, hello, reason):  # Review Focus 4
     assert apply_hello(pool, hello, D()) == HelloOut(False, reason=reason)
     assert count(conn, "bridge_session") == 0
+
+
+def test_order_that_turns_active_between_queries_is_locked_and_held(pool, conn, seeded,
+                                                                    monkeypatch):
+    """후보 주문을 잠그는 사이 다른 트랜잭션이 다른 주문의 건을 ASSIGNED로 커밋해도 보류된다."""
+    from service_bridge.core import hello as hello_mod
+
+    apply_hello(pool, HelloIn("fleet", "b1"), D())
+    t1, t2 = (trip_of(seeded, conn, {"A": 1}) for _ in range(2))
+    assert apply_report(pool, rep(t1, 1, 1, "ASSIGNED"), D()).result == "APPLIED"
+    real, fired = hello_mod._lock_orders, []
+
+    def racing(c, ids):
+        out = real(c, ids)
+        if not fired:  # 첫 잠금 직후, 다른 트랜잭션이 t2를 진행 중으로 커밋
+            fired.append(1)
+            conn.execute("update trip set status = 'ASSIGNED' where trip_id = %s", (t2,))
+        return out
+
+    monkeypatch.setattr(hello_mod, "_lock_orders", racing)
+    assert apply_hello(pool, HelloIn("fleet", "b2"), D()) == HelloOut(True, 2)
+    assert fired
+    for t in (t1, t2):
+        assert trip_state(conn, t)[:3] == ("HELD", 2, 0)
+        assert order_status(conn, t) == "HELD"

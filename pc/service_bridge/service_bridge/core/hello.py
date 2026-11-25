@@ -62,16 +62,31 @@ def _lock_session(conn: psycopg.Connection, node: str) -> tuple[int, str] | None
     ).fetchone()
 
 
+def _lock_orders(conn: psycopg.Connection, order_ids: list[str]) -> dict[str, str]:
+    return dict(conn.execute(
+        "SELECT order_id, status FROM orders WHERE order_id = ANY(%s) ORDER BY order_id "
+        "FOR UPDATE", (order_ids,)).fetchall())
+
+
 def _hold_active(conn: psycopg.Connection, epoch: int) -> None:
-    """진행 중인 운반 건 모두를 HELD로, 번호는 (epoch, 0). 잠금은 orders → trip 순 (SB-05)."""
+    """진행 중인 운반 건 모두를 HELD로, 번호는 (epoch, 0). 잠금은 orders → trip 순 (SB-05).
+
+    진행 중인 건의 주문을 모두 잠글 때까지 후보를 다시 읽는다. 잠근 주문의 건은 다른 트랜잭션이
+    바꿀 수 없으므로(보고도 orders를 먼저 잠금), 그 뒤에는 trip 잠금 대상이 더 늘지 않는다.
+    """
     active = sorted(ACTIVE)
-    orders = dict(conn.execute(
-        "SELECT order_id, status FROM orders WHERE order_id IN "
-        "(SELECT order_id FROM trip WHERE status = ANY(%s)) ORDER BY order_id FOR UPDATE",
-        (active,)).fetchall())
+    orders: dict[str, str] = {}  # 잠근 주문 -> 잠글 때의 상태
+    while True:
+        new_ids = [oid for (oid,) in conn.execute(
+            "SELECT DISTINCT order_id FROM trip WHERE status = ANY(%s) ORDER BY order_id",
+            (active,)).fetchall() if oid not in orders]
+        if not new_ids:
+            break
+        orders.update(_lock_orders(conn, new_ids))
     trips = conn.execute(
-        "SELECT trip_id, order_id, status, robot_id FROM trip WHERE status = ANY(%s) "
-        "ORDER BY trip_id FOR UPDATE", (active,)).fetchall()
+        "SELECT trip_id, order_id, status, robot_id FROM trip "
+        "WHERE status = ANY(%s) AND order_id = ANY(%s) ORDER BY trip_id FOR UPDATE",
+        (active, list(orders))).fetchall()
     for trip_id, order_id, status, robot_id in trips:
         conn.execute(
             "UPDATE trip SET status = 'HELD', report_epoch = %s, report_n = 0 "
