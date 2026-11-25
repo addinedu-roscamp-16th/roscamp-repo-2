@@ -28,6 +28,8 @@ class GoalTracker:
         self._handles: dict = {}
         self._cancels: dict = {}
         self._lost: set = set()
+        self._result_lost: set = set()  # 결과 future를 잃었지만 handle은 쥔 goal(IR-62)
+        self._lost_seen: dict = {}  # 그 goal을 처음 본 시각. 오래되면 놓는다
         self._dropped: list = []
 
     def sent(self, key) -> None:
@@ -44,10 +46,21 @@ class GoalTracker:
         self._handles.pop(key, None)
         self._cancels.pop(key, None)
         self._lost.discard(key)
+        self._result_lost.discard(key)
+        self._lost_seen.pop(key, None)
 
     def lost(self, key) -> None:
         if key in self._cancels:
             self._lost.add(key)
+
+    def result_lost(self, key) -> None:
+        self._pending.discard(key)
+        self._result_lost.add(key)
+
+    def drop_stale_lost(self, now: float, keep_s: float) -> None:
+        for key in list(self._result_lost):
+            if now - self._lost_seen.setdefault(key, now) >= keep_s:
+                self.finished(key)
 
     def cancel(self, key, now: float) -> None:
         if key in self._cancels:
@@ -56,6 +69,9 @@ class GoalTracker:
         if handle is not None:
             handle.cancel_goal_async()
         elif key not in self._pending:
+            return
+        if key in self._result_lost:  # 결과가 올 수 없으니 한 번 보내고 끝낸다
+            self.finished(key)
             return
         self._cancels[key] = _Cancel(now, _factor(self._rand))
 

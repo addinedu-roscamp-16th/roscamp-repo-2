@@ -1,4 +1,4 @@
-"""래퍼의 goal 관리. 순수 파이썬이라 ROS 없이도 돈다."""
+"""래퍼의 goal 관리 시험(ROS 없이 돈다)."""
 from fleet_manager.goal_tracker import GoalTracker, ReportOutbox
 
 RETRY_S = 1.0
@@ -73,7 +73,7 @@ def test_a_goal_is_canceling_from_the_cancel_until_its_end():
 
 
 def test_a_lost_cancel_is_warned_about_once_and_then_dropped():
-    """결과를 잃은 취소는 결과가 다시 오지 않는다. 경고까지만 다시 보내고 그만둔다."""
+    """결과를 잃은 취소는 경고까지만 다시 보내고 그만둔다."""
     goals, handle = running()
     goals.cancel("k", 0.0)
     goals.lost("k")
@@ -84,7 +84,7 @@ def test_a_lost_cancel_is_warned_about_once_and_then_dropped():
 
 
 def test_a_dropped_lost_cancel_is_handed_out_once_so_the_core_can_hear_of_it():
-    """그만둔 취소는 한 번 돌려준다. 노드가 코어에 on_goal_lost로 알린다."""
+    """그만둔 취소는 한 번 돌려주고 노드가 코어에 알린다."""
     goals, handle = running()
     goals.cancel("k", 0.0)
     goals.lost("k")
@@ -415,3 +415,30 @@ def test_a_failed_request_frees_its_place():
     outbox.track(report_id, failed)
     outbox.forget(report_id, failed)
     assert due_limited(outbox, 0.1, 1) == ["b"]
+
+
+def test_a_goal_whose_result_was_lost_keeps_its_handle_for_one_cancel():
+    """결과를 잃은 goal도 아직 돌 수 있다(IR-62). 나중의 취소는 한 번 보내고, 결과가 올 수 없으니 끝낸다."""
+    goals, handle = running()
+    goals.result_lost("k")
+    assert not goals.canceling("k")
+    goals.cancel("k", 0.0)
+    assert handle.cancels == 1 and not goals.canceling("k")
+    assert retry(goals, 10.0) == [] and handle.cancels == 1
+    goals.cancel("k", 11.0)
+    assert handle.cancels == 1, "nothing is left to cancel"
+
+
+def test_a_lost_result_handle_nobody_cancels_is_let_go_after_a_while():
+    """코어가 취소하지 않고 정한 goal(이전 order goal 등)의 handle은 오래 쥐지 않는다."""
+    goals, handle = running()
+    goals.result_lost("k")
+    goals.drop_stale_lost(0.0, 60.0)
+    goals.cancel("k", 1.0)
+    assert handle.cancels == 1, "still held before the time"
+    goals, handle = running()
+    goals.result_lost("k")
+    goals.drop_stale_lost(0.0, 60.0)
+    goals.drop_stale_lost(60.0, 60.0)
+    goals.cancel("k", 61.0)
+    assert handle.cancels == 0, "let go"

@@ -122,7 +122,7 @@ def test_fsm_dock_wait_can_be_canceled_and_stops_on_heartbeat_loss():
     assert fsm.state() == IDLE
 
 
-# ---- 도킹 이름: 거리는 보지 않고, 모르는 이름이면 경고만(2026-11-24 결정) ----
+# ---- 도킹 이름: 거리는 보지 않고, 모르는 이름이면 경고만 ----
 def test_default_dock_ids_are_the_fleet_station_names():
     assert NoMotionParams().dock_ids == ("WORK", "OUTBOUND")
 
