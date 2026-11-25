@@ -1,6 +1,5 @@
 """apply_hello (F-06, 설계 6.3) 시험: 실제 PostgreSQL 시험 DB."""
 import pytest
-
 from service_bridge.core.hello import apply_hello
 from service_bridge.core.reports import apply_report
 from service_bridge.core.types import HelloIn, HelloOut, ReportIn, ReportOut

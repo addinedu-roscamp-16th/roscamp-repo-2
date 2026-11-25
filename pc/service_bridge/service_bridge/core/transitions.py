@@ -41,7 +41,10 @@ def is_allowed(current: str, new: str) -> bool:
 
 
 def order_summary(trip_statuses: list[str]) -> str:
-    """운반 건 상태들로 주문 상태를 계산한다 (주문 DB 설계 4.4 규칙 1 ~ 4). 입력은 비어 있지 않다."""
+    """운반 건 상태들로 주문 상태를 계산한다 (주문 DB 설계 4.4 규칙 1 ~ 4).
+
+    입력은 비어 있지 않다.
+    """
     statuses = set(trip_statuses)
     # 규칙 1: 모두 끝남
     if statuses <= TERMINAL:

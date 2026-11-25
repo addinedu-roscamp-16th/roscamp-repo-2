@@ -3,7 +3,6 @@ import re
 from pathlib import Path
 
 import pytest
-
 from service_bridge.core.transitions import TRIP_REASONS, is_allowed, order_summary
 
 REPO = Path(__file__).resolve().parents[3]

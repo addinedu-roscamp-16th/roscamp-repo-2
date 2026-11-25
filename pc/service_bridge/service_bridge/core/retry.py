@@ -32,7 +32,10 @@ DB_ERRORS = (psycopg.Error, PoolTimeout, PoolClosed)
 
 def run_tx_guarded(pool: ConnectionPool, fn: Callable[[psycopg.Connection], T], deadline: float,
                    on_db_error: Callable[[Exception], T]) -> T:
-    """`run_tx`에 DB 오류(psycopg · 풀 시간 초과 · 풀 닫힘) 감싸기를 더한다. 오류면 `on_db_error(e)`."""
+    """`run_tx`에 DB 오류(psycopg · 풀 시간 초과 · 풀 닫힘) 감싸기를 더한다.
+
+    오류면 `on_db_error(e)`.
+    """
     try:
         return run_tx(pool, fn, deadline)
     except DB_ERRORS as e:

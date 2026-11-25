@@ -1,4 +1,7 @@
-"""fleet 시작 Hello: epoch 발급과 진행 중 운반 건 보류 (F-06, 설계 6.3). 한 트랜잭션, ROS 의존 없음."""
+"""fleet 시작 Hello: epoch 발급과 진행 중 운반 건 보류 (F-06, 설계 6.3).
+
+한 트랜잭션, ROS 의존 없음.
+"""
 import logging
 
 import psycopg

@@ -9,7 +9,10 @@ from psycopg_pool import ConnectionPool
 from service_bridge.core.order_sync import recompute_order_summary
 from service_bridge.core.retry import run_tx_guarded
 from service_bridge.core.transitions import (
-    STATUSES, TERMINAL, TRIP_REASONS, is_allowed,
+    STATUSES,
+    TERMINAL,
+    TRIP_REASONS,
+    is_allowed,
 )
 from service_bridge.core.types import ReportIn, ReportOut
 

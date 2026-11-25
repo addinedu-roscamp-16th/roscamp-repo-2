@@ -1,6 +1,5 @@
 """간이 주문판: 받은 순서, 응답 기억, 끝난 건 빼기."""
 import pytest
-
 from central.board import Board
 
 NOW = object()
