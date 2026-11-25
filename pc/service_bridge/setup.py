@@ -13,5 +13,8 @@ setup(
     zip_safe=True,
     entry_points={'console_scripts': [
         'bridge = service_bridge.main:main',
+        'setup_db = service_bridge.tools.setup_db:main',
+        'submit_trip = service_bridge.tools.submit_trip:main',
+        'fake_fleet = service_bridge.tools.fake_fleet:main',
     ]},
 )

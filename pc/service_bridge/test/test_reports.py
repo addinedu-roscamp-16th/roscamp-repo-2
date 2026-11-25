@@ -1,55 +1,22 @@
 """apply_report (F-09, 설계 6.4) 시험: 실제 PostgreSQL 시험 DB."""
-import itertools
 import time
 
 import psycopg
 import pytest
-
 from service_bridge.core.db import make_pool
 from service_bridge.core.reports import apply_report
 from service_bridge.core.types import ReportIn, ReportOut
+from service_bridge.tools.trips import insert_trip
 
 E = 7
-_seq = itertools.count(1)
 
 
 def D() -> float:
     return time.monotonic() + 2.5
 
 
-def make_trip(conn, account_id, products, items: dict[str, int]) -> str:
-    """웹이 넣는 것처럼 주문 · 운반 건 하나(RECEIVED)와 접수 이력 두 줄을 넣는다. Task 7에서 바꿈."""
-    order_id = f"O-T-{next(_seq):04d}"
-    trip_id = f"{order_id}-1"
-    conn.execute(
-        "insert into orders (order_id, account_id, status) values (%s, %s, 'RECEIVED')",
-        (order_id, account_id),
-    )
-    for kind, q in items.items():
-        conn.execute(
-            "insert into order_item (order_id, product_id, qty_ordered) values (%s, %s, %s)",
-            (order_id, products[kind], q),
-        )
-    conn.execute(
-        "insert into trip (trip_id, order_id, seq, status) values (%s, %s, 1, 'RECEIVED')",
-        (trip_id, order_id),
-    )
-    for kind, q in items.items():
-        conn.execute(
-            "insert into trip_item (trip_id, product_id, qty_ordered) values (%s, %s, %s)",
-            (trip_id, products[kind], q),
-        )
-    for tid in (trip_id, None):
-        conn.execute(
-            "insert into status_history (order_id, trip_id, from_status, to_status, actor, "
-            "account_id) values (%s, %s, NULL, 'RECEIVED', 'USER', %s)",
-            (order_id, tid, account_id),
-        )
-    return trip_id
-
-
 def trip_of(seeded, conn, items):
-    return make_trip(conn, seeded["account_id"], seeded["products"], items)
+    return insert_trip(conn, seeded["account_id"], items)[1]
 
 
 def rep_for(trip):

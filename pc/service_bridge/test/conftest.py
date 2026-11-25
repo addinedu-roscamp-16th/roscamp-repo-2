@@ -14,10 +14,9 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 REPO = ROOT.parents[1]
 DB_DIR = REPO / "design" / "db"
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(DB_DIR / "tests"))
 
-from helpers import make_account, make_product  # noqa: E402
 from service_bridge.core.db import make_pool  # noqa: E402
+from service_bridge.tools.seed import seed  # noqa: E402
 
 DSN = os.environ.get("IFP_PG_DSN", "postgresql://postgres:ifp_test@localhost:55432/postgres")
 TEMPLATE = "sb_tmpl"
@@ -63,7 +62,5 @@ def conn(test_db):
 
 @pytest.fixture
 def seeded(conn):
-    """USER 계정 하나와 A~D 상품(재고 20). Task 7의 seed가 생기면 그쪽으로 바꾼다."""
-    account_id = make_account(conn, role="USER")
-    products = {k: make_product(conn, k, qty=20) for k in "ABCD"}
-    return {"account_id": account_id, "products": products}
+    """USER 계정 하나와 A~D 상품(재고 20). setup_db와 같은 seed."""
+    return seed(conn)

@@ -14,7 +14,7 @@ from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
 from service_bridge.core.db import make_pool  # noqa: E402
 from service_bridge.ros.bridge_node import BridgeNode  # noqa: E402
-from test_reports import make_trip  # noqa: E402
+from service_bridge.tools.trips import insert_trip  # noqa: E402
 
 DOMAIN = 58
 
@@ -71,7 +71,7 @@ def test_mode_must_be_given_and_valid(ros, pool, overrides):
 
 
 def test_report_trip_round_trip(spin, pool, conn, seeded):
-    trip = make_trip(conn, seeded["account_id"], seeded["products"], {"A": 1})
+    _, trip = insert_trip(conn, seeded["account_id"], {"A": 1})
     bridge = BridgeNode(pool, parameter_overrides=_mode("TEST"))
     peer = rclpy.create_node("bridge_test_peer")
     spin(bridge, peer)
