@@ -14,6 +14,7 @@
 | 브랜치 · PR · 병합 · 버전 · 태그 | `docs/브랜치_운영_안내.md` (기준 브랜치 `dev`, PR로만 병합) |
 | 실물 망 통신 설정 · 디스커버리 서버 · 도메인 | `docs/설계/디스커버리_서버_안내.md` (설정은 `tools/net/net_ds.sh` 한 곳) |
 | 빌드 · 실행 · ROS 도메인 | `docs/개발_규칙.md` |
+| 서비스 브리지 코드 · 시험 도구 (실행 · 시험 명령) | `pc/service_bridge/README.md` |
 | 화면 · 다이어그램 · 스토리보드 | `design/README.md` |
 | 주문 DB | `docs/superpowers/specs/2026-11-18-order-db-design.md`, `design/db/README.md` |
 

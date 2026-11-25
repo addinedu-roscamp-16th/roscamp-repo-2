@@ -42,8 +42,8 @@ python -m pytest tests/service_bridge -q
 
 ## 나중에 할 일
 
-실제 서비스 브리지 코드가 `pc/central`에 생기면 다음 순서로 옮깁니다.
+실제 서비스 브리지 코드가 `pc/service_bridge`에 생기면 다음 순서로 옮깁니다.
 
 1. 테스트의 import를 제품 코드로 바꿉니다.
-2. 테스트를 `pc/central/test/`로 옮깁니다(팀 관례: 패키지별 `test/`).
+2. 테스트를 `pc/service_bridge/test/`로 옮깁니다(팀 관례: 패키지별 `test/`).
 3. `reference/`를 지웁니다.
