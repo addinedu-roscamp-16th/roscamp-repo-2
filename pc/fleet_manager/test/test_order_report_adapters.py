@@ -73,6 +73,10 @@ class _Interfaces:
         self._on_order_board = self._on_confirm_clear = self._on_reinstate = object()
         self._on_force_ship = object()
         self._on_system_mode = object()
+        self._core_group = self._inbox_group = None  # IR-30 콜백 그룹 자리
+
+    def _post(self, handler, *args):
+        handler(*args)
 
     def _qos(self, key):
         return None
@@ -80,13 +84,13 @@ class _Interfaces:
     def create_publisher(self, *args):
         return None
 
-    def create_subscription(self, *args):
+    def create_subscription(self, *args, **_):
         return None
 
-    def create_client(self, *args):
+    def create_client(self, *args, **_):
         return None
 
-    def create_service(self, kind, name, callback):
+    def create_service(self, kind, name, callback, **_):
         self.services.append((kind, name, callback))
 
 
@@ -112,7 +116,7 @@ def test_the_force_ship_callback_asks_the_core_and_fills_the_response():
     core = SimpleNamespace(force_ship=lambda order_id: asked.append(order_id)
                            or (False, "NOT_IMPLEMENTED"))
     response = node.FleetManagerNode._on_force_ship(
-        SimpleNamespace(core=core), SimpleNamespace(order_id="O-007"),
+        SimpleNamespace(core=core, _drain=lambda: None), SimpleNamespace(order_id="O-007"),
         SimpleNamespace(accepted=None, reason=None))
     assert asked == ["O-007"]
     assert (response.accepted, response.reason) == (False, "NOT_IMPLEMENTED")

@@ -1,6 +1,8 @@
 # ---- 관제와 로봇 사이 연결의 이름, 타입, QoS 원본 ----
 
-version: 0.7
+version: 0.8
+# 0.8 (2026-11-25): 로봇 ↔ fleet — /{robot}/set_mode 서비스(SetMode), RobotState에 boot_id · lock · last_request_id · mode · forced · detail 칸 (명세 v0.2 4.4 · 4.5),
+#   이름 틀 robot 추가.
 # 0.7 (2026-11-24): 주문 흐름 1차 — /central/submit_trip · /bridge/hello · /bridge/report_trip 서비스, /system/mode 토픽 추가.
 #   팔 이름 arm1 · arm2 · arm3 → arm_left · arm_right · arm_ship (명세 v0.2, 주문 흐름 1차 4.6).
 
@@ -8,6 +10,7 @@ version: 0.7
 placeholders:
   pode: [pode1, pode2, pode3]
   arm: [arm_ship]
+  robot: [pode1, pode2, pode3, arm_left, arm_right, arm_ship]
 
 # ---- QoS 프로필 ----
 qos_profiles:
@@ -46,3 +49,4 @@ services:
   - {key: submit_trip, name: "/central/submit_trip", type: fleet_interfaces/srv/SubmitTrip}
   - {key: hello, name: "/bridge/hello", type: fleet_interfaces/srv/Hello}
   - {key: report_trip, name: "/bridge/report_trip", type: fleet_interfaces/srv/ReportTrip}
+  - {key: robot_set_mode, name: "/{robot}/set_mode", type: fleet_interfaces/srv/SetMode, real_only: true}

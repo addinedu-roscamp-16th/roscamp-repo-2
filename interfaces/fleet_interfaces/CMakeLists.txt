@@ -31,6 +31,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
       "srv/SubmitTrip.srv"
       "srv/Hello.srv"
       "srv/ReportTrip.srv"
+      "srv/SetMode.srv"
       DEPENDENCIES geometry_msgs nav_msgs builtin_interfaces)
 install(FILES contract.yaml DESTINATION share/${PROJECT_NAME})
 ament_export_dependencies(rosidl_default_runtime)
