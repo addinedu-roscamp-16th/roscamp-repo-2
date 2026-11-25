@@ -1,6 +1,6 @@
 # 주문 관리 DB 설계 (ERD)
 
-- 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영) · 2026-11-20 (DB v1.1: 통신 규칙 검토 3장 #18 · #20 · #21 · #22 · #25 · #34 · #37 반영 — 보고 번호 · 중복 키 칸, `ws_event` · `bridge_session`, 사유 코드 contract 이름, 보고 반영 규칙)
+- 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영) · 2026-11-24 (SB-01 · SB-03 · SB-05 확정: 같거나 작은 번호는 `DUPLICATE`, 허용 전이 표, 잠금 순서 7001 → orders → trip → 원장 행, 잠금 7001 설명) · 2026-11-20 (DB v1.1: 통신 규칙 검토 3장 #18 · #20 · #21 · #22 · #25 · #34 · #37 반영 — 보고 번호 · 중복 키 칸, `ws_event` · `bridge_session`, 사유 코드 contract 이름, 보고 반영 규칙)
 - 상태: 승인 (2026-11-19) · 구현 계획 `docs/superpowers/plans/2026-11-19-order-db.md` · 구현 `design/db/`
 - 산출물: `design/db/order_db.dbml` (원본), 여기서 만드는 ERD PNG(제출용)와 PostgreSQL DDL
 - 관련 문서: `docs/설계/통신_규칙.md` · `docs/설계/인터페이스_명세.md`(11-20. 결정 표 원문은 커밋 `869c359`의 `docs/통신_규칙_인터페이스_검토.md` 3장), `docs/fleet-v1_HELD_검토.md`(5장 논의 결과), `2026-11-19-close-db-discussion.md`(마감 토의 기록), `design/다이어그램_수정_요청.md`(R-15 ~ R-20)
@@ -452,11 +452,25 @@ app_setting · ws_event · bridge_session (독립)
 - **재고 차감 (6-1-3 #33, OMS-06)**: 운반 건이 출고됨 · 일부 출고됨이 될 때 상품마다 `qty_placed`만큼 `SHIP` 한 줄 (`trip_id`). 강제 출고 처리 · 일부 출고 강제 처리도 같다. 취소됨 · 선반에 되돌림은 차감 없음.
 - **출고 차감이 재고 0 아래로 가면**: 차감만 따로 시도(SAVEPOINT)하고, 실패하면 출고됨 기록은 남기고 `NEGATIVE_STOCK` 알림을 연다. 관리자가 수시 조정 등으로 맞춘 뒤 차감한다.
 - **진행 보고 반영 (통신 규칙 #18 · #37)**: 브리지가 받은 `ReportTrip` · `ReportCommand` · `ReportEvent`를 DB에 쓰는 곳은 **웹 서비스의 함수 하나(`apply_report`)**다. 브리지는 이 함수가 커밋한 뒤 응답하고, 응답이 없으면 보낸 쪽이 같은 번호로 다시 보낸다. 한 트랜잭션에서:
-  - `ReportTrip`: 운반 건마다 `(report_epoch, report_n)`을 `trip`의 값과 비교한다. **더 클 때만 반영**하고(상태 · `placed` · `missing` · `placed_at`, 이력, 주문 요약, 재고 차감, `trip.report_epoch` · `report_n` 갱신), **같거나 작으면 아무것도 바꾸지 않고 ACK만** 한다 (재전송 · 재시작 이전의 늦은 보고). 접수됨 복귀가 정상 전이이므로 상태 순서가 아니라 번호로 가린다. 번호는 더 크지만 **허용되지 않는 전이**(예: 이미 끝난 운반 건에 다른 결과, 웹이 취소됨으로 쓴 뒤의 배정됨)는 덮어쓰지 않고 `LATE_REPORT` 알림을 연다 → 관리자 확인 뒤 출고 차감 (`account_id` 채움). 처음 배정됨이 되면 `first_assigned_at`을 한 번만 채운다.
+  - `ReportTrip`: 운반 건마다 `(report_epoch, report_n)`을 `trip`의 값과 비교한다. **더 클 때만 반영**하고(상태 · `placed` · `missing` · `placed_at`, 이력, 주문 요약, 재고 차감, `trip.report_epoch` · `report_n` 갱신), **같거나 작으면 아무것도 바꾸지 않고 `DUPLICATE`로 ACK만** 한다 (재전송 · 재시작 이전의 늦은 보고, IR-24). 접수됨 복귀가 정상 전이이므로 상태 순서가 아니라 번호로 가린다. 번호는 더 크지만 **허용되지 않는 전이**(아래 "허용 전이" 표. 예: 이미 끝난 운반 건에 다른 결과, 웹이 취소됨으로 쓴 뒤의 배정됨)는 덮어쓰지 않고 `LATE_REPORT` 알림을 연다 → 관리자 확인 뒤 출고 차감 (`account_id` 채움). 처음 배정됨이 되면 `first_assigned_at`을 한 번만 채운다.
   - `ReportCommand`: `admin_action.request_id`로 줄을 찾아 `final_result`를 쓴다 (4.9).
   - `ReportEvent`: `alert.event_id`가 이미 있으면 ACK만 한다.
   - 반영한 상태 변화는 같은 트랜잭션에서 `ws_event`에 남고 NOTIFY된다 (4.14).
 - **`Hello` (통신 규칙 #18, 9장 2절 5)**: `bridge_session`의 그 노드 `epoch`를 1 늘려 돌려준다. fleet이 새 `epoch`로 `Hello`를 부르면 직전 `epoch`에서 배정됨 ~ 운반 중이던 운반 건을 보류(`FLEET_RESTART`)로 쓴다. 다시 배정할 운반 건 목록(`ListOpenTrips`)은 `trip.created_at`(= `submitted_at`) 순으로 답한다 (#21).
+- **허용 전이 (SB-03, 2026-11-24 확정)**: 번호가 더 큰 `ReportTrip`의 상태가 지금 `trip.status`에서 아래로 가면 반영(`APPLIED`), 아니면 `LATE_REPORT`. fleet은 기다리는 보고를 최신 상태로 바꿔 끼우므로(IR-23) 중간 단계가 빠진 채 올 수 있어, **앞으로 건너뛰는 전이는 허용**한다.
+
+  | 지금 상태 | 허용 (번호가 더 크면 반영) | `LATE_REPORT` |
+  |---|---|---|
+  | RECEIVED | ASSIGNED · FILLING · FILLING_PAUSE · TRANSPORTING · SHIPPED · PARTIAL · HELD · CANCELLED(D-14) | – |
+  | ASSIGNED | FILLING · FILLING_PAUSE · TRANSPORTING · SHIPPED · PARTIAL · HELD · CANCELLED(D-14) · RECEIVED(되돌림 `REASSIGN`) | – |
+  | FILLING · FILLING_PAUSE | 서로, TRANSPORTING · SHIPPED · PARTIAL · HELD · CANCELLED(D-14) · RECEIVED(`REASSIGN`) | ASSIGNED |
+  | TRANSPORTING | SHIPPED · PARTIAL · HELD | RECEIVED · ASSIGNED · FILLING · FILLING_PAUSE · CANCELLED |
+  | HELD | SHIPPED · PARTIAL(강제 출고 처리) · RECEIVED(선반에 되돌림 · `REASSIGN`) · ASSIGNED · FILLING · TRANSPORTING(이어서 진행) | CANCELLED |
+  | SHIPPED · PARTIAL · CANCELLED (끝) | 같은 상태(번호만 갱신, 예: 웹이 취소됨으로 쓴 뒤 fleet의 같은 취소됨) | 다른 모든 상태 |
+
+  - 지금과 같은 상태가 오면 칸(`placed` · `missing`)과 번호만 갱신하고 이력은 남기지 않는다.
+  - 이 표는 상태만 본다. 마감 중 배정 · 사용자 취소처럼 다른 규칙이 막는 경우는 그 규칙을 따른다.
+- **잠금 순서 (SB-05, 2026-11-24 확정)**: 재고 원장에 쓸 수 있는 트랜잭션(`apply_report`의 출고 반영, 강제 출고 처리, 마감, 입고 · 반출 등)은 **7001 공유(마감은 배타) → orders(`order_id` 순) → trip(`trip_id` 순) → 원장 행** 순서로 잠근다. 예외 없음. `apply_report`는 `trip`에서 `order_id`만 잠금 없이 읽은 뒤 첫 줄에서 `SELECT pg_advisory_xact_lock_shared(7001)`을 부르고 orders부터 잠근다(원장 트리거가 같은 트랜잭션에서 다시 잡아도 문제없음). 모두 같은 순서를 따르므로 교착이 생기지 않는다. 잠금 7001은 아래 "재고 기록"의 설명을 본다.
 - **주문 요약 상태**: 운반 건 상태를 바꾸는 트랜잭션에서 4.4 규칙으로 `orders.status`를 다시 계산하고, 바뀌면 이력에 `trip_id` 없는 한 줄.
 
 ### 재고 기록
@@ -467,6 +481,16 @@ app_setting · ws_event · bridge_session (독립)
   3. 입력 오류 바로잡기면: 원래 기록이 같은 상품, 입고 또는 반출, 부호 반대, 같은 수량인지 확인한다. 원래 기록이 마지막 확정 마감의 `finished_at`보다 앞서면 거절한다 ("마감 이전 기록은 고칠 수 없음", 날짜가 아니라 시각).
   4. `product.stock_qty`를 바꾸고 `qty_after`를 채운다.
 - 원장은 UPDATE · DELETE 금지 트리거로 막는다.
+- **잠금 7001이란**: 표의 행이 아니라 **번호로 정한 잠금 하나**다(PostgreSQL advisory lock). 같은 번호를 잡으려는 트랜잭션끼리만 서로 기다리고, `pg_advisory_xact_lock…`이라 **트랜잭션이 끝나면(커밋 · 롤백) 저절로 풀린다.** 7001은 이 용도로 정한 번호일 뿐 다른 뜻은 없다. 목적은 마감이 "어느 순간의 재고"를 깨끗하게 잡게 하는 것이다(확정 도중 출고 차감 같은 원장 기록이 끼면 장부 수량과 실사 차이가 어긋남).
+
+  | 잠그는 쪽 | 방식 | 동시에 잡을 수 있는 수 | 막는 것 |
+  |---|---|---|---|
+  | 원장 기록(입고 · 반출 · 출고 차감 · 조정) — 원장 INSERT 트리거 1번 | **공유** `pg_advisory_xact_lock_shared(7001)` | 상한 없음 (실제로는 DB 연결 수 · 연결 풀 크기만큼) | 배타만 |
+  | 마감 시작 · 확정 — 마감 트리거 | **배타** `pg_advisory_xact_lock(7001)` | 1 | 공유 · 배타 모두 |
+
+  - 공유끼리는 막지 않아 원장 기록 여러 개가 동시에 진행된다. 배타는 진행 중인 공유가 모두 끝날 때까지 기다리고, 잡고 있는 동안 새 공유 요청을 모두 기다리게 한다(마감 확정 중에는 출고 차감이 잠깐 멈춤).
+  - PostgreSQL은 기다리는 순서를 지킨다. 마감이 배타를 **기다리는 중**이면 그 뒤에 온 공유 요청도 마감 뒤에 줄을 선다. 그래서 브리지의 `apply_report`는 `lock_timeout`(조사 문서 제안 500ms)을 두고, 넘기면 `accepted=false`로 답해 fleet이 같은 번호로 다시 보내게 한다.
+  - 7001을 잡지 않는 일(주문 접수 · 조회 등)은 영향을 받지 않는다.
 - **재고 부족 알림 (OMS-09)**: 원장 한 줄마다 `LOW_STOCK`을 다시 판단해 열거나 자동 해결한다 (4.8).
 - **마감 직후 입고**: 마감 전에 이미 창고에 넣은 물건을 마감 뒤 입고로 다시 넣으면 두 번 세게 된다. 화면 확인 창으로 막는다 (DB 변경 없음).
 
