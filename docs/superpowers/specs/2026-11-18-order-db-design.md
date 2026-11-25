@@ -1,6 +1,6 @@
 # 주문 관리 DB 설계 (ERD)
 
-- 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영) · 2026-11-24 (SB-01 · SB-03 · SB-05 확정: 같거나 작은 번호는 `DUPLICATE`, 허용 전이 표, 잠금 순서 7001 → orders → trip → 원장 행, 잠금 7001 설명) · 2026-11-20 (DB v1.1: 통신 규칙 검토 3장 #18 · #20 · #21 · #22 · #25 · #34 · #37 반영 — 보고 번호 · 중복 키 칸, `ws_event` · `bridge_session`, 사유 코드 contract 이름, 보고 반영 규칙)
+- 작성일: 2026-11-18 · 고침: 2026-11-19 (기능 목록 11-19 변경 · fleet-v1 검토 · 마감 토의 결정 · 주문 나눔 · 시험 모드 반영) · 2026-11-25 (SB-04 확정: `trip_dispatch` 테이블 추가 4.16, V2 접수 부분 확정: 주문 접수도 7001 공유, `basket_capacity` 원본은 DB · 관제 전달은 `Hello` + 서비스 4.13) · 2026-11-24 (SB-01 · SB-03 · SB-05 확정: 같거나 작은 번호는 `DUPLICATE`, 허용 전이 표, 잠금 순서 7001 → orders → trip → 원장 행, 잠금 7001 설명) · 2026-11-20 (DB v1.1: 통신 규칙 검토 3장 #18 · #20 · #21 · #22 · #25 · #34 · #37 반영 — 보고 번호 · 중복 키 칸, `ws_event` · `bridge_session`, 사유 코드 contract 이름, 보고 반영 규칙)
 - 상태: 승인 (2026-11-19) · 구현 계획 `docs/superpowers/plans/2026-11-19-order-db.md` · 구현 `design/db/`
 - 산출물: `design/db/order_db.dbml` (원본), 여기서 만드는 ERD PNG(제출용)와 PostgreSQL DDL
 - 관련 문서: `docs/설계/통신_규칙.md` · `docs/설계/인터페이스_명세.md`(11-20. 결정 표 원문은 커밋 `869c359`의 `docs/통신_규칙_인터페이스_검토.md` 3장), `docs/fleet-v1_HELD_검토.md`(5장 논의 결과), `2026-11-19-close-db-discussion.md`(마감 토의 기록), `design/다이어그램_수정_요청.md`(R-15 ~ R-20)
@@ -90,7 +90,7 @@
 
 ## 4. 테이블
 
-`※` 표시는 설계자 판단(7절)이다. 자료형은 PostgreSQL 기준. 테이블은 15개다 (11-20에 `ws_event` · `bridge_session` 추가).
+`※` 표시는 설계자 판단(7절)이다. 자료형은 PostgreSQL 기준. 테이블은 16개다 (11-20에 `ws_event` · `bridge_session` 추가, 11-25에 `trip_dispatch` 추가. `trip_dispatch`의 DBML · DDL은 브리지 2조각에서 넣는다).
 
 ### 4.1 account — 계정 · 역할 (OMS-01, SCR-01)
 
@@ -401,7 +401,14 @@ action 값:
 
 - `basket_capacity`의 처음 값은 4 (fleet-v1 `basket_capacity`와 같게). `max_order_items`의 처음 값은 8 (바구니 2개, 11-19 사용자 결정).
 - 바꾸면 `admin_action` `SETTING_CHANGE`에 이전 · 새 값을 남긴다. 마감 중에도 바꿀 수 있다 (재고와 관계없음).
-- 관제(fleet-v1)도 `basket_capacity`를 갖고 있으므로 두 값을 맞추는 방법은 인터페이스 작업으로 넘긴다 (6절).
+- **원본은 이 DB 하나다 (2026-11-25 사용자 결정).** 관리자가 정하는 중요 설정 값은 한 곳에서 관리한다. 관제(fleet-v1)의 `fleet_params.yaml` `basket_capacity`(지금 4, 주석 "추정")는 따로 두지 않고, DB 값을 관제에 전달한다.
+  - 이유: 관제는 품목 합이 자기 값보다 큰 운반 건을 배정하지 않고 `ReportOrder`도 보내지 않는다(경고 `ORDER_OVER_CAPACITY` 한 번, `pc/fleet_core/.../orders/pseudocode.md`). 두 값이 어긋나 웹 값이 크면 운반 건이 "접수됨"으로 멈춘다.
+  - **전달 방식 (2026-11-25 사용자 결정): 켜질 때는 `Hello`, 바뀔 때는 서비스.**
+    - 관제가 켜질 때: 관제가 부르는 `Hello`의 응답에 설정 값을 싣는다. 관제는 `Hello` 응답을 받아야 보고를 시작하므로 그 자체가 확인이다.
+    - 관리자가 바꿀 때: 브리지 → 관제 서비스(이름 예: `/fleet/set_settings`)로 목표 값(IR-21)과 설정 번호를 보내고, 관제는 적용한 번호로 응답한다. 응답이 없으면 같은 번호로 다시 보내고, 관리자 화면은 "관제 적용 대기"였다가 응답을 받으면 "적용됨"으로 바꾼다.
+    - 토픽이 아닌 이유: 중요 설정은 관제가 적용했다는 확인이 필요하다. 액션이 아닌 이유: 곧바로 끝나는 요청이라 IR-10 표의 "한 번 보내는 요청 = 서비스"다.
+  - 시기: 인터페이스 변경(`Hello` 응답 칸, 새 서비스)이라 IR-90 절차로 **다음 주**에 넣는다(contract 0.8 → 0.9). **이번 주는 DB · 관제 모두 4로 둔다.**
+  - 함께 정할 것 (다음 주): 값을 줄였을 때 이미 더 큰 값으로 나뉜 운반 건을 관제가 막지 않는 규칙(DB는 "이미 나뉜 운반 건은 그대로"), 설정 번호를 둘 곳, `max_order_items`도 같은 길로 보낼지.
 
 ### 4.14 ws_event — 화면 WS 사건 (OMS-05, 통신 규칙 #32 · #37)
 
@@ -430,6 +437,25 @@ action 값:
 
 - `ReportCommand` · `ReportEvent`는 `request_id` · `event_id`로 중복을 가리므로 `epoch`를 쓰지 않는다.
 
+### 4.16 trip_dispatch — 운반 건 넘기기 기록 (SB-04, 2026-11-25 확정)
+
+웹이 접수한 운반 건을 브리지가 central에 넘겼는지(`SubmitTrip`) 기록한다. 운반 건 한 건에 한 줄. 브리지는 `central_acked_at`이 빈 줄을 찾아 보낸다. 그래서 브리지가 다시 켜져도 아직 넘기지 못한 건을 찾을 수 있다(서비스 브리지 조사 D-2).
+
+| 칼럼 | 자료형 | 제약 · 설명 |
+|---|---|---|
+| trip_id | text | PK, FK → trip |
+| attempts | integer | NOT NULL DEFAULT 0, CHECK >= 0. central에 보낸 횟수 |
+| next_attempt_at | timestamptz | 다음에 다시 보낼 시각. 이번 주는 비워 둠 |
+| unknown_since | timestamptz | 결과 모름이 시작된 시각(화면 "확인 중"). 이번 주는 비워 둠 |
+| last_result | text | 마지막 응답(`NOT_READY` 등). 이번 주는 비워 둠 |
+| central_acked_at | timestamptz | central이 접수 · 거절로 확정 응답한 시각. NULL이면 아직 넘기지 않은 건 |
+
+- 주문 등록 트랜잭션에서 `orders` · `trip`과 함께 운반 건마다 한 줄을 쓴다. 접수는 됐는데 넘길 기록이 없는 경우가 생기지 않는다.
+- `trip`에 칸을 더하지 않는 이유: `trip`의 `updated_at` · `ws_event` 트리거가 보낼 때마다 돌아 화면 사건이 쌓인다.
+- 보내는 순서는 처음 접수 시각 순(`trip.created_at`, 통신 규칙의 `trip.submitted_at` · Q-16)이다. central 주문판이 처음 접수 시각 순이기 때문이다.
+- 부분 인덱스: `(trip_id) WHERE central_acked_at IS NULL` — 브리지가 1초마다 찾는 줄.
+- 칸 여섯 개를 지금 모두 만들고, 이번 주에는 `trip_id` · `attempts` · `central_acked_at`만 채운다. central이 거절했을 때의 처리는 다음 주에 정한다(지금은 `last_result`만 남긴다).
+
 ### 관계 요약
 
 ```
@@ -440,6 +466,7 @@ account 1 ─< orders 1 ─< order_item >─ 1 product 1 ─< stock_ledger >─ 
                 │  1 ─< alert >─ trip / product
 account 1 ─< admin_action >─ orders / trip / alert / stock_close
 app_setting · ws_event · bridge_session (독립)
+trip 1 ─ 1 trip_dispatch
 ```
 
 ## 5. 동작 규칙 (DB에 걸린 쪽)
@@ -447,6 +474,7 @@ app_setting · ws_event · bridge_session (독립)
 ### 주문 · 운반 건
 
 - **주문 등록 (OMS-03 · 04)**: 같은 `Idempotency-Key`(`orders.idem_key`)로 다시 온 요청은 새로 접수하지 않는다 (통신 규칙 #34). 품목 합 > `max_order_items`이거나 상품마다 주문 수량 > `stock_qty`면 거절 (주문을 기록하지 않음). 재고 초과 거절은 `LOW_STOCK` 알림에 합친다. 통과하면 같은 트랜잭션에서 `orders` · `order_item`과 `basket_capacity` 이하로 나눈 `trip` · `trip_item`을 만든다. 예약하지 않는다(OMS-07 미포함). 마감 중에도 접수는 받는다.
+  - 접수 트랜잭션은 첫 문장에서 7001 공유를 잡고(아래 "재고 기록"의 잠금 7001), `orders` · `trip`과 함께 운반 건마다 `trip_dispatch` 한 줄을 쓴다 (4.16, 2026-11-25 확정).
 - **결품 사전 확인 (6-2 #4, OMS-02)**: 상품마다 `가용 = stock_qty − (v_in_flight 운반 건의 qty_placed 합)`. 가용 < 남은 수량이면 결품. 결품이면 담기 일시 중지 → 관리자가 추가 입고를 등록하고 재개하거나 보충 불가(R-18). 재고는 창고 기준이므로 여기서 결품이면 창고에도 없다. **전제**: 출고 전에 `qty_placed`가 채워져 있어야 한다. fleet-v1은 출고 · 보류 때만 `placed`를 보내므로 이 신호가 없으면 앞선 운반 건 수량을 모른다 (6절).
 - **사용자 취소 (OMS-10, 통신 규칙 #20 · #21 · #22)**: 그 주문의 모든 운반 건이 `RECEIVED`일 때만 (담기를 시작한 운반 건은 사용자 취소됨으로 끝나지 않음, 접수됨으로 돌아온 운반 건은 취소 허용). 웹이 central에 `CancelOrder`를 보내고, **받아들인다는 접수 응답을 받은 트랜잭션 안에서 웹이 직접** 운반 건 · 주문을 취소됨(`USER_CANCEL`, actor USER)으로 쓴다. 거절(`ALREADY_ASSIGNED` · `NOT_FOUND`)이면 쓰지 않는다. 그 뒤 fleet이 같은 취소됨을 보고하면 무시한다 (상태가 같으므로 번호만 갱신하고 ACK). 판단 주인은 통신 규칙 다음 주 논의 1.
 - **재고 차감 (6-1-3 #33, OMS-06)**: 운반 건이 출고됨 · 일부 출고됨이 될 때 상품마다 `qty_placed`만큼 `SHIP` 한 줄 (`trip_id`). 강제 출고 처리 · 일부 출고 강제 처리도 같다. 취소됨 · 선반에 되돌림은 차감 없음.
@@ -470,7 +498,7 @@ app_setting · ws_event · bridge_session (독립)
 
   - 지금과 같은 상태가 오면 칸(`placed` · `missing`)과 번호만 갱신하고 이력은 남기지 않는다.
   - 이 표는 상태만 본다. 마감 중 배정 · 사용자 취소처럼 다른 규칙이 막는 경우는 그 규칙을 따른다.
-- **잠금 순서 (SB-05, 2026-11-24 확정)**: 재고 원장에 쓸 수 있는 트랜잭션(`apply_report`의 출고 반영, 강제 출고 처리, 마감, 입고 · 반출 등)은 **7001 공유(마감은 배타) → orders(`order_id` 순) → trip(`trip_id` 순) → 원장 행** 순서로 잠근다. 예외 없음. `apply_report`는 `trip`에서 `order_id`만 잠금 없이 읽은 뒤 첫 줄에서 `SELECT pg_advisory_xact_lock_shared(7001)`을 부르고 orders부터 잠근다(원장 트리거가 같은 트랜잭션에서 다시 잡아도 문제없음). 모두 같은 순서를 따르므로 교착이 생기지 않는다. 잠금 7001은 아래 "재고 기록"의 설명을 본다.
+- **잠금 순서 (SB-05, 2026-11-24 확정)**: 재고 원장에 쓸 수 있는 트랜잭션(`apply_report`의 출고 반영, 강제 출고 처리, 마감, 입고 · 반출 등)은 **7001 공유(마감은 배타) → orders(`order_id` 순) → trip(`trip_id` 순) → 원장 행** 순서로 잠근다. 예외 없음. `apply_report`는 `trip`에서 `order_id`만 잠금 없이 읽은 뒤 첫 줄에서 `SELECT pg_advisory_xact_lock_shared(7001)`을 부르고 orders부터 잠근다(원장 트리거가 같은 트랜잭션에서 다시 잡아도 문제없음). 주문 접수도 7001 공유를 잡는다(2026-11-25, V2 접수 부분). 원장 행이 없으므로 7001 → orders → trip 순서다. 모두 같은 순서를 따르므로 교착이 생기지 않는다. 잠금 7001은 아래 "재고 기록"의 설명을 본다.
 - **주문 요약 상태**: 운반 건 상태를 바꾸는 트랜잭션에서 4.4 규칙으로 `orders.status`를 다시 계산하고, 바뀌면 이력에 `trip_id` 없는 한 줄.
 
 ### 재고 기록
@@ -486,11 +514,13 @@ app_setting · ws_event · bridge_session (독립)
   | 잠그는 쪽 | 방식 | 동시에 잡을 수 있는 수 | 막는 것 |
   |---|---|---|---|
   | 원장 기록(입고 · 반출 · 출고 차감 · 조정) — 원장 INSERT 트리거 1번 | **공유** `pg_advisory_xact_lock_shared(7001)` | 상한 없음 (실제로는 DB 연결 수 · 연결 풀 크기만큼) | 배타만 |
+  | 주문 접수(OMS-03 · 04) — 접수 트랜잭션 첫 문장 (V2 접수 부분, 2026-11-25 확정) | **공유** `pg_advisory_xact_lock_shared(7001)` | 상한 없음 | 배타만 |
   | 마감 시작 · 확정 — 마감 트리거 | **배타** `pg_advisory_xact_lock(7001)` | 1 | 공유 · 배타 모두 |
 
   - 공유끼리는 막지 않아 원장 기록 여러 개가 동시에 진행된다. 배타는 진행 중인 공유가 모두 끝날 때까지 기다리고, 잡고 있는 동안 새 공유 요청을 모두 기다리게 한다(마감 확정 중에는 출고 차감이 잠깐 멈춤).
   - PostgreSQL은 기다리는 순서를 지킨다. 마감이 배타를 **기다리는 중**이면 그 뒤에 온 공유 요청도 마감 뒤에 줄을 선다. 그래서 브리지의 `apply_report`는 `lock_timeout`(조사 문서 제안 500ms)을 두고, 넘기면 `accepted=false`로 답해 fleet이 같은 번호로 다시 보내게 한다.
-  - 7001을 잡지 않는 일(주문 접수 · 조회 등)은 영향을 받지 않는다.
+  - 주문 접수도 7001 공유를 잡는다(2026-11-25 확정, 마감 보완 토의 B4 · U4, 종합 검토 V2). 접수는 `stock_qty`로 재고 초과를 판단하므로, 마감 확정 도중 조정 전 재고로 통과한 접수가 재확인 뒤에 커밋되는 빈틈을 막는다. 접수는 원장 행을 잠그지 않으므로 순서는 7001 → orders → trip이다. 마감 확정 동안에는 접수가 잠깐 기다리고, `lock_timeout`을 넘기면 503 + 같은 `Idempotency-Key`로 다시 보내게 한다(웹 쪽 값은 종합 검토 V6과 함께 정함).
+  - 7001을 잡지 않는 일(조회 등)은 영향을 받지 않는다.
 - **재고 부족 알림 (OMS-09)**: 원장 한 줄마다 `LOW_STOCK`을 다시 판단해 열거나 자동 해결한다 (4.8).
 - **마감 직후 입고**: 마감 전에 이미 창고에 넣은 물건을 마감 뒤 입고로 다시 넣으면 두 번 세게 된다. 화면 확인 창으로 막는다 (DB 변경 없음).
 
