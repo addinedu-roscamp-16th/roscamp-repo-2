@@ -33,12 +33,19 @@ def bound(core):
             if core.orchestrator.order_of(r)}
 
 
+def brief_move(row):
+    """이동 줄은 칸이 길어, 호출 번호 · Pode · 목적지(구간별 끝 노드)만 남겨 출력한다."""
+    keep = {k: row[k] for k in ("t", "out", "robot", "goal_id", "order_id")}
+    keep["base"] = [{k: seg[k] for k in ("seq_id", "mode", "end_node")} for seg in row["base"]]
+    return keep
+
+
 def test_an_order_on_the_board_is_bound_to_a_pode_through_the_traffic_layer():
     core, lines = start()
     core.on_order_board("RUN", [OrderRecord("T-1", {"A": 1})])
     run_until(core, lambda: bound(core))
     (pode, order), = bound(core).items()
-    assert order == "T-1"
+    assert pode == "r1" and order == "T-1"  # r1이 P-1(작업대 앞)에 있어 고르는 쪽이 정해져 있다
     rows = [json.loads(x) for x in lines[1:]]
     kinds = [r.get("in") or r.get("inside") or r.get("out") for r in rows]
     board = kinds.index("on_order_board")
@@ -47,13 +54,19 @@ def test_an_order_on_the_board_is_bound_to_a_pode_through_the_traffic_layer():
     bound_at = next(i for i, r in enumerate(rows) if i > answer and r.get("out") == "EventOut"
                     and r["code"] == "ORDER_BOUND")
     trip = kinds.index("ReportTripCmd", bound_at)
+    move = next(i for i in range(call + 1, answer) if kinds[i] in ("MoveOrderCmd", "MoveCmd")
+                and rows[i]["robot"] == pode)
+    dock = next(i for i in range(move + 1, answer) if kinds[i] == "DockCmd"
+                and rows[i]["robot"] == pode)
+    assert board < call < move < dock < answer < bound_at < trip
     assert rows[call]["station_id"] == "WORK" and rows[call]["robot_id"] == ""
     assert rows[answer]["success"] is True and rows[answer]["robot_id"] == pode
     assert rows[bound_at]["detail"] == "T-1" and rows[bound_at]["robot"] == pode
     assert rows[trip]["status"] == "ASSIGNED" and rows[trip]["robot"] == pode
     assert rows[trip]["trip_id"] == "T-1"
     assert AssignmentView(pode, "T-1", "WORK", "FILL") in core.assignments_view()
-    for r in (rows[board], rows[call], rows[answer], rows[bound_at], rows[trip]):
+    for r in (rows[board], rows[call], brief_move(rows[move]), rows[dock], rows[answer],
+              rows[bound_at], rows[trip]):
         print(json.dumps(r, ensure_ascii=False))
 
 
