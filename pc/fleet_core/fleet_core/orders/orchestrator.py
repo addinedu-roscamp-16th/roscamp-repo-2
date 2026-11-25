@@ -11,9 +11,12 @@ from __future__ import annotations
 from fleet_core.common.commands import (
     FILL,
     FORCE_NOT_IMPLEMENTED,
+    NO_ROBOT,
+    TRIP_ASSIGNED,
     CancelDispatchCmd,
     DispatchCmd,
     EventOut,
+    ReportTripCmd,
 )
 
 # ---- 다른 모듈이 가져다 쓰는 상태 이름 ----
@@ -54,7 +57,8 @@ class OrderOrchestrator:
         """central의 주문판이 올 때마다 불린다. 검사를 통과한 주문판만 온다.
 
         run_mode: "RUN", "PAUSE", "STOP". orders: OrderRecord 목록이고 목록 순서가 우선순위다.
-        낼 수 있는 출력: DispatchCmd(로봇 이름 없이 WORK를 부르는 열린 호출), CancelDispatchCmd.
+        낼 수 있는 출력: DispatchCmd(로봇 이름 없이 WORK를 부르는 열린 호출), CancelDispatchCmd,
+        EventOut(WARN, ORDER_OVER_CAPACITY).
         """
         self._run_mode = run_mode
         self._board = list(orders)
@@ -77,14 +81,34 @@ class OrderOrchestrator:
         phase가 NO_ROBOT이면 맡을 로봇이 없다는 뜻이다.
         낼 수 있는 출력: EventOut(WARN, NO_ROBOT_AVAILABLE).
         """
+        if phase != NO_ROBOT:
+            return
+        ids = [o.order_id for o in self._waiting_orders()]
+        self._out.append(EventOut("WARN", "NO_ROBOT_AVAILABLE",
+                                  f"{ids} wait and no robot can take them"))
 
     def on_dispatch_result(self, goal_id, success, robot_id, reason="") -> None:
         """로봇이 스테이션에 닿았거나 호출이 실패했을 때 불린다.
 
         goal_id: DispatchCmd에 넣은 번호. success: 스테이션에 닿았는지. robot_id: 닿은 로봇.
         reason: 실패 이유.
-        낼 수 있는 출력: EventOut(ORDER_BOUND), ReleaseCmd, DispatchCmd, CancelDispatchCmd.
+        낼 수 있는 출력: EventOut(ORDER_BOUND), ReportTripCmd(ASSIGNED), DispatchCmd,
+        CancelDispatchCmd.
         """
+        # ---- 열린 호출이 아닌 답은 무시 ----
+        if goal_id not in self._open_calls:
+            return
+        self._open_calls.remove(goal_id)
+        # ---- 아는 빈 Pode가 닿았으면 맨 앞 대기 주문을 묶음 ----
+        if success and self._bound.get(robot_id, True) is None:
+            waiting = self._waiting_orders()
+            if waiting:
+                order = waiting[0]
+                self._bound[robot_id] = order
+                self._out.append(EventOut("INFO", "ORDER_BOUND", order.order_id, robot_id))
+                self._out.append(ReportTripCmd(order.order_id, robot_id, TRIP_ASSIGNED, {}, {}))
+        # ---- 실패한 호출은 새 id로 다시 열림 ----
+        self._match_calls()
 
     def on_arm_report(self, report) -> None:
         """팔 작업 층(ArmJobs)의 보고가 올 때 불린다.
@@ -157,7 +181,8 @@ class OrderOrchestrator:
 
     def order_of(self, robot) -> str:
         """로봇에 묶인 주문 id. 없거나 모르는 로봇이면 ""."""
-        return ""
+        order = self._bound.get(robot)
+        return order.order_id if order else ""
 
     def robot_view(self, robot) -> dict:
         """로봇 한 대의 주문 쪽 상태. 모르는 로봇이면 {}.
@@ -167,4 +192,7 @@ class OrderOrchestrator:
         """
         if robot not in self._names:
             return {}
-        return {"stage": "", "basket": EMPTY, "order": None, "placed": {}}
+        order = self._bound[robot]
+        if order is None:
+            return {"stage": "", "basket": EMPTY, "order": None, "placed": {}}
+        return {"stage": FILLING, "basket": EMPTY, "order": order.order_id, "placed": {}}

@@ -1,4 +1,4 @@
-"""주문 처리 자리의 약속: FleetManager가 기대는 이름과 조회 모양, 그리고 아무 출력도 없음."""
+"""주문 처리 자리의 약속: FleetManager가 기대는 이름과 조회 모양, 범위 밖 입력은 아직 출력 없음."""
 from fleet_core.common.commands import FILL, ArmDeclined, ArmFault
 from fleet_core.common.params import load_params
 from fleet_core.orders.orchestrator import FILLING, SWAPPING, OrderOrchestrator
