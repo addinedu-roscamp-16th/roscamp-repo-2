@@ -116,7 +116,7 @@ def _is_int(v) -> bool:
 def _check_values(rep: ReportIn, items: dict) -> list[tuple[int, int, int]] | None:
     """값 검사(설계 6.4 4). 바르면 고칠 (product_id, 담은 수, 못 담은 수) 목록, 어기면 None.
 
-    보고에 없는 상품은 지금 수량을 그대로 둔다.
+    보고는 지금까지의 전체 수량을 싣는다(IR-23). 보고에 없는 상품은 0으로 보고 모든 행을 고친다.
     """
     if rep.status not in STATUSES:
         return None
@@ -127,10 +127,9 @@ def _check_values(rep: ReportIn, items: dict) -> list[tuple[int, int, int]] | No
             if kind not in items or not _is_int(v) or v < 0:
                 return None
     out = []
-    for kind in set(rep.placed) | set(rep.missing):
-        pid, ordered, placed, missing = items[kind]
-        placed = rep.placed.get(kind, placed)
-        missing = rep.missing.get(kind, missing)
+    for kind, (pid, ordered, _, _) in items.items():
+        placed = rep.placed.get(kind, 0)
+        missing = rep.missing.get(kind, 0)
         if placed + missing > ordered:
             return None
         out.append((pid, placed, missing))

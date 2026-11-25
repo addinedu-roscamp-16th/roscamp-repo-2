@@ -181,3 +181,16 @@ def test_exclusive_7001_gives_db_error_within_deadline(pool, conn, seeded):  # R
         assert time.monotonic() - start < 2.5
         holder.rollback()
     assert apply_report(pool, rep(1, "ASSIGNED"), D()) == ReportOut(True, "APPLIED")
+
+
+def test_report_quantities_are_cumulative_absent_kind_is_zero(pool, conn, seeded):  # IR-23
+    t = trip_of(seeded, conn, {"A": 1, "C": 1})
+    rep = rep_for(t)
+    assert apply_report(pool, rep(3, "TRANSPORTING", placed={"A": 1, "C": 1}), D()) == \
+        ReportOut(True, "APPLIED")
+    assert apply_report(pool, rep(4, "SHIPPED", placed={"A": 1}, missing={"C": 1}), D()) == \
+        ReportOut(True, "APPLIED")
+    rows = conn.execute(
+        "select p.kind, ti.qty_placed, ti.qty_missing from trip_item ti "
+        "join product p using (product_id) where ti.trip_id = %s order by p.kind", (t,)).fetchall()
+    assert rows == [("A", 1, 0), ("C", 0, 1)]
