@@ -5,10 +5,11 @@ import dataclasses
 import math
 import threading
 import time
+import uuid
 
 import rclpy
 from fleet_interfaces.msg import RobotState, RobotStatusArray
-from fleet_interfaces.srv import CheckClear
+from fleet_interfaces.srv import CheckClear, SetMode
 from geometry_msgs.msg import Pose2D
 from nav2_msgs.msg import SpeedLimit
 from nav2_msgs.srv import ClearEntireCostmap
@@ -23,6 +24,7 @@ from sensor_msgs.msg import BatteryState
 from std_msgs.msg import Header
 from tf2_ros import Buffer, TransformException, TransformListener
 
+from pode_fsm.admin import AdminState
 from pode_fsm.backup import BackUp, CancelBackUp, reason_of
 from pode_fsm.backup_ros import BackUpRunner
 from pode_fsm.commands import CancelNav, ClearCostmap, LimitSpeed, SendPath
@@ -134,6 +136,7 @@ class PodeFsmNode(Node):
         self._speed = (0.0, 0.0)
         self._costmap: tuple[Grid, str, float] | None = None
         self._battery = UNKNOWN_BATTERY
+        self._admin = AdminState(str(uuid.uuid4()))
 
         # ---- TF, 발행자, 구독자 만들기 ----
         self._tf = Buffer()
@@ -164,6 +167,8 @@ class PodeFsmNode(Node):
                                          callback_group=group)
         self.create_service(CheckClear, contract.name("check_clear", pode=self.robot_id),
                             self._on_check_clear, callback_group=group)
+        self.create_service(SetMode, contract.name("robot_set_mode", robot=self.robot_id),
+                            self._on_set_mode, callback_group=group)
         self._servers = GoalServers(self, contract, self.robot_id, group, self._lock, self._fsm,
                                     self._pose, self._run, lambda: self._alive, self._nm)
         # ---- 제어, 상태, 마커 타이머 시작 ----
@@ -323,6 +328,14 @@ class PodeFsmNode(Node):
                                                age_s=time.monotonic() - at)
         return response
 
+    # ---- 운영 모드 서비스 (IR-73) ----
+    def _on_set_mode(self, request, response):
+        with self._lock:
+            reply = self._admin.set_mode(request.request_id, request.mode, time.monotonic())
+        response.accepted, response.reason = reply.accepted, reply.reason
+        response.request_id, response.detail = request.request_id, reply.detail
+        return response
+
     # ---- 경로 점에 장애물이 있는지 검사 ----
     def _obstacle(self, points) -> bool:
         costmap = self._costmap
@@ -470,9 +483,12 @@ class PodeFsmNode(Node):
             state, goal = self._fsm.state(), self._fsm.current_goal()
             step = self._fsm.local_yield_step()
             pose = self._pose()
-        msg = RobotState(robot_id=self.robot_id, battery=float(self._battery), state=state,
-                         current_goal=goal, obstacle_x=math.nan, obstacle_y=math.nan,
-                         local_yield=step)
+            admin = self._admin
+            msg = RobotState(robot_id=self.robot_id, battery=float(self._battery), state=state,
+                             current_goal=goal, obstacle_x=math.nan, obstacle_y=math.nan,
+                             local_yield=step, boot_id=admin.boot_id, lock=admin.lock,
+                             mode=admin.mode, forced=list(admin.forced),
+                             last_request_id=admin.last_request_id)
         seen = self._obstacle_ahead(pose) if state == RobotState.STATE_BLOCKED else None
         if seen is not None:
             msg.obstacle_x, msg.obstacle_y = float(seen[0]), float(seen[1])

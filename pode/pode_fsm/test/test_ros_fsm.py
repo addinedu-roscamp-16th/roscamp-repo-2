@@ -12,7 +12,10 @@ from conftest import CONTRACT, wait_until  # noqa: E402
 from fake_nav import FakeNav  # noqa: E402
 from fleet_interfaces.action import Dock, MoveTo  # noqa: E402
 from fleet_interfaces.msg import RobotState  # noqa: E402
+from pode_fsm.contract import load_contract  # noqa: E402
 from probe import WAYPOINTS, Probe, lane_goal  # noqa: E402
+
+CONTRACT_NAMES = load_contract(CONTRACT)
 
 
 def start(harness, heartbeat_timeout_s=0.0, nav=True, beat_hz=0.0, **fsm_params):
@@ -47,6 +50,36 @@ def test_state_is_published_at_ten_hertz_with_the_map_pose(harness):
     s = probe.last_state()
     assert (s.pose.x, s.pose.y) == (pytest.approx(0.35, abs=1e-3), pytest.approx(1.55, abs=1e-3))
     assert s.current_goal == ""
+
+
+def test_a_fresh_node_reports_locked_unknown_mode_and_a_boot_id(harness):
+    _, probe = start(harness, nav=False)
+    assert wait_until(lambda: len(probe.states) >= 2, 5.0)
+    first, last = probe.states[0][1], probe.last_state()
+    assert (last.lock, last.mode, list(last.forced), last.detail) == (True, "UNKNOWN", [], "")
+    assert len(last.boot_id) == 36 and first.boot_id == last.boot_id
+
+
+def test_set_mode_answers_with_the_request_id_and_the_state_shows_the_mode(harness):
+    import rclpy.node
+    from fleet_interfaces.srv import SetMode
+    _, probe = start(harness, nav=False)
+    caller = harness.add(rclpy.node.Node("mode_caller"))
+    client = caller.create_client(SetMode, CONTRACT_NAMES.name("robot_set_mode", robot="pode1"))
+    assert client.wait_for_service(timeout_sec=5.0)
+
+    def call(request_id, mode):
+        future = client.call_async(SetMode.Request(request_id=request_id, mode=mode))
+        assert wait_until(future.done, 5.0)
+        return future.result()
+
+    ok = call("m-1", "TEST")
+    assert (ok.accepted, ok.reason, ok.request_id) == (True, "", "m-1")
+    bad = call("m-2", "UNKNOWN")
+    assert (bad.accepted, bad.reason, bad.request_id) == (False, "MODE_MISMATCH", "m-2")
+    assert wait_until(lambda: (s := probe.last_state()) is not None
+                      and s.last_request_id == "m-1", 3.0)
+    assert probe.last_state().mode == "TEST"
 
 
 def test_path_goal_arrives_within_the_tolerance(harness):
