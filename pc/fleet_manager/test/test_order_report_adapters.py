@@ -14,9 +14,10 @@ from fleet_core.common.commands import (  # noqa: E402
     SHIPPED,
     ReportOrderCmd,
 )
-from fleet_interfaces.srv import ReportOrder  # noqa: E402
+from fleet_interfaces.srv import Hello, ReportOrder  # noqa: E402
 from fleet_manager import adapters  # noqa: E402
 from fleet_manager import fleet_manager_node as node  # noqa: E402
+from fleet_manager.report_queue import TripReport  # noqa: E402
 
 
 def test_report_request_leaves_the_hold_reason_empty_by_default():
@@ -120,3 +121,21 @@ def test_the_force_ship_callback_asks_the_core_and_fills_the_response():
         SimpleNamespace(accepted=None, reason=None))
     assert asked == ["O-007"]
     assert (response.accepted, response.reason) == (False, "NOT_IMPLEMENTED")
+
+
+def test_hello_request_names_the_fleet():
+    req = adapters.hello_request("boot-1")
+    assert (req.node, req.boot_id) == ("fleet", "boot-1")
+
+
+def test_report_trip_request_carries_numbers_and_items():
+    r = TripReport("T-1", "pode1", "SHIPPED", "", {"chocolate_bar": 2}, {}, 7, 3, 12.5)
+    req = adapters.report_trip_request(r)
+    assert (req.trip_id, req.robot_id, req.status, req.report_epoch, req.report_n) == (
+        "T-1", "pode1", "SHIPPED", 7, 3)
+    assert [(i.kind, i.count) for i in req.placed] == [("chocolate_bar", 2)]
+    assert (req.stamp.sec, req.stamp.nanosec) == (12, 500_000_000)
+
+
+def test_hello_answer_reads_epoch():
+    assert adapters.hello_answer(Hello.Response(accepted=True, epoch=7)) == (True, 7)

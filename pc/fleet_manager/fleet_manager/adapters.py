@@ -19,7 +19,7 @@ from fleet_interfaces.msg import (
     ZoneState,
     ZoneStateArray,
 )
-from fleet_interfaces.srv import CheckClear, ReportOrder
+from fleet_interfaces.srv import CheckClear, Hello, ReportOrder, ReportTrip
 from geometry_msgs.msg import Pose, PoseStamped
 from nav_msgs.msg import Path
 
@@ -289,3 +289,30 @@ def report_request(cmd) -> ReportOrder.Request:
         missing=to_order_items(cmd.missing),
         detail=cmd.detail,
     )
+
+
+# ---- 켜질 때 인사와 운반 건 보고 변환 ----
+def hello_request(boot_id: str) -> Hello.Request:
+    return Hello.Request(node="fleet", boot_id=boot_id)
+
+
+def hello_answer(response) -> tuple[bool, int]:
+    return bool(response.accepted), int(response.epoch)
+
+
+def report_trip_request(report) -> ReportTrip.Request:
+    return ReportTrip.Request(
+        trip_id=report.trip_id,
+        report_epoch=int(report.epoch),
+        report_n=int(report.n),
+        status=report.status,
+        reason=report.reason,
+        robot_id=report.robot,
+        placed=to_order_items(report.placed),
+        missing=to_order_items(report.missing),
+        stamp=to_time(report.stamp),
+    )
+
+
+def report_trip_accepted(response) -> bool:
+    return bool(response.accepted)
