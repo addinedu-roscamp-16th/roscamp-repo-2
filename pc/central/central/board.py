@@ -41,7 +41,8 @@ class Board:
     def report(self, order_id: str, status: str) -> bool:
         """끝 상태 · HELD면 True(이미 뺐거나 모르는 건도 같은 결과), 그 밖의 상태면 False.
 
-        HELD는 주문판에 남기고 표시만 한다(없는 건이면 표시하지 않음). 끝 상태가 오면 표시도 지운다."""
+        HELD는 주문판에 남기고 표시만 한다(없는 건이면 표시하지 않음).
+        끝 상태가 오면 표시도 지우고 주문판에서 뺀다."""
         if status == HELD:
             if self.on_board(order_id):
                 self._held.add(order_id)
@@ -63,6 +64,7 @@ class Board:
         return order_id in self._finished or any(e.trip_id == order_id for e in self._entries)
 
     def on_board(self, order_id: str) -> bool:
+        """지금 주문판에 있는 건인지(끝나서 뺀 건은 거짓). HELD 표시는 이 건에만 한다."""
         return any(e.trip_id == order_id for e in self._entries)
 
     def held(self) -> set[str]:

@@ -379,6 +379,7 @@ class FleetManagerNode(Node):
             future.add_done_callback(partial(self._post, self._report_answered, send))
 
     def _report_answered(self, send: Send, future) -> None:
+        # _post로 코어 그룹에서 돈다. 한도를 넘겨 버린 요청의 늦은 답은 대기열이 무시한다
         self._pending.pop(send.key, None)
         now = self._now()
         epoch = 0
@@ -394,7 +395,7 @@ class FleetManagerNode(Node):
             self.get_logger().warning(f"{send.kind} report {send.key} got no reply: {exc}")
             self._reports.answer(send.key, now, None)
             return
-        first = self._reports.epoch is None
+        first = self._reports.epoch is None  # 처음 epoch를 받은 때만 INFO 한 줄
         refused = self._reports.answer(send.key, now, accepted, epoch)
         if first and self._reports.epoch is not None:
             self.get_logger().info(f"bridge epoch {self._reports.epoch} (boot_id {self._boot_id})")

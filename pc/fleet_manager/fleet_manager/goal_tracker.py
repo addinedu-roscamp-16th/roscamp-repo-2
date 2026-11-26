@@ -8,7 +8,7 @@ from fleet_core.common.params import RETRY_JITTER
 
 
 def _factor(rand) -> float:
-    # IR-41: 재전송 간격에 곱하는 배수, 0.8~1.2 균등
+    # IR-41: 재전송 간격에 곱하는 배수, 0.8~1.2 균등 (report_queue도 같이 씀)
     return 1.0 - RETRY_JITTER + 2.0 * RETRY_JITTER * rand()
 
 
