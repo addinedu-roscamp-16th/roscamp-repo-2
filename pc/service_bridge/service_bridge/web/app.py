@@ -12,8 +12,8 @@ from fastapi import FastAPI, Header, Request, WebSocket
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from psycopg.errors import LockNotAvailable
-from psycopg_pool import ConnectionPool
+from psycopg.errors import LockNotAvailable, QueryCanceled
+from psycopg_pool import ConnectionPool, PoolTimeout, TooManyRequests
 from pydantic import BaseModel, ConfigDict
 
 from service_bridge.core import snapshot
@@ -27,6 +27,8 @@ log = logging.getLogger("service_bridge.web")
 
 ROBOTS_PERIOD = 0.2   # robots를 보내는 간격(초). 새 값이 있을 때만 보낸다
 CLOSE_UNKNOWN_ACCOUNT = 4404
+# 잠금 · 풀 대기 초과, 기다리는 요청 넘침, statement_timeout: 잠시 뒤 다시 보내면 되는 오류 (503 BUSY)
+BUSY_ERRORS = (LockNotAvailable, PoolTimeout, TooManyRequests, QueryCanceled)
 
 
 def _now() -> str:
@@ -132,7 +134,17 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
             return read_event(conn, seq)
 
     async def on_seq(seq: int) -> None:
-        row = await asyncio.to_thread(_read, seq)
+        try:
+            row = await asyncio.to_thread(_read, seq)
+        except psycopg.OperationalError:
+            # 일시 DB 오류(풀 대기 초과 등): 커밋된 사건을 놓쳤으니 다시 붙을 때처럼 스냅샷으로 맞춘다.
+            # 데이터 오류(줄 없음 · 잘못된 data)는 아래처럼 로그만 남기고 다음 사건으로
+            log.exception("ws_event seq %d 읽기 실패, 모든 연결에 스냅샷 다시 보냄", seq)
+            try:
+                await hub.resend_snapshots()
+            except Exception:
+                log.exception("스냅샷 다시 보내기 실패")
+            return
         if row is None:
             log.warning("ws_event seq %d 줄이 없음", seq)
             return
@@ -206,12 +218,12 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
         error = check_shape(req)
         if error:
             raise ApiError(error)
-        with pool.connection() as conn:
-            current_account(conn, req.account_id)
         try:
             with pool.connection() as conn:
+                current_account(conn, req.account_id)
+            with pool.connection() as conn:
                 res = place_order(conn, req, idempotency_key)
-        except LockNotAvailable:
+        except BUSY_ERRORS:
             raise ApiError(PlaceError(503, "BUSY", "잠시 뒤 같은 키로 다시 보내 주세요"),
                            {"Retry-After": "1"}) from None
         if isinstance(res, PlaceError):

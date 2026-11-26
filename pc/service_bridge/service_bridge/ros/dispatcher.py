@@ -42,12 +42,14 @@ class Dispatcher:
         self._trip_id = ""
         self._sent_at = 0.0        # monotonic
         self._due = 0.0            # 이 시각(monotonic) 전에는 새로 보내지 않음
+        self._started_at = 0.0     # start() 시각(monotonic)
 
     def start(self) -> None:
         """켜질 때 남은 줄도 이어서 보낸다(첫 확인을 바로 시킴)."""
         self._client = self._node.create_client(
             SubmitTrip, self._contract.name("submit_trip"), callback_group=self._group)
         self._guard = self._node.create_guard_condition(self._tick, callback_group=self._group)
+        self._started_at = time.monotonic()
         self._timer = self._node.create_timer(TICK_SEC, self._tick, callback_group=self._group)
         self._guard.trigger()
 
@@ -82,6 +84,9 @@ class Dispatcher:
                 self._due = time.monotonic() + wait
                 return
         if not self._client.service_is_ready():
+            # 켜진 뒤 첫 TICK_SEC은 디스커버리 전일 수 있다: 세지 않고 다음 확인을 기다린다
+            if time.monotonic() - self._started_at < TICK_SEC:
+                return
             self._fail(item.trip_id, "NO_SERVICE")
             return
         self._trip_id = item.trip_id
@@ -104,7 +109,8 @@ class Dispatcher:
             self._due = 0.0  # 다음 건은 바로
         except Exception as e:
             self._future = None
-            self._node.get_logger().warning(f"넘기기 응답 처리 실패 {trip_id}: {e!r}")
+            self._node.get_logger().warning(f"넘기기 응답 처리 실패 {trip_id}: {e!r}",
+                                            throttle_duration_sec=5.0)
             self._due = time.monotonic() + RETRY_SEC
 
     def _abandon(self) -> None:
@@ -119,7 +125,8 @@ class Dispatcher:
             with self._pool.connection(timeout=DB_TIMEOUT_SEC) as conn:
                 attempts = record_failure(conn, trip_id, result)
         except Exception as e:
-            self._node.get_logger().warning(f"넘기기 실패 기록 못 함 {trip_id}: {e!r}")
+            self._node.get_logger().warning(f"넘기기 실패 기록 못 함 {trip_id}: {e!r}",
+                                            throttle_duration_sec=5.0)
             self._due = time.monotonic() + RETRY_SEC
             return
         delay = retry_delay(attempts)

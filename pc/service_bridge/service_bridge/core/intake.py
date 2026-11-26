@@ -9,7 +9,8 @@ from psycopg.errors import UniqueViolation
 from service_bridge.core.types import (
     OrderLine, OrderRequest, PlaceError, PlaceOk, TripPlan)
 
-# 처음 한 번 + 다시 매기기 최대 3번 (설계 5.4). 풀 연결이 4개라 동시에 겹칠 상대는 최대 3
+# 처음 한 번 + 다시 매기기 최대 3번 (설계 5.4). 번호 매기기는 7002로 한 줄로 세우므로 보통 겹치지 않고,
+# 이 재시도는 그 뒤의 안전망이다(웹 풀 연결이 4개라 겹칠 상대가 있어도 최대 3)
 ORDER_ID_TRIES = 4
 
 
@@ -162,10 +163,11 @@ def _replay_or_conflict(conn: psycopg.Connection, req: OrderRequest,
 
 # ---- 주문 번호 (설계 5.4) ----
 def _insert_order(conn: psycopg.Connection, req: OrderRequest, idem_key: str) -> str:
-    prefix = f"O-{datetime.date.today():%Y%m%d}-"
+    # 날짜는 DB 기준(웹 프로세스 시계 · 시간대와 무관하게 created_at과 같은 날)
+    prefix = "O-" + conn.execute("SELECT to_char(current_date, 'YYYYMMDD')").fetchone()[0] + "-"
     # 번호 매기기는 커밋까지 한 줄로 세운다(7002, 순서 7001 공유 → 7002 → orders라 마감과 교착 없음).
     # 안 그러면 최댓값 + 1이 계속 겹쳐
-    # 늦게 온 접수가 다시 매기기를 다 써 버릴 수 있다. 위의 겹침 처리는 안전망으로 남긴다
+    # 늦게 온 접수가 다시 매기기를 다 써 버릴 수 있다. 아래 orders_pkey 충돌 재시도는 안전망으로 남긴다
     conn.execute("SELECT pg_advisory_xact_lock(7002)")
     for _ in range(ORDER_ID_TRIES):
         last = conn.execute("SELECT max(order_id) FROM orders WHERE order_id LIKE %s",
@@ -194,7 +196,8 @@ def _count_low_stock(conn: psycopg.Connection, short: list[dict]) -> None:
                 "INSERT INTO alert (level, code, source, product_id, message, detail) "
                 "VALUES ('WARN', 'LOW_STOCK', 'order_service', %s, '재고 부족으로 주문 거절', %s) "
                 "ON CONFLICT (code, product_id) WHERE status = 'OPEN' AND code = 'LOW_STOCK' "
-                "DO UPDATE SET detail = jsonb_build_object("
+                # 다른 칸은 남기고 두 칸만 바꾼다
+                "DO UPDATE SET detail = COALESCE(alert.detail, '{}'::jsonb) || jsonb_build_object("
                 "'reject_count', COALESCE((alert.detail->>'reject_count')::int, 0) + 1, "
                 "'last_rejected_at', %s::text)",
                 (item["product_id"], json.dumps(first), now))

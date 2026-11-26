@@ -396,3 +396,47 @@ def test_slow_client_closed():
         assert hub.clients == set()
 
     asyncio.run(main())
+
+
+# ---- 일시 DB 오류 (설계 7.2) ----
+def test_event_read_db_error_resends_snapshot(client, seeded, monkeypatch):
+    from psycopg_pool import PoolTimeout
+
+    from service_bridge.web import app as app_mod
+    real = app_mod.read_event
+    failed = []
+
+    def flaky(conn, seq):
+        if not failed:
+            failed.append(seq)
+            raise PoolTimeout("풀 대기 초과 흉내")
+        return real(conn, seq)
+    monkeypatch.setattr(app_mod, "read_event", flaky)
+    acc = seeded["accounts"]["tester"]
+    with client.websocket_connect("/ws/admin") as wa, \
+            client.websocket_connect(f"/ws/customer?account_id={acc}") as wc:
+        recv(wa), recv(wc)
+        oid = _post(client, _body(seeded)).json()["order_id"]
+        # 첫 사건(order_changed)은 읽기 실패 -> 모든 연결에 스냅샷을 다시 보내 맞춘다
+        snap = recv_until(wa, "snapshot")["data"]
+        assert [o["order_id"] for o in snap["orders"]] == [oid]
+        assert [o["order_id"] for o in recv_until(wc, "snapshot")["data"]["orders"]] == [oid]
+    assert failed
+
+
+@pytest.mark.parametrize("make", [
+    lambda: __import__("psycopg_pool").PoolTimeout("풀 대기 초과"),
+    lambda: __import__("psycopg_pool").TooManyRequests("기다리는 요청이 너무 많음"),
+    lambda: __import__("psycopg").errors.QueryCanceled("statement_timeout"),
+])
+def test_db_busy_is_503(client, seeded, monkeypatch, make):
+    from service_bridge.web import app as app_mod
+
+    def busy(*_a, **_k):
+        raise make()
+    monkeypatch.setattr(app_mod, "place_order", busy)
+    r = _post(client, _body(seeded))
+    assert r.status_code == 503
+    assert r.json()["code"] == "BUSY"
+    assert r.headers["Retry-After"] == "1"
+    assert client.wake.count == 0

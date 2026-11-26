@@ -132,6 +132,41 @@ def test_same_key_concurrent(pool, conn, seeded):
     assert _count(conn, "orders") == 1 and _count(conn, "trip") == 2
 
 
+def test_same_key_race_replays_committed(pool, seeded, test_db):
+    # 옆 연결이 7002를 쥔 채 키 'same' 주문을 써 둔다(커밋 전). place_order는 재생 확인(아직 안 보임)을
+    # 지나 7002에서 막히고, 옆 연결이 커밋하면 orders 삽입이 idem_key 충돌 -> _KeyRace -> 재생 답
+    from conftest import _dsn
+    req = _req(seeded, [("A", 2)])
+    pid = seeded["products"]["A"]
+    side = psycopg.connect(_dsn(test_db), autocommit=False)
+    try:
+        side.execute("SELECT pg_advisory_xact_lock(7002)")
+        oid = side.execute("SELECT 'O-' || to_char(current_date, 'YYYYMMDD') || '-0001'").fetchone()[0]
+        side.execute("INSERT INTO orders (order_id, account_id, status, idem_key) "
+                     "VALUES (%s, %s, 'RECEIVED', 'same')", (oid, req.account_id))
+        side.execute("INSERT INTO order_item (order_id, product_id, qty_ordered) VALUES (%s, %s, 2)",
+                     (oid, pid))
+        side.execute("INSERT INTO trip (trip_id, order_id, seq, status) VALUES (%s, %s, 1, 'RECEIVED')",
+                     (f"{oid}-1", oid))
+        out = []
+
+        def go():
+            with pool.connection() as c:
+                out.append(place_order(c, req, "same"))
+        t = threading.Thread(target=go)
+        t.start()
+        time.sleep(0.3)  # lock_timeout(0.5초) 안에 커밋
+        assert t.is_alive()  # 7002에서 기다리는 중
+        side.commit()
+        t.join(5)
+    finally:
+        side.close()
+    assert len(out) == 1
+    res = out[0]
+    assert isinstance(res, PlaceOk) and res.replayed is True
+    assert (res.order_id, res.trip_ids) == (oid, (f"{oid}-1",))
+
+
 def test_out_of_stock_rejects_and_counts_low_stock(conn, seeded):
     pid = seeded["products"]["A"]
     # 재고를 5로 줄인다(원장 반출 15). 6개는 max_order_items(8) 안이라 재고 검사까지 간다

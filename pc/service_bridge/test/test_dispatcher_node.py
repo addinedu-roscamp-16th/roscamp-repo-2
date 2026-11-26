@@ -196,3 +196,15 @@ def test_reply_while_waking_sends_once(spin, pool, conn, seeded):
         "select attempts from trip_dispatch where trip_id = %s and central_acked_at is not null",
         (res.trip_ids[0],)).fetchone() == (1,), 3)
     assert central.received == list(res.trip_ids)
+
+
+def test_no_service_not_counted_right_after_start(spin, pool, conn, seeded):
+    # 켜진 직후는 디스커버리 전이라 central이 없어 보여도 시도로 세지 않는다(재시작마다 +1 막기)
+    res = _place(conn, seeded, [("B", 1)], "k1")
+    bridge = _bridge(pool)
+    spin(bridge)
+    q = "select attempts, last_result from trip_dispatch where trip_id = %s"
+    time.sleep(0.8)
+    assert conn.execute(q, (res.trip_ids[0],)).fetchone() == (0, None)
+    # 첫 1초가 지나면 없는 서비스를 실패로 센다
+    assert _until(lambda: conn.execute(q, (res.trip_ids[0],)).fetchone() == (1, "NO_SERVICE"), 3)

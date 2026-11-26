@@ -149,8 +149,9 @@ WS에 연결했을 때 첫 메시지(`type: "snapshot"`)의 `data`도 같은 내
 main()
   rclpy.init(신호 처리는 uvicorn에 맡김)
   동기 풀(1단계 그대로, 4개) · BridgeNode · MultiThreadedExecutor(4) → 뒷 스레드에서 spin
-  FastAPI 앱(비동기 풀 4개 + LISTEN 전용 연결 1개)을 uvicorn으로 메인 스레드에서 실행
-끌 때: uvicorn 멈춤 → WS 닫기 → 1단계 순서(서버 없앰 → 실행기 → 노드 → 풀) → 비동기 풀
+  FastAPI 앱(웹 전용 동기 풀 4개 + LISTEN 전용 비동기 연결 1개)을 uvicorn으로 메인 스레드에서 실행.
+    DB 읽기 · 쓰기는 동기 풀로 하고, 비동기 처리(WS · LISTEN)에서는 asyncio.to_thread로 부른다
+끌 때: uvicorn 멈춤(앱 lifespan이 WS 닫기 · LISTEN 멈춤) → 1단계 순서(서버 없앰 → 실행기 → 노드 → 브리지 풀) → 웹 풀
 ```
 
 - 웹 ↔ 브리지는 같은 프로세스 안에서 두 가지만 주고받는다.
@@ -163,6 +164,7 @@ main()
 
 - 깨우는 때: 1초 타이머 + 접수 커밋 뒤 깨우기. 전용 콜백 그룹(상호 배제) 하나에서 돈다.
 - 한 번에 하나만, **접수 순서대로** 보낸다. 보내는 중이면 깨워도 건너뛴다. 맨 앞 건이 확정 답을 받기 전에는 뒤 건을 보내지 않는다(사용자 결정 2026-11-25, 가 안). 그래서 central 주문판 순서가 접수 순서와 같다(명세 #21).
+- "접수 순서"는 `trip.created_at`(접수 트랜잭션 시작 시각), 같으면 `trip_id` 순이다. 번호는 7002를 잡은 뒤 매기므로 주문 번호 순과 밀리초 단위로 다를 수 있다.
 - 한 번의 차례:
   1. 넘기기가 쉬는 중(아래 3)이면 아무것도 하지 않는다. 아니면 짧은 읽기 트랜잭션: `central_acked_at IS NULL`인 줄 중 `trip.created_at`(같으면 `trip_id`)이 가장 이른 것 하나와 그 품목. 커밋하고 연결을 돌려준다.
   2. `SubmitTrip`을 `call_async`로 부른다. 칸: `trip_id`, `order_id`, `trip_index` = `seq`, `trip_count` = 그 주문의 운반 건 수, `items`, `submitted_at` = `trip.created_at`. 시간 한도 2초.
