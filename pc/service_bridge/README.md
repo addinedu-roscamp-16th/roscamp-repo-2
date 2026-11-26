@@ -32,3 +32,24 @@ central 쪽 `SubmitTrip` 처리는 `pc/central`에 있습니다.
 - 설계: [`docs/superpowers/specs/2026-11-25-bridge-slice1-design.md`](../../docs/superpowers/specs/2026-11-25-bridge-slice1-design.md)
 - 계획: [`docs/superpowers/plans/2026-11-25-bridge-slice1.md`](../../docs/superpowers/plans/2026-11-25-bridge-slice1.md)
 - 주문 DB: [`design/db/README.md`](../../design/db/README.md)
+
+## 화면 (고객 · 관리자 주문 화면)
+
+- 파일 위치: `pc/service_bridge/service_bridge/web/static/` (`common/` 공용 모듈 · `customer/` 고객 주문 · `admin/` 관리자 상태 · `test/` 시험 페이지 · `img/` 상품 그림). 설계는 [`docs/superpowers/specs/2026-11-26-order-screens-design.md`](../../docs/superpowers/specs/2026-11-26-order-screens-design.md)입니다.
+- 가짜 데이터로 띄우기 (서버 없이, `static/` 폴더를 그대로 웹 뿌리로 씀):
+
+```bash
+python3 -m http.server 8765 -d pc/service_bridge/service_bridge/web/static
+```
+
+| 주소 | 내용 |
+|---|---|
+| `http://localhost:8765/customer/?demo=normal` | 고객 주문 화면 (가짜 데이터) |
+| `http://localhost:8765/admin/?demo=normal` | 관리자 상태 화면 (가짜 데이터) |
+| `http://localhost:8765/test/` | 순수 함수 시험 페이지 (`결과: 통과 N · 실패 0`) |
+
+- 시험 페이지를 headless chromium으로 한 번에 돌리기: `bash pc/service_bridge/service_bridge/web/static/test/run_headless.sh` (실패 0이면 종료 코드 0).
+- 장면 이름 (`?demo=<이름>`): `normal` · `stock` · `busy` · `maintenance` · `reconnect` · `race` · `many`.
+  - 고객 화면은 일곱 장면을 모두 씁니다.
+  - 관리자 화면은 `normal` · `maintenance` · `reconnect` · `many`만 씁니다. 나머지는 `normal`로 떨어집니다.
+- 실제 서버 주소: `http://localhost:8000/customer/?account=<account_id 숫자>` (관리자는 `/admin/`). 웹 뿌리 마운트(백엔드 N-07)가 들어간 뒤에 열립니다. `/`는 고객 화면으로 넘어갑니다.
