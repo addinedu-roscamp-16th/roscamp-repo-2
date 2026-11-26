@@ -1,6 +1,6 @@
 # 2단계-주문 접수 REST API/WS 구현 설계
 
-- 상태: 구현됨 (커밋 68d7002 ~ 3c2a9f2, 이름 맞춤 포함) · 작성 2026-11-25 · 수정 2026-11-25 (검토자 질문 반영, 넘기기 가 안 · 멈춤 알림, 알림 WS는 고도화 때)
+- 상태: 구현됨 (커밋 68d7002 ~ 3c2a9f2, 이름 맞춤 포함) · 작성 2026-11-25 · 수정 2026-11-26 (화면 연결 요청 N-05 ~ N-08 반영: 스냅샷 · `stock` 칸, 화면 파일 내주기) · 이전 수정 2026-11-25 (검토자 질문 반영, 넘기기 가 안 · 멈춤 알림, 알림 WS는 고도화 때)
 - 담당: 주문 처리
 - 앞 단계: **1단계-보고 반영 구현** ([설계](2026-11-25-bridge-slice1-design.md), PR #14). 옛 이름 "첫 조각 · 1조각"
 - 근거 문서
@@ -31,7 +31,7 @@
 4. 화면 담당이 이 API · WS에 바로 붙일 수 있다. 이름 · 겉모양 · `data` 칸은 명세 3.1과 [계획] 5.2 그대로다.
 
 **하지 않는 것**
-- 화면(HTML · JS), 정적 파일 내주기
+- 화면(HTML · JS) 만들기. 화면 파일은 화면 담당이 `web/static/`에 넣고, 웹은 그 폴더를 내주기만 한다(5.6, 2026-11-26 N-07)
 - 인증. 이번 주는 `account_id`를 요청에 싣는다(5.1)
 - 운영 모드 바꾸기 요청(F-15). 모드는 켤 때 실행 인자로만 정한다
 - 취소, 관리 명령, `ReportCommand` · `ReportEvent`, 마감, 재시작 복구(`ListOpenTrips`)
@@ -136,10 +136,21 @@ Idempotency-Key: <화면이 만든 UUID>
 
 | `view` | 내용 |
 |---|---|
-| `customer` (`account_id` 필수) | `orders`: 그 계정의 주문(끝나지 않은 것 + 최근 24시간 안에 끝난 것), 고객 말 `status_text`(7.3). `stock`: 상품별 재고. `notice`: 시험 모드면 `MAINTENANCE` |
-| `admin` | `orders`: 끝나지 않은 것 + 최근 24시간 안에 끝난 것의 `{order_id, status}`. `trips`: 같은 주문들의 [계획] 5.2 `trip_changed` 모양. `robots`: 브리지가 가진 마지막 값. `work_state`: `{system_mode}`. `stock` |
+| `customer` (`account_id` 필수) | `orders`: 그 계정의 주문(끝나지 않은 것 + 최근 24시간 안에 끝난 것)의 `{order_id, status_text, created_at, items: [{product_id, qty}]}`. `status_text`는 고객 말(7.3), `qty`는 `order_item`의 주문 수량. `stock`: 7.4 `stock`과 같은 모양. `limits`: `{max_order_items}`(`app_setting`). `notice`: 시험 모드면 `MAINTENANCE` |
+| `admin` | `orders`: 끝나지 않은 것 + 최근 24시간 안에 끝난 것의 `{order_id, status, created_at, items: [{product_id, qty}]}`. `trips`: 같은 주문들의 [계획] 5.2 `trip_changed` 모양. `robots`: 브리지가 가진 마지막 값. `work_state`: `{system_mode}`. `stock` |
 
 WS에 연결했을 때 첫 메시지(`type: "snapshot"`)의 `data`도 같은 내용이다.
+
+- `orders`는 `created_at` 순(같으면 `order_id` 순), `items`는 `product_id` 순이다. `created_at`은 ISO 8601 글(시간대 포함)이다.
+- 품목 · `created_at`은 스냅샷에만 싣는다. WS `order_changed`는 그대로 `{order_id, status_text}` · `{order_id, status}`다. 새 주문의 품목은 화면이 202 답을 받을 때 보낸 본문에서 붙인다(백엔드 검토 목록 8.2 N-06 보충).
+- 2026-11-26 화면 연결 요청 N-05 · N-06 · N-08을 받아 `items` · `created_at` · `limits`를 더했다(백엔드 검토 목록 8장).
+
+### 5.6 화면 파일 (N-07)
+
+- `create_app`이 화면 폴더 `pc/service_bridge/service_bridge/web/static/` 전체를 `StaticFiles(directory=…, html=True)`로 웹 뿌리(`/`)에 마운트한다. 모든 경로를 받는 마운트라 API · WS 경로를 다 등록한 **뒤** 맨 끝에 붙인다.
+- `/customer/`는 고객 화면, `/admin/`은 관리자 화면, `/`는 `static/index.html`이 고객 화면으로 넘긴다(주소의 `?…`는 그대로). 끝 `/` 없이 오면 폴더로 넘긴다.
+- 같은 출처라 CORS가 필요 없다.
+- 설치: `setup.py` `package_data`로 패키지와 함께 깔린다. 화면 시험 폴더 `static/test/`는 깔지 않는다.
 
 ## 6. 브리지 쪽
 
@@ -256,7 +267,7 @@ DB 트랜잭션 커밋 → NOTIFY ifp_events {"seq", "t", "id", "status"}
 |---|---|---|
 | `robots` | 6.3 | 관리자 |
 | `work_state` `{system_mode}` | 연결할 때(스냅샷 안). 모드는 켤 때 정해져 바뀌지 않는다 | 관리자 |
-| `stock` `{items: [{product_id, stock_qty}]}` | 주문을 받을 때마다 ([계획] 5.2) | 관리자 · 고객 |
+| `stock` `{items: [{product_id, kind, name, stock_qty}]}` | 주문을 받을 때마다 ([계획] 5.2). 고객 · 관리자 스냅샷의 `stock`도 같은 모양이다. 화면은 `name`으로 상품 카드 이름 · 검색을, `kind`로 상품 이미지(`img/<kind>.png`)를 고른다 (2026-11-26 N-05) | 관리자 · 고객 |
 
 ### 7.5 알림 사건의 `data` (고도화 때 정함, `TODO(Q-07)`)
 
@@ -299,6 +310,8 @@ DB 트랜잭션 커밋 → NOTIFY ifp_events {"seq", "t", "id", "status"}
 
 `tools/seed.py`의 시험 계정을 고객 둘(`tester`, `tester2`)과 관리자 하나(`admin`, role `ADMIN`)로 늘린다. 고객 거르기를 시험하기 위해서다.
 
+시험 상품은 실제 상품 다섯 개다(2026-11-26 사용자 결정, 각 재고 20). `kind`는 비전 클래스 이름과 같고 영문 소문자와 `_`만 쓴다: `mentos`(미니멘토스 레인보우) · `choco_bar`(자유시간 Mini) · `mygummy`(과즙팡 비타민 마이구미) · `choco_ball`(M&M's) · `bungeo_cake`(참붕어빵). 원본은 `seed.PRODUCTS`이고, `sim/fake_robots/scenarios`의 실물 시나리오는 두 팔에 같은 상품을 10개씩 둔다(팔별 배치는 비전이 정하므로 고정하지 않음).
+
 ## 9. 시험 도구
 
 | 명령 | 하는 일 |
@@ -336,7 +349,8 @@ DB 트랜잭션 커밋 → NOTIFY ifp_events {"seq", "t", "id", "status"}
 | 누구 | 항목 | 이 문서의 안 |
 |---|---|---|
 | 화면 | 주문 요청 본문 · 답 · 오류 `code` | 5.2 |
-| 화면 | 스냅샷 · WS 첫 메시지 `snapshot`의 모양 | 5.5. 명세에 없어 이 문서가 정한다 |
+| 화면 | 스냅샷 · WS 첫 메시지 `snapshot`의 모양 | 5.5. 명세에 없어 이 문서가 정한다. 화면 연결 요청 N-05 · N-06 · N-08 반영(2026-11-26) |
+| 화면 | 화면 파일 내주기 | 5.6 (N-07) |
 | 화면 | 고객 구분 | 이번 주 `account_id`를 실음. 인증은 화면과 함께 정함 |
 | 화면 | 알림 사건 `alert_raised` · `alert_resolved`의 `data` | 고도화 때. 참고 안은 7.5 |
 | 관제 | `SubmitTrip`의 `trip_index` · `trip_count` · `submitted_at` | 6.2 |

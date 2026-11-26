@@ -2,9 +2,9 @@
 
 // ---- 상품 셋 (스토리보드의 세 상품) ----
 const PRODUCTS = [
-  { product_id: 1, kind: "A", name: "미니멘토스 레인보우", stock_qty: 12 },
-  { product_id: 2, kind: "B", name: "과즙팡 비타민 마이구미", stock_qty: 5 },
-  { product_id: 3, kind: "C", name: "자유시간 Mini", stock_qty: 0 },
+  { product_id: 1, kind: "mentos", name: "미니멘토스 레인보우", stock_qty: 12 },
+  { product_id: 2, kind: "mygummy", name: "과즙팡 비타민 마이구미", stock_qty: 5 },
+  { product_id: 3, kind: "choco_bar", name: "자유시간 Mini", stock_qty: 0 },
 ];
 const FLOW = ["접수됨", "준비 중", "출고 중", "출고 완료"];       // 고객 상태 말
 const ADMIN_FLOW = ["RECEIVED", "ASSIGNED", "FILLING", "TRANSPORTING", "SHIPPED"];

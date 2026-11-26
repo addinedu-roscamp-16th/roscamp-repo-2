@@ -18,7 +18,7 @@ def test_epoch_starts_at_1_and_same_boot_id_keeps_it(pool):
 
 def test_restart_holds_active_and_filters_old_epoch(pool, conn, seeded):
     assert apply_hello(pool, HelloIn("fleet", "b1"), D()) == HelloOut(True, 1)
-    t1, t2, t3 = (trip_of(seeded, conn, {"A": 1}) for _ in range(3))
+    t1, t2, t3 = (trip_of(seeded, conn, {"mentos": 1}) for _ in range(3))
     for n, st in enumerate(["ASSIGNED", "FILLING", "TRANSPORTING"], 1):
         assert apply_report(pool, rep(t1, 1, n, st), D()).result == "APPLIED"
     assert apply_report(pool, rep(t3, 1, 1, "SHIPPED"), D()).result == "APPLIED"
@@ -47,7 +47,7 @@ def test_restart_holds_active_and_filters_old_epoch(pool, conn, seeded):
 
 def test_restart_without_active_trips_only_bumps_epoch(pool, conn, seeded):
     apply_hello(pool, HelloIn("fleet", "b1"), D())
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     hist = count(conn, "status_history")
     assert apply_hello(pool, HelloIn("fleet", "b2"), D()) == HelloOut(True, 2)
     assert trip_state(conn, t)[:3] == ("RECEIVED", None, None)
@@ -67,7 +67,7 @@ def test_order_that_turns_active_between_queries_is_locked_and_held(pool, conn, 
     from service_bridge.core import hello as hello_mod
 
     apply_hello(pool, HelloIn("fleet", "b1"), D())
-    t1, t2 = (trip_of(seeded, conn, {"A": 1}) for _ in range(2))
+    t1, t2 = (trip_of(seeded, conn, {"mentos": 1}) for _ in range(2))
     assert apply_report(pool, rep(t1, 1, 1, "ASSIGNED"), D()).result == "APPLIED"
     real, fired = hello_mod._lock_orders, []
 

@@ -71,7 +71,7 @@ def test_mode_must_be_given_and_valid(ros, pool, overrides):
 
 
 def test_report_trip_round_trip(spin, pool, conn, seeded):
-    _, trip = insert_trip(conn, seeded["account_id"], {"A": 1})
+    _, trip = insert_trip(conn, seeded["account_id"], {"mentos": 1})
     bridge = BridgeNode(pool, parameter_overrides=_mode("TEST"))
     peer = rclpy.create_node("bridge_test_peer")
     spin(bridge, peer)

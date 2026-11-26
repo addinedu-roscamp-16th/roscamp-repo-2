@@ -4,6 +4,11 @@ setup(
     name='service_bridge',
     version='0.1.0',
     packages=find_packages(exclude=['test']),
+    # 화면 파일 (N-07). 화면 시험 폴더 static/test/는 설치하지 않는다
+    package_data={'service_bridge.web': [
+        'static/*.html',
+        'static/admin/*', 'static/common/*', 'static/customer/*', 'static/img/*',
+    ]},
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/service_bridge']),
         ('share/service_bridge', ['package.xml']),

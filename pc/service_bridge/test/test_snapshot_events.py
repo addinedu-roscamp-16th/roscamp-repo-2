@@ -1,4 +1,6 @@
 """고객 말 · 스냅샷 · 사건 나누기 시험."""
+import datetime
+
 from service_bridge.core.customer import STATUS_TEXT, status_text
 from service_bridge.core.events import Outgoing, envelope, read_event, route
 from service_bridge.core.intake import place_order
@@ -9,7 +11,7 @@ NINE = ["RECEIVED", "ASSIGNED", "FILLING", "FILLING_PAUSE", "TRANSPORTING",
         "SHIPPED", "PARTIAL", "HELD", "CANCELLED"]
 
 
-def _place(conn, seeded, account, key, kind_qty=(("A", 1),)):
+def _place(conn, seeded, account, key, kind_qty=(("mentos", 1),)):
     items = tuple(OrderLine(seeded["products"][k], q) for k, q in kind_qty)
     res = place_order(conn, OrderRequest(seeded["accounts"][account], items), key)
     assert isinstance(res, PlaceOk)
@@ -63,26 +65,65 @@ def test_stock_sorted(conn, seeded):
     s = stock(conn)
     assert [i["product_id"] for i in s["items"]] == sorted(seeded["products"].values())
     assert all(i["stock_qty"] == 20 for i in s["items"])
+    # N-05: 상품 코드 · 이름을 같이 싣는다
+    names = dict(conn.execute("SELECT product_id, name FROM product").fetchall())
+    for i in s["items"]:
+        assert set(i) == {"product_id", "kind", "name", "stock_qty"}
+        assert seeded["products"][i["kind"]] == i["product_id"]
+        assert i["name"] == names[i["product_id"]]
+
+
+def test_snapshots_share_stock_shape(conn, seeded):
+    """고객 · 관리자 스냅샷과 WS stock이 같은 모양 (N-05)."""
+    acc = seeded["accounts"]["tester"]
+    assert customer_snapshot(conn, acc, "NORMAL")["stock"] == stock(conn)
+    assert admin_snapshot(conn, "NORMAL", [])["stock"] == stock(conn)
 
 
 def test_customer_snapshot_only_own_orders(conn, seeded):
     mine = _place(conn, seeded, "tester", "k1")
     _place(conn, seeded, "tester2", "k2")
     snap = customer_snapshot(conn, seeded["accounts"]["tester"], "NORMAL")
-    assert snap["orders"] == [{"order_id": mine.order_id, "status_text": "접수됨"}]
+    assert [(o["order_id"], o["status_text"]) for o in snap["orders"]] == [(mine.order_id, "접수됨")]
     assert snap["notice"] is None
     assert "items" in snap["stock"]
     t = customer_snapshot(conn, seeded["accounts"]["tester"], "TEST")
     assert t["notice"] == {"kind": "MAINTENANCE", "message": "점검 중"}
 
 
+def test_customer_snapshot_order_items(conn, seeded):
+    """주문 줄에 품목 · 접수 시각, 스냅샷에 최대 수량 (N-06 · N-08)."""
+    p = seeded["products"]
+    res = _place(conn, seeded, "tester", "k1", (("choco_bar", 2), ("mentos", 3)))
+    snap = customer_snapshot(conn, seeded["accounts"]["tester"], "NORMAL")
+    o, = snap["orders"]
+    assert set(o) == {"order_id", "status_text", "created_at", "items"}
+    assert o["order_id"] == res.order_id
+    assert o["items"] == sorted([{"product_id": p["mentos"], "qty": 3}, {"product_id": p["choco_bar"], "qty": 2}],
+                                key=lambda i: i["product_id"])
+    created, = conn.execute("SELECT created_at FROM orders WHERE order_id=%s",
+                            (res.order_id,)).fetchone()
+    assert datetime.datetime.fromisoformat(o["created_at"]) == created
+    assert snap["limits"] == {"max_order_items": 8}
+    conn.execute("UPDATE app_setting SET value = 6 WHERE key = 'max_order_items'")
+    assert customer_snapshot(conn, seeded["accounts"]["tester"], "NORMAL")["limits"] == {
+        "max_order_items": 6}
+
+
 def test_admin_snapshot_shape(conn, seeded):
-    a = _place(conn, seeded, "tester", "k1", (("A", 3), ("B", 3)))
+    a = _place(conn, seeded, "tester", "k1", (("mentos", 3), ("choco_bar", 3)))
     _place(conn, seeded, "tester2", "k2")
     robots = [{"robot_id": "pode1"}]
     snap = admin_snapshot(conn, "NORMAL", robots)
     assert set(snap) == {"orders", "trips", "robots", "work_state", "stock"}
     assert [o["status"] for o in snap["orders"]] == ["RECEIVED", "RECEIVED"]
+    # N-06: 관리자 주문 줄에도 품목 · 접수 시각
+    first = snap["orders"][0]
+    assert set(first) == {"order_id", "status", "created_at", "items"}
+    assert first["order_id"] == a.order_id
+    assert sorted((i["product_id"], i["qty"]) for i in first["items"]) == sorted(
+        [(seeded["products"]["mentos"], 3), (seeded["products"]["choco_bar"], 3)])
+    assert snap["orders"][0]["created_at"] <= snap["orders"][1]["created_at"]
     assert snap["robots"] == robots and snap["work_state"] == {"system_mode": "NORMAL"}
     assert len(snap["trips"]) == 3
     assert all(t["items"] for t in snap["trips"])

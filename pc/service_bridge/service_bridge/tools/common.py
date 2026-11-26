@@ -16,7 +16,7 @@ def load_default_contract() -> Contract:
 
 
 def parse_items(text: str) -> dict[str, int]:
-    """"A:1,C:1" → {"A": 1, "C": 1}. 같은 kind는 합친다. 빈 글은 빈 dict."""
+    """"mentos:1,mygummy:1" → {"mentos": 1, "mygummy": 1}. 같은 kind는 합친다. 빈 글은 빈 dict."""
     out: dict[str, int] = {}
     for part in filter(None, (p.strip() for p in text.split(","))):
         kind, sep, count = part.partition(":")

@@ -103,6 +103,15 @@ def test_real_three_orders_is_v7_three_robots_wall_speed():
     assert scn.faults == []
 
 
+def test_shipped_scenarios_put_same_stock_on_both_arms():
+    """팔별 배치를 고정하지 않는다: 두 팔 재고가 같고, 주문 상품은 모두 재고에 있다."""
+    site = load_site("v7")
+    for path in (SCENARIO, THREE):
+        scn = load_scenario(str(path), site)
+        assert scn.stock["arm_left"] == scn.stock["arm_right"]
+        assert all(set(o.items) <= set(scn.stock["arm_left"]) for o in scn.orders)
+
+
 def test_real_three_orders_equal_real_two_orders_except_pode3():
     site = load_site("v7")
     two = load_scenario(str(SCENARIO), site)

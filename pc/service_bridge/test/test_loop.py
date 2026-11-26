@@ -46,8 +46,8 @@ def test_full_loop(pool, conn, seeded):
         thread = threading.Thread(target=ex.spin, daemon=True)
         thread.start()
 
-        order_id, trip_id = insert_trip(conn, seeded["account_id"], {"A": 1, "C": 1})
-        accepted, reason = submit(peer, contract, order_id, trip_id, {"A": 1, "C": 1})
+        order_id, trip_id = insert_trip(conn, seeded["account_id"], {"mentos": 1, "mygummy": 1})
+        accepted, reason = submit(peer, contract, order_id, trip_id, {"mentos": 1, "mygummy": 1})
         assert (accepted, reason) == (True, "")
 
         deadline = time.monotonic() + 20

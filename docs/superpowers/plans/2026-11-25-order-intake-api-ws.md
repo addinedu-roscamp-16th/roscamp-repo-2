@@ -325,9 +325,11 @@ git commit -m "feat(service_bridge): 운반 건 넘기기 기록, 5번 실패 �
 - Consumes: Task 1의 `ws_event` 모양, Task 2 `place_order`(시험 데이터)
 - Produces:
   - `customer.STATUS_TEXT: dict[str, str]` (Global Constraints의 표 그대로), `customer.status_text(status: str) -> str`
-  - `snapshot.stock(conn) -> dict`: `{"items": [{"product_id", "stock_qty"}]}` (product_id 순)
-  - `snapshot.customer_snapshot(conn, account_id: int, mode: str) -> dict`: `{"orders": [{"order_id", "status_text"}], "stock": {...}, "notice": {"kind": "MAINTENANCE", "message": "점검 중"} | None}`
-  - `snapshot.admin_snapshot(conn, mode: str, robots: list[dict]) -> dict`: `{"orders": [{"order_id", "status"}], "trips": [trip_changed data], "robots": robots, "work_state": {"system_mode": mode}, "stock": {...}}`
+  - `snapshot.stock(conn) -> dict`: `{"items": [{"product_id", "kind", "name", "stock_qty"}]}` (product_id 순)
+  - `snapshot.limits(conn) -> dict`: `{"max_order_items"}` (`app_setting`)
+  - `snapshot.customer_snapshot(conn, account_id: int, mode: str) -> dict`: `{"orders": [{"order_id", "status_text", "created_at", "items": [{"product_id", "qty"}]}], "stock": {...}, "limits": {...}, "notice": {"kind": "MAINTENANCE", "message": "점검 중"} | None}`
+  - `snapshot.admin_snapshot(conn, mode: str, robots: list[dict]) -> dict`: `{"orders": [{"order_id", "status", "created_at", "items": [...]}], "trips": [trip_changed data], "robots": robots, "work_state": {"system_mode": mode}, "stock": {...}}`
+  - 2026-11-26 화면 연결 요청 N-05 · N-06 · N-08로 `kind` · `name` · `created_at` · `items` · `limits`를 더함(설계 5.5 · 7.4)
   - 두 스냅샷 모두 끝나지 않은 주문 + `finished_at`이 24시간 안인 주문이다. `created_at` 순.
   - `events.read_event(conn, seq: int) -> tuple[str, dict] | None`
   - `events.Outgoing(audience: Literal["admin", "customer"], account_id: int | None, message: dict)`
@@ -451,6 +453,7 @@ git commit -m "feat(service_bridge): SubmitTrip 넘기기(접수 순서, 앞 건
     - `POST /api/orders` (헤더 `Idempotency-Key`)
     - `GET /api/snapshot?view=customer&account_id=…` · `?view=admin`
     - `WS /ws/customer?account_id=…`(모르는 계정이면 4404로 닫음) · `WS /ws/admin`
+    - 화면 파일: `web/static/`을 `/`에 마운트(`/customer/` · `/admin/`). 위 경로를 다 등록한 뒤 맨 끝에 붙인다(설계 5.6, 2026-11-26 N-07)
   - `current_account(conn, account_id: int | None) -> int`: 고객 구분을 읽는 유일한 곳. 없거나 모르면 404 `UNKNOWN_ACCOUNT`.
   - `Hub`
     - `register(ws, audience, account_id) -> Client`, `unregister(client)`

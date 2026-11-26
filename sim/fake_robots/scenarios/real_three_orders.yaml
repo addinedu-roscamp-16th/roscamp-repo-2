@@ -1,16 +1,20 @@
 # 실물 세 대 시험: v7, pode1~3은 P-1~P-3. 로봇만 실물이고 central과 팔은 가짜다.
-# 주문 4건은 시뮬레이션 시험과 같고 20 s 늦춰 한 번만 넣는다. 도킹은 PC 대역(DOCK_STUB=1)이 받는다.
+# 주문 4건은 시뮬레이션 시험과 같은 모양이고(상품 코드만 실제 상품) 20 s 늦춰 한 번만 넣는다. 도킹은 PC 대역(DOCK_STUB=1)이 받는다.
 # 벽시계로 돈다. robots의 speed_scale, pose_noise_m은 실물에 쓰이지 않는다.
 map: v7
 seed: 65
 speed_factor: 1.0
 timeout_s: 1800
-stock: {arm_left: {A: 20, B: 20}, arm_right: {C: 20, D: 20}}
+# 두 팔에 같은 상품을 같은 수로 둔다. 실물은 비전이 보고 담을 팔을 정하므로 팔별 배치를 고정하지 않는다.
+# 상품 코드 · 상품마다 합 20개는 service_bridge tools/seed.py의 PRODUCTS · STOCK과 같다
+stock:
+  arm_left: {mentos: 10, choco_bar: 10, mygummy: 10, choco_ball: 10, bungeo_cake: 10}
+  arm_right: {mentos: 10, choco_bar: 10, mygummy: 10, choco_ball: 10, bungeo_cake: 10}
 orders:
-  - {at_s: 20, id: R-001, items: {A: 1, C: 1}}
-  - {at_s: 40, id: R-002, items: {B: 1}}
-  - {at_s: 60, id: R-003, items: {D: 1, A: 1}}
-  - {at_s: 80, id: R-004, items: {C: 1}}
+  - {at_s: 20, id: R-001, items: {mentos: 1, mygummy: 1}}
+  - {at_s: 40, id: R-002, items: {choco_bar: 1, bungeo_cake: 1}}
+  - {at_s: 60, id: R-003, items: {choco_ball: 1, mentos: 1}}
+  - {at_s: 80, id: R-004, items: {mygummy: 1}}
 robots:
   pode1: {start: P-1, speed_scale: 1.0, pose_noise_m: 0.03}
   pode2: {start: P-2, speed_scale: 1.0, pose_noise_m: 0.03}

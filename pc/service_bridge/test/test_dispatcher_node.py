@@ -96,8 +96,8 @@ def _bridge(pool, **kw):
 
 
 def test_sends_in_order_one_at_a_time(spin, pool, conn, seeded):
-    a = _place(conn, seeded, [("A", 5)], "k1")   # 운반 건 2개
-    b = _place(conn, seeded, [("B", 1)], "k2")
+    a = _place(conn, seeded, [("mentos", 5)], "k1")   # 운반 건 2개
+    b = _place(conn, seeded, [("choco_bar", 1)], "k2")
     central = FakeCentral(delay=0.2)
     bridge = _bridge(pool)
     spin(central.node, bridge)
@@ -111,8 +111,8 @@ def test_sends_in_order_one_at_a_time(spin, pool, conn, seeded):
 
 
 def test_head_blocks_followers(spin, pool, conn, seeded):
-    a = _place(conn, seeded, [("B", 1)], "k1")
-    _place(conn, seeded, [("B", 1)], "k2")
+    a = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    _place(conn, seeded, [("choco_bar", 1)], "k2")
     central = FakeCentral(answer=lambda i, req: (False, "NOT_READY"))
     bridge = _bridge(pool)
     spin(central.node, bridge)
@@ -130,7 +130,7 @@ def test_wake_sends_without_waiting_timer(spin, pool, conn, seeded):
     spin(central.node, bridge)
     assert _until(lambda: central.node.count_clients("/central/submit_trip") == 1, 5)
     time.sleep(1.2)  # 빈 줄이 없으니 쉬는 시각 없이 타이머만 돌고 있는 상태
-    res = _place(conn, seeded, [("B", 1)], "k1")
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
     t0 = time.monotonic()
     bridge.wake_dispatch()
     assert _until(lambda: central.received == list(res.trip_ids), 0.5)
@@ -138,7 +138,7 @@ def test_wake_sends_without_waiting_timer(spin, pool, conn, seeded):
 
 
 def test_rejection_is_final(spin, pool, conn, seeded):
-    res = _place(conn, seeded, [("B", 1)], "k1")
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
     central = FakeCentral(answer=lambda i, req: (False, "INVALID_REQUEST"))
     bridge = _bridge(pool)
     spin(central.node, bridge)
@@ -150,7 +150,7 @@ def test_rejection_is_final(spin, pool, conn, seeded):
 
 
 def test_timeout_records_failure(spin, pool, conn, seeded):
-    res = _place(conn, seeded, [("B", 1)], "k1")
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
     central = FakeCentral(delay=3.0)
     bridge = _bridge(pool)
     spin(central.node, bridge)
@@ -161,7 +161,7 @@ def test_timeout_records_failure(spin, pool, conn, seeded):
 
 
 def test_no_service_records_failure(spin, pool, conn, seeded):
-    res = _place(conn, seeded, [("B", 1)], "k1")
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
     bridge = _bridge(pool)
     spin(bridge)
     assert _until(lambda: conn.execute(
@@ -184,7 +184,7 @@ def test_robots_callback(spin, pool):
 
 
 def test_reply_while_waking_sends_once(spin, pool, conn, seeded):
-    res = _place(conn, seeded, [("B", 1)], "k1")
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
     central = FakeCentral(delay=0.3)
     bridge = _bridge(pool)
     spin(central.node, bridge)
@@ -200,7 +200,7 @@ def test_reply_while_waking_sends_once(spin, pool, conn, seeded):
 
 def test_no_service_not_counted_right_after_start(spin, pool, conn, seeded):
     # 켜진 직후는 디스커버리 전이라 central이 없어 보여도 시도로 세지 않는다(재시작마다 +1 막기)
-    res = _place(conn, seeded, [("B", 1)], "k1")
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
     bridge = _bridge(pool)
     spin(bridge)
     q = "select attempts, last_result from trip_dispatch where trip_id = %s"
