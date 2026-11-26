@@ -13,17 +13,17 @@ central 쪽 `SubmitTrip` 처리는 `pc/central`에 있습니다.
 
 ## 실행 · 시험
 
-환경 준비(가상환경, `source` 순서, 도메인)와 명령은 [`docs/개발_규칙.md`](../../docs/개발_규칙.md)의 "주문 처리(브리지) 개발 환경"을 따릅니다. 여기에는 옮겨 적지 않습니다.
+환경 준비(가상환경, `source` 순서, 도메인)와 명령은 [`docs/개발_규칙.md`](../../docs/개발_규칙.md)의 "주문 처리(브리지) 개발 환경"을 따릅니다. 여기에는 옮겨 적지 않습니다. 이 패키지의 실행은 `ros2 run` 대신 가상환경을 켠 터미널에서 `python -m`으로 합니다(`ros2 run`으로는 psycopg를 못 찾음, 까닭은 같은 절).
 
 | 하는 일 | 명령 |
 |---|---|
-| 브리지(웹 포함) | `ros2 run service_bridge bridge --ros-args -p mode:=NORMAL` (`TEST`면 주문 503 `MAINTENANCE`) |
+| 브리지(웹 포함) | `python -m service_bridge.main --ros-args -p mode:=NORMAL` (`TEST`면 주문 503 `MAINTENANCE`) |
 | central | `ros2 run central central` |
-| 시험 DB 만들기 (이름이 `_test`로 끝날 때만) | `ros2 run service_bridge setup_db` |
-| 주문 보내기 | `ros2 run service_bridge order --account 1 --items 3:2,5:1 [--key <UUID>] [--url http://localhost:8000]` (202면 0으로 끝남) |
-| WS 보기 | `ros2 run service_bridge ws_watch --account 1` 또는 `--admin` (한 줄에 메시지 하나, JSON) |
-| 운반 건 직접 넘기기 | `ros2 run service_bridge submit_trip --items mentos:1,mygummy:1` (central만 손으로 볼 때. 2단계부터는 브리지가 직접 넘기므로 브리지와 같이 쓰면 같은 건을 두고 겹칠 수 있음) |
-| fleet 대역 | `ros2 run service_bridge fake_fleet` |
+| 시험 DB 만들기 (이름이 `_test`로 끝날 때만) | `python -m service_bridge.tools.setup_db` |
+| 주문 보내기 | `python -m service_bridge.tools.order --account 1 --items 3:2,5:1 [--key <UUID>] [--url http://localhost:8000]` (202면 0으로 끝남) |
+| WS 보기 | `python -m service_bridge.tools.ws_watch --account 1` 또는 `--admin` (한 줄에 메시지 하나, JSON) |
+| 운반 건 직접 넘기기 | `python -m service_bridge.tools.submit_trip --items mentos:1,mygummy:1` (central만 손으로 볼 때. 2단계부터는 브리지가 직접 넘기므로 브리지와 같이 쓰면 같은 건을 두고 겹칠 수 있음) |
+| fleet 대역 | `python -m service_bridge.tools.fake_fleet` |
 | core 시험 | `~/venv/iponic/bin/python -m pytest pc/service_bridge/test -q` |
 | central 시험 | `colcon test --packages-select central` |
 

@@ -125,7 +125,7 @@ A를 고릅니다 (11-26 논의에서 "`ReportOutbox`를 넓혀 셋이 함께 �
 | 노드 연결 | `test_report_flush.py` 등 기존 노드 시험 방식으로 `ReportTripCmd` · `ReportOrderCmd`가 클라이언트까지 가는지 |
 | central | `HELD` 남김 · 표시, 보류 뒤 끝 상태로 뺌, 같은 보고 반복 |
 | 전체 | `python3 -m pytest pc/fleet_core/test pc/fleet_manager/test -q`, `colcon test --packages-select central` |
-| T-10 재시험 | 백엔드 PR(`feat/screen-api-links`, 웹 뿌리 마운트 N-07 · 실제 상품 코드 포함) 병합 뒤 이 브랜치를 `dev`에 맞춤. 실행: `setup_db` → 브리지(`bridge -p mode:=NORMAL`, 웹 포함) → `central` → `pc.launch.py use_fake:=true fake_central:=false ...`. **주문은 11-25의 `submit_trip` 대신 고객 화면**(`http://localhost:8000/customer/?account=<id>`)에서 넣음 (11-26 사용자 결정). 확인: 고객 화면 접수됨 → 준비 중, DB `trip`이 `ASSIGNED`이고 `report_epoch` · `report_n`이 채워짐(완료 기준 2), 브리지 로그 `APPLIED`, 관리자 화면 · WS `trip_changed`. 결과를 `reports/스프린트_3회차/주문_배정_연동_테스트_메모.md` T-10 줄에 적고, T-01 확인 방법이 화면 → 웹 API → DB → 브리지 → central로 바뀐 것을 함께 적음 |
+| T-10 재시험 | 백엔드 PR(`feat/screen-api-links`, 웹 뿌리 마운트 N-07 · 실제 상품 코드 포함) 병합 뒤 이 브랜치를 `dev`에 맞춤. 실행: `setup_db` → 브리지(`bridge -p mode:=NORMAL`, 웹 포함) → `central` → `pc.launch.py use_fake:=true fake_central:=false ...`. **주문은 11-25의 `submit_trip` 대신 고객 화면**(`http://localhost:8000/customer/?account=<id>`)에서 넣음 (11-26 사용자 결정). 확인: 고객 화면 접수됨 → 준비 중, DB `trip`이 `ASSIGNED`이고 `report_epoch` · `report_n`이 채워짐(완료 기준 2), `status_history`에 RECEIVED → ASSIGNED(SYSTEM) 줄, `ws_event`의 `trip_changed` · `order_changed`, 관리자 화면. (브리지가 답하는 `result=APPLIED`는 로그에 남지 않으므로 반영 근거는 DB 행으로 봄) 결과를 `reports/스프린트_3회차/주문_배정_연동_테스트_메모.md` T-10 줄에 적고, T-01 확인 방법이 화면 → 웹 API → DB → 브리지 → central로 바뀐 것을 함께 적음 |
 
 ## 7. 구현자에게 맡기는 것
 

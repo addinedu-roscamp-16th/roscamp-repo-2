@@ -1,6 +1,6 @@
 # ---- 웹 대신 운반 건 하나를 접수하고 central에 넘긴다 ----
-#     ros2 run service_bridge submit_trip --items mentos:1,mygummy:1
-#     ros2 run service_bridge submit_trip --trip-id O-20261125-0001-1   # DB에 넣지 않고 다시 보냄
+#     python -m service_bridge.tools.submit_trip --items mentos:1,mygummy:1
+#     python -m service_bridge.tools.submit_trip --trip-id O-20261125-0001-1   # DB에 넣지 않고 다시 보냄
 from __future__ import annotations
 
 import argparse

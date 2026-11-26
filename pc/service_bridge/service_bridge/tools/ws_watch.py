@@ -1,6 +1,6 @@
 # ---- 화면 대신 WS에 붙어 받은 메시지를 한 줄에 하나씩 JSON으로 출력한다 (설계 9) ----
-#     ros2 run service_bridge ws_watch --account 1
-#     ros2 run service_bridge ws_watch --admin
+#     python -m service_bridge.tools.ws_watch --account 1
+#     python -m service_bridge.tools.ws_watch --admin
 from __future__ import annotations
 
 import argparse

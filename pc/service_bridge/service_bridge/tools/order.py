@@ -1,5 +1,5 @@
 # ---- 화면 대신 주문 하나를 POST /api/orders로 보낸다 (설계 9) ----
-#     ros2 run service_bridge order --account 1 --items 3:2,5:1 [--key <UUID>]
+#     python -m service_bridge.tools.order --account 1 --items 3:2,5:1 [--key <UUID>]
 # 같은 --key로 두 번 부르면 같은 답이어야 한다(중복 접수 없음).
 from __future__ import annotations
 
