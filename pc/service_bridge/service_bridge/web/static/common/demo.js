@@ -40,7 +40,12 @@ export function createDemo({ view, scene }, clock = realClock) {
   return {
     onMessage(h) { msgHandlers.push(h); },
     onState(h) { stateHandlers.push(h); },
-    async placeOrder(body, key) { return def.placeOrder(ctx, body, key); },
+    async placeOrder(body, key) {
+      // 실제 _OrderBody처럼 account_id 정수 · 비지 않은 items가 아니면 400
+      const okBody = body && Number.isInteger(body.account_id) && Array.isArray(body.items) && body.items.length > 0;
+      if (!okBody) return { status: 400, body: { code: "BAD_REQUEST", message: "요청 본문이 올바르지 않습니다.", detail: null }, headers: { get: () => null } };
+      return def.placeOrder(ctx, body, key);
+    },
     async reloadSnapshot() { if (!closed) deliver(snapshot()); },
     close() { closed = true; },
   };

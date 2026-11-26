@@ -121,7 +121,7 @@ function manyCustomer() {
   return m;
 }
 
-// ---- many: 관리자 주문 네 개 · 운반 건 다섯 개 (8개 주문 → 운반 건 2개), Pode 하나 오류 ----
+// ---- many: 관리자 주문 네 개 · 운반 건 다섯 개 (8개 주문 → 운반 건 2개, 각 4개), Pode 하나 오류 ----
 function manyAdmin() {
   const m = adminModel(), d = m.data;
   const od = (n, status, h, items) => ({ order_id: orderNo(n), status, created_at: at(h), items: items.map(([product_id, qty]) => ({ product_id, qty })) });
@@ -132,8 +132,8 @@ function manyAdmin() {
     od(4, "SHIPPED", "08:40", [[2, 1]]),
   ];
   d.trips = [
-    trip(tripNo(orderNo(1), 1), orderNo(1), "FILLING_PAUSE", "pode1", [[1, 4, 2], [2, 1, 0]]),
-    trip(tripNo(orderNo(1), 2), orderNo(1), "RECEIVED", null, [[1, 1, 0], [2, 2, 0]]),
+    trip(tripNo(orderNo(1), 1), orderNo(1), "FILLING_PAUSE", "pode1", [[1, 4, 2]]),
+    trip(tripNo(orderNo(1), 2), orderNo(1), "RECEIVED", null, [[1, 1, 0], [2, 3, 0]]),
     trip(tripNo(orderNo(2), 1), orderNo(2), "HELD", null, [[2, 2, 0]]),
     trip(tripNo(orderNo(3), 1), orderNo(3), "TRANSPORTING", "pode2", [[1, 2, 2]]),
     trip(tripNo(orderNo(4), 1), orderNo(4), "SHIPPED", "pode2", [[2, 1, 1]]),

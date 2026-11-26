@@ -49,6 +49,8 @@ python3 -m http.server 8765 -d pc/service_bridge/service_bridge/web/static
 | `http://localhost:8765/test/` | 순수 함수 시험 페이지 (`결과: 통과 N · 실패 0`) |
 
 - 시험 페이지를 headless chromium으로 한 번에 돌리기: `bash pc/service_bridge/service_bridge/web/static/test/run_headless.sh` (실패 0이면 종료 코드 0).
+  - 위 명령은 모두 저장소 루트에서 실행합니다.
+  - `run_headless.sh`는 `/snap/bin/chromium`이 있어야 돕니다.
 - 장면 이름 (`?demo=<이름>`): `normal` · `stock` · `busy` · `maintenance` · `reconnect` · `race` · `many`.
   - 고객 화면은 일곱 장면을 모두 씁니다.
   - 관리자 화면은 `normal` · `maintenance` · `reconnect` · `many`만 씁니다. 나머지는 `normal`로 떨어집니다.

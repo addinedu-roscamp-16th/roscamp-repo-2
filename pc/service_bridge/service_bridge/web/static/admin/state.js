@@ -72,7 +72,7 @@ export function columns(s) {
 export function robotCards(s) {
   return s.robots.map(r => {
     const w = robotWord(r);
-    return { robotId: r.robot_id, text: w.text, tone: w.tone, sub: r.trip_id ? r.trip_id : `배터리 ${r.battery}%` };
+    return { robotId: r.robot_id, text: w.text, tone: w.tone, sub: r.trip_id ? r.trip_id : `배터리 ${Number.isFinite(r.battery) ? Math.round(r.battery) + "%" : "—"}` };
   });
 }
 

@@ -1,10 +1,11 @@
 // ---- 고객 화면 상태 계산 (순수 함수: 화면 · 네트워크를 모르고, 받은 상태를 고치지 않음) ----
-import { productName, progressIndex, rejectMessage } from "../common/words.js";
+import { productName, progressIndex, rejectMessage, MAINTENANCE_TEXT } from "../common/words.js";
 
 const DEFAULT_MAX_ITEMS = 8;
 const RELOAD_WAIT_MS = 2000;
 const MAX_BUSY_RETRIES = 3;
 const MAX_NET_RETRIES = 1;
+let warnedNoLimits = false;   // limits 없음 경고는 한 번만
 
 // ---- 처음 상태 ----
 export function initialState(accountId) {
@@ -46,7 +47,10 @@ export function applyMessage(s, msg) {
   if (msg.type === "snapshot") {
     let maxItems = DEFAULT_MAX_ITEMS;
     if (data.limits && data.limits.max_order_items != null) maxItems = data.limits.max_order_items;
-    else console.warn("스냅샷에 limits가 없어 한 주문 최대 수량을 8로 둡니다.");
+    else if (!warnedNoLimits) {
+      warnedNoLimits = true;
+      console.warn("스냅샷에 limits가 없어 한 주문 최대 수량을 8로 둡니다.");
+    }
     const orders = (data.orders || []).map(o => ({
       order_id: o.order_id, status_text: o.status_text, created_at: o.created_at,
       items: o.items || s.knownItems[o.order_id] || [],
@@ -103,14 +107,25 @@ export function setOnline(s, online) { return { ...s, online: !!online }; }
 export function cartTotal(s) { return sumCart(s.cart); }
 
 export function canOrder(s) {
-  return cartTotal(s) > 0 && !s.sending && !s.notice && s.online;
+  return cartTotal(s) > 0 && !s.sending && !(s.notice && s.notice.kind === "MAINTENANCE") && s.online;
 }
 
 // ---- 보내기 ----
 // 새로 보내기면 시도 횟수를 지우고, 이미 보내는 중(다시 보내기)이면 이어 센다.
+// ---- UUID v4: randomUUID는 보안 문맥(HTTPS · localhost)에서만 있어, 없으면 getRandomValues로 만듦 ----
+export function makeUuid(c = globalThis.crypto) {
+  if (c && typeof c.randomUUID === "function") return c.randomUUID();
+  const b = new Uint8Array(16);
+  if (c && typeof c.getRandomValues === "function") c.getRandomValues(b);
+  else for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  b[6] = (b[6] & 0x0f) | 0x40; b[8] = (b[8] & 0x3f) | 0x80;
+  const h = Array.from(b, x => x.toString(16).padStart(2, "0")).join("");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
 export function beginSend(s) {
-  const key = s.key || crypto.randomUUID();
-  const body = { items: Object.entries(s.cart).map(([id, qty]) => ({ product_id: Number(id), qty })) };
+  const key = s.key || makeUuid();
+  const body = { account_id: s.accountId, items: Object.entries(s.cart).map(([id, qty]) => ({ product_id: Number(id), qty })) };
   const fresh = !s.sending;
   const state = { ...s, key, sending: true, reject: null,
     busyAttempts: fresh ? 0 : s.busyAttempts, netAttempts: fresh ? 0 : s.netAttempts };
@@ -119,6 +134,11 @@ export function beginSend(s) {
 
 export function applyResponse(s, resp, sentBody) {
   const status = resp.status, body = resp.body;
+  if (status === 202 && !(body && body.order_id)) {
+    // 202인데 주문 번호가 없으면 접수 여부를 모르니 확인 안내로 풀어 줌
+    return { state: { ...s, busyAttempts: 0, netAttempts: 0, sending: false,
+                      reject: { text: "주문이 접수됐는지 확인 중입니다.", action: "reload" } }, retryAfterMs: null };
+  }
   if (status === 202) {
     const items = clone(sentBody.items);
     const id = body.order_id;
@@ -160,7 +180,7 @@ export function applyResponse(s, resp, sentBody) {
   } else if (status === 409) {
     next = { ...next, key: null };
   } else if (reject.action === "maintenance") {
-    next = { ...next, notice: { kind: "maintenance", message: reject.text } };
+    next = { ...next, notice: { kind: "MAINTENANCE", message: MAINTENANCE_TEXT } };
   }
   return { state: next, retryAfterMs: null };
 }

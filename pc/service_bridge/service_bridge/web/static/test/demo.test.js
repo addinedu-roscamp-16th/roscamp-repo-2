@@ -52,7 +52,7 @@ test("demo: 관리자 normal은 3초 뒤 주문이 들어와 SHIPPED까지", asy
 });
 test("demo: normal 주문 흐름", async () => {
   const d = open("customer", "normal");
-  const r = await d.src.placeOrder({ items: [{ product_id: 1, qty: 2 }] }, "k1");
+  const r = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 2 }] }, "k1");
   eq(r.status, 202); ok(r.body.order_id.startsWith("O-20261126-"));
   eq(r.body.status, "RECEIVED");
   d.clock.advance(6000);
@@ -64,21 +64,21 @@ test("demo: normal 주문 흐름", async () => {
 });
 test("demo: stock 장면은 첫 주문을 OUT_OF_STOCK으로 거절", async () => {
   const d = open("customer", "stock");
-  const r = await d.src.placeOrder({ items: [{ product_id: 1, qty: 5 }] }, "k1");
+  const r = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 5 }] }, "k1");
   eq(r.status, 422); eq(r.body.code, "OUT_OF_STOCK");
   eq(r.body.detail, { items: [{ product_id: 1, qty: 5, stock_qty: 2 }] });
   d.clock.advance(0);
   eq(d.msgs.find(m => m.type === "stock").data.items.find(i => i.product_id === 1).stock_qty, 2);
-  eq((await d.src.placeOrder({ items: [{ product_id: 1, qty: 2 }] }, "k2")).status, 202);
+  eq((await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 2 }] }, "k2")).status, 202);
 });
 test("demo: busy는 같은 키로 세 번째에 202", async () => {
   const d = open("customer", "busy");
   const orig = console.info, logged = [];
   console.info = (...a) => logged.push(a.join(" "));
   try {
-    const a = await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "kk");
-    const b = await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "kk");
-    const c = await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "kk");
+    const a = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "kk");
+    const b = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "kk");
+    const c = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "kk");
     eq([a.status, b.status, c.status], [503, 503, 202]);
     eq(a.body.code, "BUSY"); eq(a.headers.get("Retry-After"), "1");
     eq(c.headers.get("Retry-After"), null);
@@ -90,13 +90,13 @@ test("demo: maintenance", async () => {
   eq(d.msgs[0].data.notice.kind, "MAINTENANCE");
   eq(d.msgs[1].type, "customer_notice");
   eq(d.msgs[1].data, { kind: "MAINTENANCE", message: "점검 중" });
-  const r = await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
+  const r = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "k");
   eq(r.status, 503); eq(r.body.code, "MAINTENANCE");
   eq(open("admin", "maintenance").msgs[0].data.work_state.system_mode, "TEST");
 });
 test("demo: reconnect는 두 번째 사건 뒤 끊겼다가 3초 뒤 스냅샷", async () => {
   const d = open("customer", "reconnect");
-  await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
+  await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "k");
   d.clock.advance(3000);      // 접수됨, 준비 중
   eq(d.states, ["open", "reconnecting"]);
   const before = d.msgs.length;
@@ -118,7 +118,7 @@ test("demo: race는 order_changed가 202보다 먼저", async () => {
   const d = open("customer", "race");
   const order = [];
   d.src.onMessage(m => { if (m.type === "order_changed") order.push("evt"); });
-  const p = d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k").then(r => { order.push("202"); return r; });
+  const p = d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "k").then(r => { order.push("202"); return r; });
   await tick(); d.clock.advance(0); await tick();
   eq(order, ["evt"]);
   d.clock.advance(499); await tick(); eq(order, ["evt"]);
@@ -148,7 +148,7 @@ test("demo: 고객 메시지에 내부 상태 값 없음", async () => {
   const bad = ["RECEIVED", "ASSIGNED", "FILLING", "TRANSPORTING", "SHIPPED", "HELD", "PARTIAL", "CANCELLED", "배정", "운반", "보류", "일시", "결품", "장애"];
   for (const scene of ["many", "normal"]) {
     const d = open("customer", scene);
-    const r = await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
+    const r = await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "k");
     d.clock.advance(10000);
     const all = JSON.stringify(d.msgs);
     for (const w of bad) ok(!all.includes(w), `${scene}: ${w}`);
@@ -166,7 +166,7 @@ test("demo: SCENES 이름과 화면", () => {
 test("demo: reloadSnapshot은 snapshot을 다시 냄, close 뒤엔 조용", async () => {
   const d = open("customer", "normal");
   await d.src.reloadSnapshot(); eq(d.msgs.filter(m => m.type === "snapshot").length, 2);
-  d.src.close(); await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
+  d.src.close(); await d.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "k");
   const n = d.msgs.length; d.clock.advance(10000); eq(d.msgs.length, n);
 });
 test("demo: trip_id는 문자열 <주문>-<순번>, robots.trip_id는 있는 운반 건 또는 빈 문자열", async () => {
@@ -185,6 +185,21 @@ test("demo: trip_id는 문자열 <주문>-<순번>, robots.trip_id는 있는 운
     ok(robots.filter(r => r.trip_id !== "").every(r => trips.has(r.trip_id)), `${scene}: robots.trip_id가 운반 건과 맞음`);
   }
   const c = open("customer", "normal");
-  const r = await c.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
+  const r = await c.src.placeOrder({ account_id: 1, items: [{ product_id: 1, qty: 1 }] }, "k");
   eq(r.body.trip_ids, [`${r.body.order_id}-1`]);
+});
+
+test("demo: 가짜 주문도 실제처럼 account_id 정수 · 비지 않은 items를 요구(400 BAD_REQUEST)", async () => {
+  const d = open("customer", "normal");
+  const items = [{ product_id: 1, qty: 1 }];
+  for (const body of [{ items }, { account_id: "1", items }, { account_id: 1, items: [] }, { account_id: 1 }]) {
+    const r = await d.src.placeOrder(body, "k");
+    eq(r.status, 400); eq(r.body.code, "BAD_REQUEST"); eq(r.body.detail, null); ok(r.body.message.length > 0);
+  }
+  eq((await d.src.placeOrder({ account_id: 1, items }, "k")).status, 202);
+});
+
+test("demo: many 관리자 운반 건은 로봇 바구니 4를 넘지 않음", () => {
+  const m = SCENES.many.init("admin").data;
+  for (const t of m.trips) ok(t.items.reduce((a, i) => a + i.qty_ordered, 0) <= 4, t.trip_id);
 });

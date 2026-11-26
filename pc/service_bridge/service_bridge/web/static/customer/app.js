@@ -1,6 +1,6 @@
 // ---- 고객 주문 화면: 상태 하나를 들고, 메시지 · 누름마다 state.js를 불러 다시 그림 ----
 import { readParams, openSource } from "../common/source.js";
-import { PROGRESS_STEPS } from "../common/words.js";
+import { PROGRESS_STEPS, noticeText } from "../common/words.js";
 import {
   initialState, applyMessage, applyResponse, setQty, setOnline, beginSend,
   canOrder, cartTotal, orderView, productView,
@@ -105,7 +105,7 @@ function render() {
   renderConn();
   const n = $("notice");
   n.hidden = !s.notice;
-  n.textContent = s.notice ? s.notice.message : "";
+  n.textContent = noticeText(s.notice);
   renderProducts();
   renderOrders();
   $("summary").textContent = `고른 상품 ${cartTotal(s)}개 · 한 주문 최대 ${s.maxItems}개`;

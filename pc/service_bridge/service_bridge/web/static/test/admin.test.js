@@ -78,3 +78,12 @@ test("admin: 재고 한 줄", () => {
   s = applyMessage(s, { type: "stock", data: { items: [{ product_id: 7, stock_qty: 1 }] } });
   eq(stockLine(s), "상품 7 1");
 });
+
+test("admin: 배터리는 반올림, 숫자가 아니면 —", () => {
+  const s = applyMessage(initialState(), snap({ robots: [
+    { robot_id: "a", fsm_state: "IDLE", fault: "NONE", battery: 86.30000305175781, trip_id: "" },
+    { robot_id: "b", fsm_state: "IDLE", fault: "NONE", battery: null, trip_id: "" },
+    { robot_id: "c", fsm_state: "IDLE", fault: "NONE", trip_id: "" },
+  ] }));
+  eq(robotCards(s).map(r => r.sub), ["배터리 86%", "배터리 —", "배터리 —"]);
+});

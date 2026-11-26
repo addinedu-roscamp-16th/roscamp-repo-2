@@ -89,10 +89,19 @@ export function rejectMessage(status, body, names) {
     return { text: "상품 정보가 바뀌었습니다. 화면을 새로 불러옵니다.", action: "reload" };
   }
   if (status === 503 && code === "MAINTENANCE") {
-    return { text: "점검 중입니다. 잠시 뒤 다시 주문해 주세요.", action: "maintenance" };
+    return { text: MAINTENANCE_TEXT, action: "maintenance" };
   }
   if (status === 503 && code === "BUSY") {
     return { text: "주문이 몰려 처리하지 못했습니다. 다시 눌러 주세요.", action: null };
   }
   return { text: `주문을 보내지 못했습니다. (${code || status})`, action: null };
+}
+
+// ---- 점검 문구 한 곳 (설계 3.3): 점검 줄과 503 거절 안내가 같이 씀 ----
+export const MAINTENANCE_TEXT = "점검 중입니다. 잠시 뒤 다시 주문해 주세요.";
+
+// ---- 고객 안내 줄 글: 점검이면 고정 문구, 그 밖 kind는 서버 message ----
+export function noticeText(notice) {
+  if (!notice) return "";
+  return notice.kind === "MAINTENANCE" ? MAINTENANCE_TEXT : (notice.message || "");
 }

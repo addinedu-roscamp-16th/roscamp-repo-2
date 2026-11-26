@@ -2,9 +2,9 @@
 import { test, eq, ok } from "./harness.js";
 import {
   initialState, applyMessage, setQty, setOnline, cartTotal, canOrder,
-  beginSend, applyResponse, orderView, productView,
+  beginSend, applyResponse, orderView, productView, makeUuid,
 } from "../customer/state.js";
-import { rejectMessage } from "../common/words.js";
+import { rejectMessage, noticeText, MAINTENANCE_TEXT } from "../common/words.js";
 
 const P = [
   { product_id: 1, kind: "snack", name: "미니멘토스", stock_qty: 12 },
@@ -143,7 +143,7 @@ test("customer: 이름 없는 상품 · limits 없는 스냅샷", () => {
 test("customer: 점검 중 · 연결 끊김이면 주문 불가", () => {
   let s = setQty(ready(), 1, 1);
   ok(canOrder(s));
-  const n = applyMessage(s, { type: "customer_notice", data: { kind: "maintenance", message: "점검 중입니다." } }).state;
+  const n = applyMessage(s, { type: "customer_notice", data: { kind: "MAINTENANCE", message: "점검 중입니다." } }).state;
   ok(!canOrder(n)); eq(n.notice.message, "점검 중입니다.");
   ok(!canOrder(setOnline(s, false)));
   ok(!canOrder(setQty(applyMessage(initialState(1), snap()).state, 1, 1)));   // 초기 online false
@@ -233,4 +233,51 @@ test("customer: created_at 없는 스냅샷이어도 방금 넣은 주문이 맨
   const a = beginSend(s);
   s = applyResponse(a.state, ok202("N"), a.body).state;
   eq(orderView(s).map(o => o.orderId), ["N", "B", "A"]);
+});
+
+// ---- 전체 검토 반영 ----
+test("customer: 주문 본문에 account_id가 있음 (실제 _OrderBody 필수)", () => {
+  const a = beginSend(setQty(ready(), 1, 2));
+  eq(a.body.account_id, 1);
+  eq(a.body.items, [{ product_id: 1, qty: 2 }]);
+});
+
+test("customer: UUID 대체 함수는 v4 모양", () => {
+  const re = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  for (let i = 0; i < 20; i++) ok(re.test(makeUuid(null)), "대체 경로");
+  ok(re.test(makeUuid({ getRandomValues: (a) => { for (let i = 0; i < a.length; i++) a[i] = (i * 37 + 11) & 255; return a; } })));
+  eq(makeUuid({ randomUUID: () => "fixed" }), "fixed");
+});
+
+test("customer: 점검 줄 문구는 한 곳(words.js)에서, 다른 kind는 서버 message", () => {
+  eq(noticeText({ kind: "MAINTENANCE", message: "점검 중" }), MAINTENANCE_TEXT);
+  eq(MAINTENANCE_TEXT, "점검 중입니다. 잠시 뒤 다시 주문해 주세요.");
+  eq(noticeText({ kind: "INFO", message: "내일 휴무" }), "내일 휴무");
+  eq(noticeText(null), "");
+});
+
+test("customer: 점검이 아닌 안내는 주문을 막지 않음", () => {
+  const s = setQty(applyMessage(ready(), { type: "customer_notice", data: { kind: "INFO", message: "내일 휴무" } }).state, 1, 1);
+  ok(canOrder(s));
+  ok(!canOrder(applyMessage(s, { type: "customer_notice", data: { kind: "MAINTENANCE", message: "점검 중" } }).state));
+});
+
+test("customer: 202인데 본문이 비면 보냄 상태를 풀고 안내", () => {
+  for (const b of [null, {}]) {
+    const a = beginSend(setQty(ready(), 1, 1));
+    const r = applyResponse(a.state, res(202, b), a.body);
+    ok(!r.state.sending); ok(r.state.reject && r.state.reject.text.length > 0);
+    eq(r.retryAfterMs, null);
+  }
+});
+
+test("customer: limits 없는 스냅샷 경고는 한 번만", () => {
+  const warn = console.warn; let warned = 0; console.warn = () => { warned++; };
+  try {
+    const data = { orders: [], stock: { items: [] }, notice: null };
+    let s = applyMessage(initialState(1), { type: "snapshot", data }).state;
+    const after1 = warned;
+    applyMessage(s, { type: "snapshot", data }); applyMessage(s, { type: "snapshot", data });
+    eq(warned, after1);
+  } finally { console.warn = warn; }
 });
