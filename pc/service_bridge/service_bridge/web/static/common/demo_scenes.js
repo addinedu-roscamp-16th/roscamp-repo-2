@@ -31,9 +31,11 @@ function customerModel() {
       notice: null,
       limits: { max_order_items: 8 },
     },
-    nextNo: 2, nextTrip: 2,
+    nextNo: 2,
   };
 }
+// 운반 건 번호는 실제와 같은 문자열 "<주문 번호>-<순번>"
+const tripNo = (order_id, seq) => `${order_id}-${seq}`;
 const trip = (trip_id, order_id, status, robot_id, items) => ({
   trip_id, order_id, status, robot_id,
   items: items.map(([product_id, q, placed]) => ({ product_id, qty_ordered: q, qty_placed: placed, qty_missing: 0 })),
@@ -44,12 +46,12 @@ function adminModel() {
   return {
     data: {
       orders: [{ order_id: orderNo(1), status: "SHIPPED", created_at: at("09:10"), items: [{ product_id: 2, qty: 1 }] }],
-      trips: [trip(1, orderNo(1), "SHIPPED", "pode1", [[2, 1, 1]])],
-      robots: [robot("pode1", "IDLE", "NONE", 86, 1.2, 0.8, null), robot("pode2", "IDLE", "NONE", 92, 2.4, 0.8, null)],
+      trips: [trip(tripNo(orderNo(1), 1), orderNo(1), "SHIPPED", "pode1", [[2, 1, 1]])],
+      robots: [robot("pode1", "IDLE", "NONE", 86, 1.2, 0.8, ""), robot("pode2", "IDLE", "NONE", 92, 2.4, 0.8, "")],
       work_state: { system_mode: "NORMAL" },
       stock: { items: clone(PRODUCTS) },
     },
-    nextNo: 2, nextTrip: 2,
+    nextNo: 2,
   };
 }
 
@@ -65,7 +67,7 @@ function acceptOrder(ctx, body, { first = 0, stockDelay = 0 } = {}) {
     const p = d.stock.items.find(s => s.product_id === it.product_id);
     if (p) p.stock_qty = Math.max(0, p.stock_qty - it.qty);
   }
-  const trip_ids = [m.nextTrip++];
+  const trip_ids = [tripNo(order_id, 1)];
   for (let i = first; i < FLOW.length; i++) {
     ctx.after(STEP_MS * (i - first + 1), () => {
       order.status_text = FLOW[i];
@@ -80,7 +82,7 @@ function acceptOrder(ctx, body, { first = 0, stockDelay = 0 } = {}) {
 function adminLoop(ctx) {
   const m = ctx.model, d = m.data;
   const run = () => {
-    const order_id = orderNo(m.nextNo++), trip_id = m.nextTrip++;
+    const order_id = orderNo(m.nextNo++), trip_id = tripNo(order_id, 1);
     const items = [[1, 2], [2, 1]];
     const order = { order_id, status: "RECEIVED", created_at: new Date(ctx.now()).toISOString(), items: items.map(([product_id, qty]) => ({ product_id, qty })) };
     const t = trip(trip_id, order_id, "RECEIVED", null, items.map(([p, q]) => [p, q, 0]));
@@ -91,11 +93,11 @@ function adminLoop(ctx) {
       if (i >= 1) t.robot_id = "pode1";
       if (status === "TRANSPORTING" || status === "SHIPPED") t.items.forEach(it => { it.qty_placed = it.qty_ordered; });
       Object.assign(pode, [
-        { fsm_state: "IDLE", trip_id: null },
+        { fsm_state: "IDLE", trip_id: "" },
         { fsm_state: "MOVING", trip_id, x: 1.8 },
         { fsm_state: "DOCKED", trip_id, x: 2.6, battery: pode.battery - 1 },
         { fsm_state: "MOVING", trip_id, x: 3.4, battery: pode.battery - 2 },
-        { fsm_state: "IDLE", trip_id: null, x: 1.2 },
+        { fsm_state: "IDLE", trip_id: "", x: 1.2 },
       ][i]);
       ctx.emit("order_changed", { order_id, status });
       ctx.emit("trip_changed", clone(t));
@@ -133,18 +135,18 @@ function manyAdmin() {
     od(4, "SHIPPED", "08:40", [[2, 1]]),
   ];
   d.trips = [
-    trip(1, orderNo(1), "FILLING_PAUSE", "pode1", [[1, 4, 2], [2, 1, 0]]),
-    trip(2, orderNo(1), "RECEIVED", null, [[1, 1, 0], [2, 2, 0]]),
-    trip(3, orderNo(2), "HELD", null, [[2, 2, 0]]),
-    trip(4, orderNo(3), "TRANSPORTING", "pode2", [[1, 2, 2]]),
-    trip(5, orderNo(4), "SHIPPED", "pode2", [[2, 1, 1]]),
+    trip(tripNo(orderNo(1), 1), orderNo(1), "FILLING_PAUSE", "pode1", [[1, 4, 2], [2, 1, 0]]),
+    trip(tripNo(orderNo(1), 2), orderNo(1), "RECEIVED", null, [[1, 1, 0], [2, 2, 0]]),
+    trip(tripNo(orderNo(2), 1), orderNo(2), "HELD", null, [[2, 2, 0]]),
+    trip(tripNo(orderNo(3), 1), orderNo(3), "TRANSPORTING", "pode2", [[1, 2, 2]]),
+    trip(tripNo(orderNo(4), 1), orderNo(4), "SHIPPED", "pode2", [[2, 1, 1]]),
   ];
   d.robots = [
-    robot("pode1", "DOCKED", "NONE", 74, 2.6, 0.8, 1),
-    robot("pode2", "MOVING", "NONE", 58, 3.4, 1.5, 4),
-    robot("pode3", "ERROR", "ERROR", 31, 0.6, 2.0, null),
+    robot("pode1", "DOCKED", "NONE", 74, 2.6, 0.8, tripNo(orderNo(1), 1)),
+    robot("pode2", "MOVING", "NONE", 58, 3.4, 1.5, tripNo(orderNo(3), 1)),
+    robot("pode3", "ERROR", "ERROR", 31, 0.6, 2.0, ""),
   ];
-  m.nextNo = 5; m.nextTrip = 6;
+  m.nextNo = 5;
   return m;
 }
 

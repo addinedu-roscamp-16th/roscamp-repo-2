@@ -169,3 +169,22 @@ test("demo: reloadSnapshot은 snapshot을 다시 냄, close 뒤엔 조용", asyn
   d.src.close(); await d.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
   const n = d.msgs.length; d.clock.advance(10000); eq(d.msgs.length, n);
 });
+test("demo: trip_id는 문자열 <주문>-<순번>, robots.trip_id는 있는 운반 건 또는 빈 문자열", async () => {
+  const re = /^O-\d{8}-\d{4}-\d+$/;
+  for (const scene of ["normal", "many"]) {
+    const d = open("admin", scene);
+    d.clock.advance(20000);
+    const trips = new Set(), robots = [];
+    for (const m of d.msgs) {
+      if (m.type === "snapshot") { m.data.trips.forEach(t => trips.add(t.trip_id)); robots.push(...m.data.robots); }
+      if (m.type === "trip_changed") trips.add(m.data.trip_id);
+      if (m.type === "robots") robots.push(...m.data.robots);
+    }
+    ok(trips.size > 0 && [...trips].every(t => re.test(t)), `${scene}: trip_id 모양`);
+    ok(robots.every(r => typeof r.trip_id === "string"), `${scene}: robots.trip_id 문자열`);
+    ok(robots.filter(r => r.trip_id !== "").every(r => trips.has(r.trip_id)), `${scene}: robots.trip_id가 운반 건과 맞음`);
+  }
+  const c = open("customer", "normal");
+  const r = await c.src.placeOrder({ items: [{ product_id: 1, qty: 1 }] }, "k");
+  eq(r.body.trip_ids, [`${r.body.order_id}-1`]);
+});
