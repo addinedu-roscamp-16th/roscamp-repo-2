@@ -8,7 +8,7 @@
 <script type="module">
 // ---- 시험 파일을 모두 불러온 뒤 실행 (파일을 더하면 여기에 줄 추가) ----
 import { run } from "./harness.js";
-const files = ["./words.test.js", "./source.test.js", "./demo.test.js"];
+const files = ["./words.test.js", "./source.test.js", "./demo.test.js", "./customer.test.js"];
 try {
   for (const f of files) await import(f);
 } catch (e) {
