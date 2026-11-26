@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import time
 import traceback
+from collections.abc import Callable
 
 from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.contract import load_contract, to_ros_qos
-from fleet_interfaces.msg import SystemMode
+from fleet_interfaces.msg import RobotStatusArray, SystemMode
 from fleet_interfaces.srv import Hello, ReportTrip
 from psycopg_pool import ConnectionPool
 from rcl_interfaces.msg import ParameterDescriptor
@@ -18,6 +19,7 @@ from rclpy.parameter import Parameter
 from service_bridge.core.hello import apply_hello
 from service_bridge.core.reports import apply_report
 from service_bridge.ros import convert
+from service_bridge.ros.dispatcher import Dispatcher
 
 MODES = (SystemMode.MODE_NORMAL, SystemMode.MODE_TEST)
 REQUEST_BUDGET_SEC = 2.5   # 요청 마감 = 받은 시각 + 2.5초 (fleet 호출 한도 3초보다 짧게)
@@ -27,9 +29,12 @@ DB_PROBE_TIMEOUT_SEC = 0.2  # 실행기 스레드를 오래 잡지 않게 짧게
 
 # ---- 노드 만들기와 켜질 때 순서 ----
 class BridgeNode(Node):
-    def __init__(self, pool: ConnectionPool, **kwargs):
+    def __init__(self, pool: ConnectionPool,
+                 on_robots: Callable[[list[dict]], None] | None = None, **kwargs):
         super().__init__("service_bridge", **kwargs)
         self._pool = pool
+        self._on_robots = on_robots
+        self._dispatcher: Dispatcher | None = None
         self._mode = self._read_mode()
         self._contract = load_contract(
             get_package_share_directory("fleet_interfaces") + "/contract.yaml")
@@ -42,7 +47,13 @@ class BridgeNode(Node):
         self._mode_pub.publish(SystemMode(mode=self._mode, stamp=self.get_clock().now().to_msg()))
         self.get_logger().info(f"system mode {self._mode} 발행")
 
-        # 2. DB 첫 연결이 될 때까지 확인. 되면 3 · 4.
+        # 로봇 상태 구독 (DB와 무관, LATCHED라 늦게 켜져도 마지막 값을 받음)
+        self._robots_sub = self.create_subscription(
+            RobotStatusArray, self._contract.name("robots"), self._on_robots_msg,
+            to_ros_qos(self._contract.qos("robots")),
+            callback_group=MutuallyExclusiveCallbackGroup())
+
+        # 2. DB 첫 연결이 될 때까지 확인. 되면 3 · 4 · 5.
         # 서버가 없는 동안 fleet은 시간 초과 뒤 다시 보내므로 잃는 보고가 없다
         self._probe_timer = self.create_timer(DB_PROBE_PERIOD_SEC, self._probe_db)
 
@@ -87,10 +98,30 @@ class BridgeNode(Node):
                 ReportTrip, self._contract.name("report_trip"), self._on_report,
                 callback_group=MutuallyExclusiveCallbackGroup()),
         ]
+        # 5. 운반 건 넘기기 시작: 켜질 때 남은 줄도 다시 보낸다
+        self._dispatcher = Dispatcher(self, self._pool, self._contract)
+        self._dispatcher.start()
         self._probe_timer.cancel()
         self.destroy_timer(self._probe_timer)
         self._probe_timer = None
         self.get_logger().info("DB 연결됨, Hello · ReportTrip 서버 열림")
+
+    @property
+    def mode(self) -> str:
+        return self._mode
+
+    def wake_dispatch(self) -> None:
+        """웹 스레드에서 불러도 됨. 아직 켜지는 중이면 start()가 남은 줄을 보낸다."""
+        if self._dispatcher is not None:
+            self._dispatcher.wake()
+
+    def _on_robots_msg(self, msg: RobotStatusArray) -> None:
+        if self._on_robots is None:
+            return
+        try:
+            self._on_robots(convert.robots(msg))
+        except Exception:
+            self.get_logger().error(f"on_robots 예외\n{traceback.format_exc()}")
 
     # ---- 끌 때 ----
     def close_servers(self) -> None:

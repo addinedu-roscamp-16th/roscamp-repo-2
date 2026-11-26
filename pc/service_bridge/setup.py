@@ -16,5 +16,7 @@ setup(
         'setup_db = service_bridge.tools.setup_db:main',
         'submit_trip = service_bridge.tools.submit_trip:main',
         'fake_fleet = service_bridge.tools.fake_fleet:main',
+        'order = service_bridge.tools.order:main',
+        'ws_watch = service_bridge.tools.ws_watch:main',
     ]},
 )

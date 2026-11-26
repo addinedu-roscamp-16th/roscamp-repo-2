@@ -20,7 +20,7 @@ class Board:
     def __init__(self):
         self._entries: list[BoardEntry] = []
         # trip_id -> 처음의 확정 응답(접수 · 거절). 같은 trip_id가 다시 오면 그대로 준다 (SB-06).
-        # NOT_READY는 기억하지 않는다(이번 조각에는 내는 경우가 없음)
+        # NOT_READY는 기억하지 않는다(이번 단계에는 내는 경우가 없음)
         self._answers: dict[str, tuple[bool, str]] = {}
         self._finished: dict[str, str] = {}  # 주문판에서 뺀 trip_id -> 끝 상태
 

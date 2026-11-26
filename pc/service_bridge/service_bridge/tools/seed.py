@@ -7,16 +7,20 @@ TEST_LOGIN = "tester"
 
 
 def seed(conn: psycopg.Connection) -> dict:
-    """{"account_id": int, "products": {kind: product_id}}를 돌려준다.
+    """{"account_id": int, "accounts": {"tester", "tester2", "admin": id},
+    "products": {kind: product_id}}를 돌려준다. "account_id"는 tester.
 
     재고는 상품을 0으로 만든 뒤 stock_ledger 입고로 넣는다
     (product.stock_qty 직접 쓰기는 트리거가 막음).
     """
     with conn.transaction():
-        account_id = conn.execute(
-            "INSERT INTO account (login_id, password_hash, role, name) "
-            "VALUES (%s, 'x', 'USER', %s) RETURNING account_id",
-            (TEST_LOGIN, TEST_LOGIN)).fetchone()[0]
+        accounts = {}
+        for login, role in ((TEST_LOGIN, "USER"), ("tester2", "USER"), ("admin", "ADMIN")):
+            accounts[login] = conn.execute(
+                "INSERT INTO account (login_id, password_hash, role, name) "
+                "VALUES (%s, 'x', %s, %s) RETURNING account_id",
+                (login, role, login)).fetchone()[0]
+        account_id = accounts[TEST_LOGIN]
         products = {}
         for kind in KINDS:
             pid = conn.execute(
@@ -26,4 +30,4 @@ def seed(conn: psycopg.Connection) -> dict:
                 "INSERT INTO stock_ledger (product_id, entry_type, change_qty, reason) "
                 "VALUES (%s, 'INBOUND', %s, 'REGULAR')", (pid, STOCK))
             products[kind] = pid
-    return {"account_id": account_id, "products": products}
+    return {"account_id": account_id, "accounts": accounts, "products": products}

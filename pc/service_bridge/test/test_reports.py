@@ -162,3 +162,14 @@ def test_report_quantities_are_cumulative_absent_kind_is_zero(pool, conn, seeded
         "select p.kind, ti.qty_placed, ti.qty_missing from trip_item ti "
         "join product p using (product_id) where ti.trip_id = %s order by p.kind", (t,)).fetchall()
     assert rows == [("A", 1, 0), ("C", 0, 1)]
+
+
+def test_late_report_detail_has_stamp(pool, conn, seeded):
+    t = trip_of(seeded, conn, {"A": 1})
+    rep = rep_for(t)
+    stamp = "2025-11-24T16:00:00+00:00"
+    assert apply_report(pool, rep(1, "CANCELLED"), D()).result == "APPLIED"
+    assert apply_report(pool, rep(2, "FILLING", stamp=stamp), D()).reason == "NOT_ALLOWED"
+    detail = conn.execute(
+        "select detail from alert where code = 'LATE_REPORT' and trip_id = %s", (t,)).fetchone()[0]
+    assert detail["stamp"] == stamp

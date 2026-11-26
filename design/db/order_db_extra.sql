@@ -25,6 +25,8 @@ ALTER TABLE trip
 
 ALTER TABLE bridge_session ADD CONSTRAINT ck_bridge_session_epoch CHECK (epoch > 0);
 
+ALTER TABLE trip_dispatch ADD CONSTRAINT ck_trip_dispatch_attempts CHECK (attempts >= 0);
+
 ALTER TABLE trip_item ADD CONSTRAINT ck_trip_item_qty CHECK (
   qty_ordered > 0 AND qty_placed >= 0 AND qty_missing >= 0 AND qty_placed + qty_missing <= qty_ordered);
 
@@ -95,6 +97,11 @@ ALTER TABLE stock_ledger
 -- 부분 UNIQUE
 CREATE UNIQUE INDEX ux_stock_close_one_open ON stock_close ((true)) WHERE status = 'IN_PROGRESS';
 CREATE UNIQUE INDEX ux_alert_low_stock_open ON alert (code, product_id) WHERE status = 'OPEN' AND code = 'LOW_STOCK';
+
+-- 넘기는 중인 운반 건 (central 확정 답 전). 넘기기 루프가 접수 순서대로 고른다 (접수 API 설계 8.1).
+CREATE UNIQUE INDEX ux_trip_dispatch_pending ON trip_dispatch (trip_id) WHERE central_acked_at IS NULL;
+-- 넘기기 멈춤 알림은 운반 건마다 열린 것 하나 (접수 API 설계 6.5)
+CREATE UNIQUE INDEX ux_alert_dispatch_stalled_open ON alert (code, trip_id) WHERE status = 'OPEN' AND code = 'DISPATCH_STALLED';
 
 -- 생성 칼럼 (DBML에는 노트로만)
 ALTER TABLE stock_count
@@ -373,14 +380,17 @@ END $$;
 -- == Task 6: NOTIFY · 처음 설정 값 ==
 
 -- 화면 전달 (OMS-05, 통신 규칙 #32 · #37): 사건은 ws_event에 넣고 같은 트랜잭션에서 NOTIFY한다.
--- 채널 ifp_events. ws_event 한 줄마다 {"seq": 순번, "t": type, ...data의 id · status}.
+-- 채널 ifp_events. ws_event 한 줄마다 {"seq": 순번, "t": type, "id": order_changed면 order_id, trip_changed면 trip_id, 그 밖엔 data의 id, "status": data의 status}.
 -- 웹 서비스가 직접 넣는 사건(관리 명령 결과 등)도 같은 INSERT 트리거로 알린다.
 CREATE FUNCTION fn_ws_event_notify() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
   PERFORM pg_notify('ifp_events', jsonb_strip_nulls(jsonb_build_object(
     'seq', NEW.seq,
     't', NEW.type,
-    'id', NEW.data ->> 'id',
+    'id', CASE NEW.type
+      WHEN 'order_changed' THEN NEW.data ->> 'order_id'
+      WHEN 'trip_changed' THEN NEW.data ->> 'trip_id'
+      ELSE NEW.data ->> 'id' END,
     'status', NEW.data ->> 'status'))::text);
   RETURN NULL;
 END $$;
@@ -389,8 +399,13 @@ CREATE TRIGGER tg_ws_event_notify AFTER INSERT ON ws_event
   FOR EACH ROW EXECUTE FUNCTION fn_ws_event_notify();
 
 -- 주문 · 운반 건 · 알림은 새로 생기거나 상태가 바뀔 때 ws_event 한 줄(사건), 마감은 바뀔 때마다 NOTIFY만(상태, 순번 없음).
--- 트리거 인자 = 키 칼럼 이름.
+-- 주문 · 운반 건 · 알림 트리거는 커밋 때 돈다(DEFERRED). 그 트랜잭션의 마지막 값을 싣도록 표를 다시 읽어 data를 만든다.
+-- 상태가 바뀌었는지는 그 문장의 OLD · NEW로 비교한다. 같은 줄은 한 트랜잭션에서 한 번만 바뀐다고 보고 중복 제거는 없다
+-- (접수 API 설계 8.2). 트리거 인자 = 키 칼럼 이름.
 CREATE FUNCTION fn_notify_change() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE
+  ev_type text;
+  ev_data jsonb;
 BEGIN
   IF TG_TABLE_NAME = 'stock_close' THEN
     PERFORM pg_notify('ifp_events', json_build_object(
@@ -402,18 +417,38 @@ BEGIN
   IF TG_OP = 'UPDATE' AND NEW.status IS NOT DISTINCT FROM OLD.status THEN
     RETURN NULL;
   END IF;
-  INSERT INTO ws_event (type, data) VALUES (TG_TABLE_NAME, jsonb_build_object(
-    'id', to_jsonb(NEW) ->> TG_ARGV[0],
-    'status', NEW.status));
+
+  IF TG_TABLE_NAME = 'orders' THEN
+    ev_type := 'order_changed';
+    SELECT jsonb_build_object('order_id', o.order_id, 'status', o.status, 'account_id', o.account_id)
+      INTO ev_data FROM orders o WHERE o.order_id = NEW.order_id;
+  ELSIF TG_TABLE_NAME = 'trip' THEN
+    ev_type := 'trip_changed';
+    SELECT jsonb_build_object('trip_id', t.trip_id, 'order_id', t.order_id, 'status', t.status, 'robot_id', t.robot_id,
+             'items', COALESCE((SELECT jsonb_agg(jsonb_build_object(
+                'product_id', ti.product_id, 'qty_ordered', ti.qty_ordered,
+                'qty_placed', ti.qty_placed, 'qty_missing', ti.qty_missing) ORDER BY ti.product_id)
+              FROM trip_item ti WHERE ti.trip_id = t.trip_id), '[]'::jsonb))
+      INTO ev_data FROM trip t WHERE t.trip_id = NEW.trip_id;
+  ELSE
+    ev_type := TG_TABLE_NAME;
+    SELECT jsonb_build_object('id', a.alert_id::text, 'status', a.status)
+      INTO ev_data FROM alert a WHERE a.alert_id = NEW.alert_id;
+  END IF;
+
+  -- 같은 트랜잭션에서 지워진 줄이면 다시 읽을 수 없으므로 사건을 남기지 않는다.
+  IF ev_data IS NOT NULL THEN
+    INSERT INTO ws_event (type, data) VALUES (ev_type, ev_data);
+  END IF;
   RETURN NULL;
 END $$;
 
-CREATE TRIGGER tg_orders_notify AFTER INSERT OR UPDATE ON orders
-  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('order_id');
-CREATE TRIGGER tg_trip_notify AFTER INSERT OR UPDATE ON trip
-  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('trip_id');
-CREATE TRIGGER tg_alert_notify AFTER INSERT OR UPDATE ON alert
-  FOR EACH ROW EXECUTE FUNCTION fn_notify_change('alert_id');
+CREATE CONSTRAINT TRIGGER tg_orders_notify AFTER INSERT OR UPDATE ON orders
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fn_notify_change('order_id');
+CREATE CONSTRAINT TRIGGER tg_trip_notify AFTER INSERT OR UPDATE ON trip
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fn_notify_change('trip_id');
+CREATE CONSTRAINT TRIGGER tg_alert_notify AFTER INSERT OR UPDATE ON alert
+  DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION fn_notify_change('alert_id');
 CREATE TRIGGER tg_stock_close_notify AFTER INSERT OR UPDATE ON stock_close
   FOR EACH ROW EXECUTE FUNCTION fn_notify_change('close_id');
 

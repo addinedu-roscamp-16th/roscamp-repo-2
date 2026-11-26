@@ -2,7 +2,7 @@
 
 TABLES = {"account", "product", "stock_ledger", "orders", "order_item", "trip", "trip_item",
           "status_history", "alert", "admin_action", "stock_close", "stock_count", "app_setting",
-          "ws_event", "bridge_session"}
+          "ws_event", "bridge_session", "trip_dispatch"}
 
 
 def _constraint_cols(conn, kind):
@@ -122,6 +122,6 @@ def test_defaults(conn):
     for key in [("trip_item", "qty_placed"), ("trip_item", "qty_missing"), ("stock_count", "in_transit_qty"),
                 ("product", "stock_qty"), ("product", "low_stock_threshold")]:
         assert d[key] == "0", key
-    for t in TABLES - {"order_item", "trip_item", "app_setting", "product"}:
+    for t in TABLES - {"order_item", "trip_item", "app_setting", "product", "trip_dispatch"}:
         col = {"stock_close": "started_at", "bridge_session": "hello_at"}.get(t, "created_at")
         assert "now()" in d[(t, col)], t

@@ -7,10 +7,10 @@
 
 | 파일 | 내용 |
 |---|---|
-| `order_db.dbml` | **원본 (v1.1, 2026-11-20).** 테이블 15개, 노트에 기능 ID · 값 목록. ERD 그림과 DDL을 여기서 만든다 |
+| `order_db.dbml` | **원본 (v1.1, 2026-11-20).** 테이블 16개, 노트에 기능 ID · 값 목록. ERD 그림과 DDL을 여기서 만든다 |
 | `order_db.sql` | `dbml2sql`로 만든 DDL. **손으로 고치지 않는다** |
-| `order_db.dbdiagram` | dbdiagram.io 표 배치(위치만). 같은 화면에서 DBML과 함께 불러와 ERD 배치를 되살린다. v1.1에서 더한 `ws_event` · `bridge_session`은 아직 위치가 없다 |
-| `order_db_extra.sql` | DBML로 못 쓰는 것: CHECK · 부분 UNIQUE · 생성 칼럼 · 원장 · 마감 트리거 · `v_in_flight` · 재확인 함수 · NOTIFY · 처음 설정 값 |
+| `order_db.dbdiagram` | dbdiagram.io 표 배치(위치만). 같은 화면에서 DBML과 함께 불러와 ERD 배치를 되살린다. v1.1에서 더한 `ws_event` · `bridge_session`과 `trip_dispatch`는 아직 위치가 없다 |
+| `order_db_extra.sql` | DBML로 못 쓰는 것: CHECK · 부분 UNIQUE · 생성 칼럼 · 원장 · 마감 트리거 · `v_in_flight` · 재확인 함수 · NOTIFY(주문 · 운반 건 · 알림 사건은 커밋 때 마지막 값으로 `ws_event`에 넣음) · 처음 설정 값 |
 | `compose.yaml` | 시험용 PostgreSQL 16 (포트 55432, 내리면 데이터 사라짐) |
 | `tools/gen_sql.sh` | Docker(`node:20-alpine`)로 `@dbml/cli` 12.1.0의 `dbml2sql` 실행 |
 | `tests/` | pytest 시험 |
