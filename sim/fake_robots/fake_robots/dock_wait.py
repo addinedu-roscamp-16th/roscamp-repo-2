@@ -8,7 +8,7 @@ from __future__ import annotations
 import math
 import re
 
-REACH_M = 0.15  # Gazebo 시뮬레이션의 도크 대역과 같은 기준
+REACH_M = 0.15  # 도크에 닿았다고 보는 거리
 STATE_MAX_AGE_S = 2.0  # 이보다 오래된 state는 믿지 않는다
 _NAME = re.compile(r"^[a-z_][a-z0-9_]*$")
 

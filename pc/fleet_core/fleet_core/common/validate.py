@@ -86,3 +86,10 @@ def clear_problem(robot, zone_ids, robots, zone_exists) -> str:
     if unknown:
         return "no such zone " + ", ".join(shown(z) for z in unknown)
     return ""
+
+
+# ---- 운영자 명령의 주문 id 검사 (주문 층 판단 전) ----
+def force_ship_problem(order_id) -> str:
+    if not isinstance(order_id, str) or order_id == "":
+        return f"order id {shown(order_id)} is not a name"
+    return ""

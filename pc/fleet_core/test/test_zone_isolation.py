@@ -133,6 +133,45 @@ def test_a_removed_robot_does_not_keep_others_off_the_spot_it_last_reported():
     assert "PLACEMENT_CONFLICT" not in world.codes()
 
 
+def beside_a_parked_robot_in_a_full_zone(speed: float):
+    """남들이 동쪽 마당 지점(N_E, O_Q, P-3)을 모두 쥐었고 pode3의 첫 보고는 P-3에서 서쪽으로 0.12 m다."""
+    world = Harness(layout="d", starts={"pode1": "N_E", "pode2": "P-3", "pode3": "P-1"},
+                    speed=speed)
+    world.silent.add("pode3")
+    world.report()
+    assert world.traffic.grants.force("pode1", ["HALL_E"], ["O_Q"])  # 대기 자리로 가려고 잡았다
+    x, y = world.site.node_pose("P-3")[:2]
+    world.bots["pode2"].x = x + 0.05
+    world.bots["pode3"].x, world.bots["pode3"].y = x - 0.12, y
+    assert world.site.nearest_node(x - 0.12, y, radius=0.15) == "P-3"
+    world.silent.clear()
+    world.step()
+    return world
+
+
+def test_a_robot_beside_a_taken_node_is_not_on_it_when_the_zone_has_no_free_node():
+    """지점을 남들이 모두 쥐고 있으면 그 지점 이름이 붙어도 그 위에 선 로봇으로 다루지 않는다."""
+    world = beside_a_parked_robot_in_a_full_zone(speed=0.12)
+    view = world.view("pode3")
+    assert view["on_map"] and view["held"] == ["HALL_E"] and view["nodes"] == []
+    assert view["state"] != "PARKED" and "PLACEMENT_CONFLICT" not in world.codes()
+    assert world.run_until(lambda: world.phase("pode3") == "PARKED", 120.0)
+    assert world.view("pode3")["nodes"][0] in ("P-1", "P-2"), "P-3 is pode2's"
+    assert world.view("pode2")["nodes"] == ["P-3"]
+    assert not world.problems
+
+
+def test_a_robot_beside_a_taken_node_is_still_not_on_it_after_its_report_moves():
+    """보고는 흔들린다. 0.06 m 다가간 보고가 와도 남이 쥔 주차 자리에 주차한 것이 아니다."""
+    world = beside_a_parked_robot_in_a_full_zone(speed=0.0)
+    world.run(1.0)
+    assert world.phase("pode3") == "TO_PARK"
+    world.bots["pode3"].x += 0.06
+    world.run(1.0)
+    assert world.phase("pode3") == "TO_PARK", "it holds no parking node"
+    assert world.view("pode3")["nodes"] == [] and world.view("pode2")["nodes"] == ["P-3"]
+
+
 def test_while_one_robot_cannot_be_placed_nobody_is_sent_anywhere():
     world = Harness(starts={"pode1": "P-1", "pode2": "P-1", "pode3": "P-3"})
     world.step()

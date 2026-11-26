@@ -66,6 +66,14 @@ def test_a_point_in_the_yard_marks_only_nav_goals_whose_straight_line_passes_it(
     assert not any(a in ("X_W", "X_E") for a, _ in keys), "the fixed lines are not touched"
 
 
+def test_a_point_in_a_corridor_marks_every_nav_goal_through_that_corridor_and_no_other():
+    site, p = load_fleet_map("d"), load_params()
+    keys = set(keys_at(site, p, (0.99, 0.60)))
+    through = {(edge.a, edge.b) for edge in site.edges() if "CORR_M" in edge.zones}
+    assert keys == through
+    assert not any("CORR_S" in site.edge(*key).zones for key in keys)
+
+
 # ---- 표시 ----
 
 def test_blocked_in_the_express_with_a_position_marks_the_express_and_backs_out():
@@ -229,6 +237,35 @@ def test_the_express_blocked_detour_goes_beyond_the_keepout():
     world.obstacles.append((1.0, 0.89, 0.15))
     assert world.run_until(lambda: world.result_of(call), 120.0)
     assert detours(world) == ["keepout"]
+
+
+def test_blocked_inside_a_corridor_it_turns_back_and_does_not_drive_past_the_box():
+    world = Seeing(layout="d", starts={"pode1": "O_Q", "pode2": "P-1", "pode3": "P-2"})
+    world.step()
+    call = world.call("WORK", "pode1")
+    world.obstacles.append((0.99, 0.58, 0.06))  # CORR_M 가운데
+    assert world.run_until(lambda: world.result_of(call), 300.0)
+    assert world.result_of(call).success
+    assert world.codes("pode1").count("ZONE_MARKED_BLOCKED") == 1
+    marked_keys = {key for mark in world.traffic._marks.values() for key in mark.keys}
+    assert ("@pode1", "N_W") in marked_keys and ("@pode1", "N_E") not in marked_keys
+    assert detours(world) == ["keepout"], "back to HALL_E and round by the express"
+    assert not world.problems
+
+
+def test_detour_kinds():
+    from fleet_core.traffic.zone.detours import detour_kind
+    from fleet_core.traffic.zone.routes import Route
+    site = load_fleet_map("d")
+    via = [site.edge("N_W", "N_E")]
+    south = [site.edge("N_W", "W_Q"), site.edge("W_Q", "P-2"), site.edge("P-2", "P-3")]
+    old = {"HALL_W", "CORR_M", "HALL_E"}
+    assert detour_kind(site, "N_E", old, Route("O_Q", via)) == "destination"
+    assert detour_kind(site, "P-3", old, Route("P-3", south)) == "corridor"
+    inside = [site.edge("N_W", "W_Q"), site.edge("W_Q", "P-2")]
+    assert detour_kind(site, "P-2", {"HALL_W"}, Route("P-2", inside)) == "in_zone"
+    express = [site.edge("N_W", "X_W"), site.edge("X_W", "X_E"), site.edge("X_E", "N_E")]
+    assert detour_kind(site, "N_E", old, Route("N_E", express)) == "keepout"
 
 
 # ---- 읽기 전용 관측 API(시뮬용) ----

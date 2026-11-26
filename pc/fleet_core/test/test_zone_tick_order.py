@@ -10,6 +10,10 @@ from fleet_core.common.commands import (
     ArmFault,
     ArmFillCmd,
     ArmLost,
+    DispatchCmd,
+    MoveCmd,
+    MoveOrderCmd,
+    OrderRecord,
     RobotFaultCmd,
     RobotIsolated,
 )
@@ -124,6 +128,28 @@ def _seen(world: Harness, kind) -> list:
     return [(phase, n) for phase, n, item in world.manager.seen if isinstance(item, kind)]
 
 
+def _ordered_world() -> Harness:
+    world = Harness(tick_order="manager", manager_inputs=True)
+    world.step()
+    world.manager.on_order_board("RUN", [OrderRecord("o1", {"red": 1})])
+    return world
+
+
+def test_in_production_a_board_order_reaches_traffic_at_once_and_the_next_tick_picks_a_robot():
+    world = _ordered_world()
+    # on_order_board가 바로 _pump하므로 호출은 틱이 아니라 입력 때 교통에 닿는다
+    assert _seen(world, DispatchCmd) == [("input", 1)]
+    assert not any(world.view(r)["destination"] == "WORK" for r in world.bots)
+    world.step()
+    assert _seen(world, (MoveCmd, MoveOrderCmd))[0] == ("tick", 2)
+    assert any(world.view(r)["destination"] == "WORK" for r in world.bots)
+
+
+def _items(world: Harness, kind) -> list:
+    """(단계, 틱 번호, 항목) 목록."""
+    return [entry for entry in world.manager.seen if isinstance(entry[2], kind)]
+
+
 def _filling_world() -> Harness:
     """호출 하나로 로봇 한 대를 WORK에 세우고, 그 로봇의 채우기 팔 작업을 매니저 전달 길로
     건넨다."""
@@ -137,11 +163,6 @@ def _filling_world() -> Harness:
     assert world.run_until(docked, 300.0), "\n".join(world.log[-20:])
     world.manager._route(ArmFillCmd(docked()[0], world.manager._work, "o1", {"red": 1}))
     return world
-
-
-def _items(world: Harness, kind) -> list:
-    """(단계, 틱 번호, 항목) 목록."""
-    return [entry for entry in world.manager.seen if isinstance(entry[2], kind)]
 
 
 def test_in_production_an_arm_timeout_is_an_arm_fault_inside_the_same_tick():
