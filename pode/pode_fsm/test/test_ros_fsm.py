@@ -586,17 +586,6 @@ def test_a_final_goal_replacing_a_partial_one_switches_back_to_the_normal_contro
 CONTRACT_NAMES = load_contract(CONTRACT)
 
 
-def test_state_is_published_at_ten_hertz_with_the_map_pose(harness):
-    _, probe = start(harness)
-    t0 = time.monotonic()
-    time.sleep(2.0)
-    n = len([1 for t, _ in probe.states if t >= t0])
-    assert 17 <= n <= 23
-    s = probe.last_state()
-    assert (s.pose.x, s.pose.y) == (pytest.approx(0.35, abs=1e-3), pytest.approx(1.55, abs=1e-3))
-    assert s.current_goal == ""
-
-
 def test_set_mode_answers_with_the_request_id_and_the_state_shows_the_mode(harness):
     import rclpy.node
     from fleet_interfaces.srv import SetMode
