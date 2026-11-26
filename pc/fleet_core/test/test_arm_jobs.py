@@ -357,3 +357,10 @@ def test_removing_a_robot_cancels_its_goal_first():
     assert out[0] == CancelCmd("arm_ship", swap.goal_id)
     assert out[1] == ArmLost("r1", swap.goal_id, "arm_ship", SWAP, cleared=True, order_id="O-001",
                              bound=1)
+
+
+def test_a_fill_given_up_on_an_arm_error_is_no_longer_held():
+    jobs, _, goal = started()
+    assert jobs.holds(goal.goal_id)
+    jobs.on_arm_state("arm_left", "ERROR", "GRIPPER_JAM", False)
+    assert not jobs.holds(goal.goal_id)
