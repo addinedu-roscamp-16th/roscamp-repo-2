@@ -1,0 +1,16 @@
+# 관제 PC 공용 가상환경(~/venv/iponic) 패키지 목록
+# 만들기: python3 -m venv --system-site-packages ~/venv/iponic
+# 설치:   ~/venv/iponic/bin/pip install -r pc/requirements.txt
+# rclpy 등 ROS 패키지는 /opt/ros/jazzy에서 보이므로 여기에 넣지 않는다.
+
+# 주문 DB (service_bridge, design/db 시험)
+psycopg[binary,pool]==3.3.9
+psycopg-pool==3.3.3
+
+# 주문 접수 REST API · WS (service_bridge web)
+fastapi==0.165.0
+uvicorn[standard]==0.54.0
+
+# 시험 (pytest는 Ubuntu 24.04의 python3-pytest 7.4.4가 있으면 그것을 씀)
+pytest>=7.4
+httpx==0.28.1

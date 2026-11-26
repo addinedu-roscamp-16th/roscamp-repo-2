@@ -1,4 +1,6 @@
-# 서비스 브리지 첫 조각 설계 (fleet 쪽 먼저)
+# 서비스 브리지 1단계 설계 (fleet 쪽 먼저)
+
+> 새 이름: 1단계-보고 반영 구현 (옛 이름: 첫 조각)
 
 - 상태: 초안 · 작성 2026-11-25 · 수정 2026-11-25 (빌더 점검 반영, 목록 밖 사유 처리, Q-21)
 - 담당: 주문 처리
@@ -15,50 +17,50 @@
 
 브리지는 웹(DB)과 ROS 쪽(central · fleet)을 잇는 자리입니다. 브리지가 일부라도 떠 있어야 양쪽이 "실제 상대"에 붙여 인터페이스를 만들고 시험할 수 있습니다. 그래서 브리지를 완성품이 아니라 **상대가 먼저 붙을 수 있는 최소 판**으로 먼저 내고, 그 위에 웹과 central을 함께 키웁니다(사용자 결정, 2026-11-24).
 
-첫 조각의 상대는 **fleet(관제 담당)**입니다. 관제 담당이 이번 주에 만드는 fleet 쪽 `Hello` · `ReportTrip` 호출을 실제 브리지에 붙여 시험할 수 있게 하는 것이 이 조각의 쓸모입니다.
+1단계의 상대는 **fleet(관제 담당)**입니다. 관제 담당이 이번 주에 만드는 fleet 쪽 `Hello` · `ReportTrip` 호출을 실제 브리지에 붙여 시험할 수 있게 하는 것이 이 단계의 쓸모입니다.
 
 ## 2. 목표 · 하지 않는 것 · 실패로 보는 경우
 
 **목표**
 1. 명령 하나로 운반 건을 DB에 넣고 central에 넘기면, central 주문판 → fleet → `Hello` · `ReportTrip` → DB → `ReportOrder` → 주문판에서 빠짐까지 한 바퀴 돈다.
 2. 관제 담당이 자기 `fleet_manager_node`를 이 브리지 · central에 그대로 붙일 수 있다 (이름 · 타입 · QoS는 contract 0.7 그대로).
-3. 주문 흐름 1차 완료 기준 중 **2번**(DB `trip`의 상태 · `report_epoch` · `report_n`이 마지막 보고와 같음)과 **3번**(같은 `ReportTrip` 두 번째는 `DUPLICATE`, DB 그대로)을 이 조각에서 확인한다.
-4. 두 번째 조각(웹 화면 · REST · WS)을 얹을 때 브리지 코드를 다시 짜지 않는다.
+3. 주문 흐름 1차 완료 기준 중 **2번**(DB `trip`의 상태 · `report_epoch` · `report_n`이 마지막 보고와 같음)과 **3번**(같은 `ReportTrip` 두 번째는 `DUPLICATE`, DB 그대로)을 이 단계에서 확인한다.
+4. 2단계(웹 화면 · REST · WS)를 얹을 때 브리지 코드를 다시 짜지 않는다.
 
-**하지 않는 것** (다음 조각 이후)
+**하지 않는 것** (다음 단계 이후)
 - 웹 화면 · REST · WS (F-01 · F-02 · F-03 · F-12 · F-14 · F-15), `ws_event` WS 전달
 - 브리지가 outbox를 읽어 `SubmitTrip`을 부르는 길(F-04 호출 쪽, SB-04). 이번에는 시험 명령이 직접 부름
 - `/fleet/robots` 구독(F-11) · 로봇 상태 전달
 - 재고 차감(출고 `SHIP` 원장), `NEGATIVE_STOCK` 알림 (TT-24 나머지)
 - `ListOpenTrips` · 재시작 복구 화면, 마감, 취소, 관리 명령, `ReportCommand` · `ReportEvent`
 - 모드가 다르면 연결 거부(IR-73), 모드별 DB 이름 확인
-- 관제의 `fleet_manager_node` 고치기(TT-27). 이 조각은 그 대역으로 "가짜 fleet"을 둠
+- 관제의 `fleet_manager_node` 고치기(TT-27). 이 단계는 그 대역으로 "가짜 fleet"을 둠
 
 **실패로 보는 경우** (기술적으로 돌아가도)
 - 관제 담당이 붙이려면 contract와 다른 이름 · 타입 · QoS를 따로 맞춰야 한다.
 - 같은 보고를 다시 보냈을 때 DB가 두 번 바뀐다.
 - fleet이 보낸 값 하나(모르는 사유 코드, 주문보다 많은 담은 수 등) 때문에 DB 쓰기가 계속 실패해 fleet이 끝없이 다시 보낸다.
-- 두 번째 조각에서 웹을 얹을 때 판단 코드(`apply_report` 등)를 ROS 코드에서 떼어 내야 한다.
+- 2단계에서 웹을 얹을 때 판단 코드(`apply_report` 등)를 ROS 코드에서 떼어 내야 한다.
 
 ## 3. 방식 (Approaches)
 
-| 안 | 첫 조각 | 장점 | 대가 |
+| 안 | 1단계 | 장점 | 대가 |
 |---|---|---|---|
 | **A. fleet 쪽 먼저 (선택)** | `Hello` · `ReportTrip` 서버 + DB 기록, `/system/mode` 발행. 주문판을 채우려고 central 간이판과 시험 명령을 함께 둠 | 관제 담당이 이번 주에 만드는 F-06 · F-08을 바로 실제 브리지에 붙여 시험. 웹 · central은 본인 몫이라 그동안 대역으로 버팀 | `ReportTrip` 판정이 SB-01 · SB-03에 걸림 → 확정함(2026-11-24) |
 | B. 웹 · central 쪽 먼저 | 웹 접수 → `SubmitTrip` → central | 주문이 들어가는 앞부분부터 눈으로 확인 | 관제 담당은 그동안 "가짜 브리지"로 시험, 실제 연결이 늦어짐 |
 
-사용자가 A를 골랐습니다(2026-11-24). fleet은 central 주문판(F-05)을 보고 일을 시작하므로, A만으로는 fleet이 보고할 운반 건이 생기지 않습니다. 그래서 **central 간이판(F-04 서버 · F-05 · F-10)과 "운반 건 하나를 넣는 명령"**을 첫 조각에 함께 넣었습니다(본인 담당 범위 안).
+사용자가 A를 골랐습니다(2026-11-24). fleet은 central 주문판(F-05)을 보고 일을 시작하므로, A만으로는 fleet이 보고할 운반 건이 생기지 않습니다. 그래서 **central 간이판(F-04 서버 · F-05 · F-10)과 "운반 건 하나를 넣는 명령"**을 1단계에 함께 넣었습니다(본인 담당 범위 안).
 
 ## 4. 범위
 
-| 부분 | 첫 조각에 넣을 것 | Jira |
+| 부분 | 1단계에 넣을 것 | Jira |
 |---|---|---|
 | 브리지 (fleet 쪽) | F-06 `/bridge/hello` 서버, F-08 `/bridge/report_trip` 서버 + F-09 DB 반영(`apply_report`), F-13 `/system/mode` 발행 | TT-25 · TT-24(일부) · TT-28(발행만) |
-| 웹 · 브리지 기반 | 패키지 · 프로세스 뼈대, DB 연결 풀. 이번 조각은 rclpy만 띄우고 FastAPI는 두 번째 조각에서 같은 프로세스에 얹음 | TT-22(일부) |
+| 웹 · 브리지 기반 | 패키지 · 프로세스 뼈대, DB 연결 풀. 이번 단계는 rclpy만 띄우고 FastAPI는 2단계에서 같은 프로세스에 얹음 | TT-22(일부) |
 | central (간이) | F-04 `/central/submit_trip` 서버 → F-05 `/central/orders` 발행 → F-10 `/central/report_order` 서버로 빼기, `/system/mode` 구독(로그만) | TT-26 |
 | 웹 대신 | 시험 명령 `submit_trip`: 운반 건을 DB에 넣고 `SubmitTrip`을 부름 | — |
 | fleet 대신 | 가짜 fleet 노드: 주문판을 받아 `Hello` → `ReportTrip` 4번 → `ReportOrder` | TT-27 대역 |
-| DB | `design/db`의 스키마 그대로(PostgreSQL 16). 이번 조각이 쓰는 표: `account` · `product` · `orders` · `order_item` · `trip` · `trip_item` · `status_history` · `alert` · `bridge_session` (`ws_event`는 트리거가 채움) | — |
+| DB | `design/db`의 스키마 그대로(PostgreSQL 16). 이번 단계가 쓰는 표: `account` · `product` · `orders` · `order_item` · `trip` · `trip_item` · `status_history` · `alert` · `bridge_session` (`ws_event`는 트리거가 채움) | — |
 
 ## 5. 구성
 
@@ -67,7 +69,7 @@
 ```
 pc/service_bridge/            ament_python 패키지 (새로 만듦)
   service_bridge/
-    core/                     ROS 없음. 두 번째 조각에서 웹도 이 함수를 그대로 씀
+    core/                     ROS 없음. 2단계에서 웹도 이 함수를 그대로 씀
       db.py                   연결 풀 · 설정 (DSN, 시간 한도)
       transitions.py          허용 전이 표(SB-03), 주문 요약 규칙(DB 설계 4.4) — 순수 함수
       reports.py              apply_report(conn, ReportIn) -> ReportOut
@@ -75,7 +77,7 @@ pc/service_bridge/            ament_python 패키지 (새로 만듦)
     ros/
       bridge_node.py          Hello · ReportTrip 서버, /system/mode 발행
       convert.py              ROS 메시지 ↔ core 데이터 클래스
-    main.py                   진입점: rclpy + MultiThreadedExecutor (두 번째 조각에서 uvicorn 추가)
+    main.py                   진입점: rclpy + MultiThreadedExecutor (2단계에서 uvicorn 추가)
     tools/
       setup_db.py             시험 DB 만들기 + 시험 데이터 넣기
       submit_trip.py          시험 명령 (웹 대신)
@@ -107,7 +109,7 @@ submit_trip(명령) ──DB INSERT (orders · trip RECEIVED)──▶ PostgreSQ
 
 ## 6. 브리지
 
-### 6.1 켜질 때 순서 (조사 문서 4.4에서 이번 조각에 해당하는 것만)
+### 6.1 켜질 때 순서 (조사 문서 4.4에서 이번 단계에 해당하는 것만)
 
 1. 설정을 읽고 노드를 만든 뒤 `/system/mode`를 발행합니다. DB와 상관없이 바로 냅니다.
 2. 동기 연결 풀을 열고 첫 연결을 확인합니다. 실패하면 3 ~ 4를 미루고 다시 시도합니다(서버가 없으면 fleet이 시간 초과 뒤 다시 보내므로 잃는 것이 없음).
@@ -147,7 +149,7 @@ submit_trip(명령) ──DB INSERT (orders · trip RECEIVED)──▶ PostgreSQ
 **`apply_report` 한 트랜잭션** (DB 설계 5절 · SB-01 · SB-03 · SB-05)
 
 1. `trip`에서 `order_id`를 잠금 없이 읽습니다. 운반 건이 없으면 7로 갑니다(사유 `NOT_FOUND`).
-2. `SELECT pg_advisory_xact_lock_shared(7001)` → `orders` 그 줄 `FOR UPDATE` → `trip` 그 줄 `FOR UPDATE`. 이번 조각은 원장에 쓰지 않지만, 두 번째 조각에서 출고 차감을 넣을 때 순서를 바꾸지 않도록 처음부터 7001을 잡습니다.
+2. `SELECT pg_advisory_xact_lock_shared(7001)` → `orders` 그 줄 `FOR UPDATE` → `trip` 그 줄 `FOR UPDATE`. 이번 단계는 원장에 쓰지 않지만, 2단계에서 출고 차감을 넣을 때 순서를 바꾸지 않도록 처음부터 7001을 잡습니다.
 3. **번호 비교**: `(report_epoch, report_n)`이 `trip`의 값보다 **같거나 작으면**(`trip` 값이 NULL이면 무엇보다 작음) 아무것도 바꾸지 않고 `DUPLICATE` (SB-01).
 4. **값 검사** (8 참고): 상태가 9개 중 하나인지, `report_n`이 DB 칸(integer) 범위 안인지, `placed` · `missing`의 `kind`가 그 운반 건의 상품인지, 상품마다 `placed + missing ≤ 주문 수`인지. 어기면 7로 갑니다(사유 `INVALID_REPORT`).
 5. **허용 전이** (SB-03 표): 지금 상태에서 갈 수 없는 상태면 7로 갑니다(사유 `NOT_ALLOWED`).
@@ -185,7 +187,7 @@ submit_trip(명령) ──DB INSERT (orders · trip RECEIVED)──▶ PostgreSQ
 | 상태 | 내용 |
 |---|---|
 | 주문판 | 받은 순서대로의 운반 건 목록 (`trip_id`, `items`, `created_at = submitted_at`) |
-| 응답 기억 | `trip_id` → 처음의 확정 응답(접수 · 거절). `NOT_READY`는 기억하지 않음(SB-06). 이번 조각에는 `NOT_READY`를 내는 경우가 없음 |
+| 응답 기억 | `trip_id` → 처음의 확정 응답(접수 · 거절). `NOT_READY`는 기억하지 않음(SB-06). 이번 단계에는 `NOT_READY`를 내는 경우가 없음 |
 | 끝난 건 | 주문판에서 뺀 `trip_id` → 끝 상태 |
 
 **`SubmitTrip` (F-04 서버)**
@@ -204,7 +206,7 @@ submit_trip(명령) ──DB INSERT (orders · trip RECEIVED)──▶ PostgreSQ
 
 **`/system/mode`**: 구독해 로그만 남깁니다.
 
-- central을 다시 켜면 주문판 · 응답 기억이 사라집니다. **지원하지 않음(알려진 위험, SB-06)**. 이번 조각은 central 재시작을 알아채는 브리지 쪽 코드도 없습니다(브리지가 `SubmitTrip`을 부르지 않으므로).
+- central을 다시 켜면 주문판 · 응답 기억이 사라집니다. **지원하지 않음(알려진 위험, SB-06)**. 이번 단계는 central 재시작을 알아채는 브리지 쪽 코드도 없습니다(브리지가 `SubmitTrip`을 부르지 않으므로).
 
 ## 8. 시험 도구
 
@@ -263,7 +265,7 @@ ros2 run service_bridge submit_trip --items A:1,C:1
 
 **시험 네트워크**: 개인 도메인 + `LOCALHOST` (`FLEET_LOCAL=1 source tools/net/net_ds.sh`, IR-81). 관제 담당의 실제 fleet과 붙일 때는 둘이 같은 도메인 · 같은 디스커버리 설정을 쓰고, 운영 도메인 6은 쓰지 않습니다.
 
-## 10. 관제 담당과 맞출 것 (첫 조각을 붙이기 전)
+## 10. 관제 담당과 맞출 것 (1단계를 붙이기 전)
 
 | 항목 | 이 문서의 안 |
 |---|---|
@@ -276,13 +278,13 @@ ros2 run service_bridge submit_trip --items A:1,C:1
 ## 11. 정한 사람
 
 **사용자가 정한 것**
-- A안(fleet 쪽 먼저), 첫 조각 범위(4장 표의 큰 틀), 웹 대신 시험 명령 (2026-11-24)
+- A안(fleet 쪽 먼저), 1단계 범위(4장 표의 큰 틀), 웹 대신 시험 명령 (2026-11-24)
 - SB-01 · SB-03 · SB-05 · SB-06 확정 (2026-11-24)
 - 이번 주 기술 스택: 웹 · 브리지 한 프로세스, FastAPI · rclpy, PostgreSQL 16 · psycopg 3, central은 `pc/central` rclpy 노드 (주문 흐름 1차 5.3)
 
 **이 문서에서 제가 정한 것** (검토 때 확인 부탁드립니다)
 - 브리지 위치 `pc/service_bridge`, `core/` · `ros/` 나누기, 가짜 fleet을 이 패키지 `tools/`에 둠
-- 재고 차감을 다음 조각으로 미룸. 단, 7001 공유 잠금은 처음부터 잡음
+- 재고 차감을 다음 단계로 미룸. 단, 7001 공유 잠금은 처음부터 잡음
 - fleet 값 오류를 `accepted=false`가 아니라 `LATE_REPORT`(`INVALID_REPORT`)로 답함. 단 목록 밖 사유는 오류로 보지 않고 상태를 반영함 (사용자 확인 2026-11-25)
 - `LATE_REPORT` 알림 중복을 `event_id`로 막음 (운반 건 번호는 바꾸지 않음)
 - `Hello`의 `HELD` 대상에 `FILLING_PAUSE` 포함

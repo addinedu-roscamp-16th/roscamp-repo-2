@@ -1,10 +1,12 @@
-# 서비스 브리지 첫 조각 구현 계획
+# 서비스 브리지 1단계 구현 계획
+
+> 새 이름: 1단계-보고 반영 구현 (옛 이름: 첫 조각)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 명령 하나로 넣은 운반 건이 central 주문판 → (가짜) fleet → `Hello` · `ReportTrip` → DB → `ReportOrder` → 주문판에서 빠짐까지 한 바퀴 돌게 한다.
 
-**Architecture:** 판단 코드(`service_bridge/core`, `central/board.py`)는 ROS 없이 두고, ROS 노드는 받은 메시지를 바꿔 그 함수만 부른다. DB 쓰기는 `apply_report` · `apply_hello` 두 함수가 한 트랜잭션씩 맡는다. 웹(FastAPI)은 두 번째 조각에서 같은 프로세스에 얹으므로 이번에는 만들지 않는다.
+**Architecture:** 판단 코드(`service_bridge/core`, `central/board.py`)는 ROS 없이 두고, ROS 노드는 받은 메시지를 바꿔 그 함수만 부른다. DB 쓰기는 `apply_report` · `apply_hello` 두 함수가 한 트랜잭션씩 맡는다. 웹(FastAPI)은 2단계에서 같은 프로세스에 얹으므로 이번에는 만들지 않는다.
 
 **Tech Stack:** ROS 2 Jazzy · rclpy (`MultiThreadedExecutor`), Python 3.12, PostgreSQL 16 (`design/db/compose.yaml`), psycopg 3 + psycopg_pool, pytest.
 
@@ -245,7 +247,7 @@ def test_bad_hello_rejected(pool, hello, reason):    # Review Focus 4. HelloOut(
 
 **Files:**
 - Create: `pc/central/central/board.py`, `pc/central/central/central_node.py`
-- Modify: `pc/central/setup.py` (진입점 `central = central.central_node:main`, `tests_require`), `pc/central/package.xml` (`fleet_core` · `ament_index_python`), `pc/central/README.md` (이번 조각의 서비스 · 발행 목록으로 고침)
+- Modify: `pc/central/setup.py` (진입점 `central = central.central_node:main`, `tests_require`), `pc/central/package.xml` (`fleet_core` · `ament_index_python`), `pc/central/README.md` (이번 단계의 서비스 · 발행 목록으로 고침)
 - Test: `pc/central/test/test_board.py`, `pc/central/test/test_central_node.py`
 
 **Interfaces:**

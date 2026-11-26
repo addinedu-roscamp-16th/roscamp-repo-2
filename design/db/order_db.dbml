@@ -198,7 +198,7 @@ Table app_setting {
 
 Table ws_event {
   seq bigint [pk, increment, note: '화면 WS 사건 순번. 다시 연결하면 since_seq 뒤만 보냄']
-  type text [not null, note: '사건 종류 (orders · trip · alert 상태 변화, 관리 명령 결과 등)']
+  type text [not null, note: '사건 종류 (order_changed · trip_changed · alert 상태 변화, 관리 명령 결과 등)']
   data jsonb [not null, note: '사건 내용']
   created_at timestamptz [not null, default: `now()`]
   Note: '화면 WS 사건 (OMS-05, 통신 규칙 #32 · #37). 같은 트랜잭션에서 INSERT 후 NOTIFY (INSERT 트리거). 주문 · 운반 건 · 알림 상태 변화는 트리거가 넣음'
@@ -210,4 +210,14 @@ Table bridge_session {
   boot_id text [not null, note: '노드가 켜질 때 만든 UUID (기록용)']
   hello_at timestamptz [not null, default: `now()`, note: '마지막 Hello 시각']
   Note: '노드별 epoch (통신 규칙 #18 · #37). ReportTrip 번호 (report_epoch, report_n)의 앞자리'
+}
+
+Table trip_dispatch {
+  trip_id text [pk, ref: > trip.trip_id, note: '넘길 운반 건 (접수 트랜잭션에서 함께 INSERT)']
+  attempts integer [not null, default: 0, note: 'CHECK >= 0. 지금까지 넘기려 한 횟수']
+  next_attempt_at timestamptz [note: '다음에 다시 넘길 시각. NULL이면 바로']
+  unknown_since timestamptz [note: '결과를 모르게 된 시각 (시간 초과 등). 확정 답을 받으면 NULL']
+  last_result text [note: '마지막 시도 결과 (기록용)']
+  central_acked_at timestamptz [note: 'central이 확정 답(수락 · 거절)을 준 시각. NULL이면 아직 넘기는 중']
+  Note: '운반 건 central 넘기기 상태 (주문 DB 설계 4.16, 접수 API 설계 8.1). 접수 순서대로 넘기고 확정 답을 받으면 central_acked_at을 채움. 넘기는 중인 줄 부분 인덱스는 order_db_extra.sql'
 }

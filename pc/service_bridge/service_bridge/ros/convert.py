@@ -1,7 +1,11 @@
 # ---- ROS 메시지 ↔ core 자료형 변환 ----
-from fleet_interfaces.msg import OrderItem
-from fleet_interfaces.srv import Hello, ReportTrip
+from datetime import datetime, timezone
 
+from builtin_interfaces.msg import Time
+from fleet_interfaces.msg import OrderItem, RobotStatusArray
+from fleet_interfaces.srv import Hello, ReportTrip, SubmitTrip
+
+from service_bridge.core.dispatch import DispatchItem
 from service_bridge.core.types import HelloIn, ReportIn
 
 
@@ -23,8 +27,42 @@ def report_in(req: ReportTrip.Request) -> ReportIn:
         robot_id=req.robot_id,
         placed=items(req.placed),
         missing=items(req.missing),
+        stamp=iso(req.stamp),
     )
 
 
 def hello_in(req: Hello.Request) -> HelloIn:
     return HelloIn(node=req.node, boot_id=req.boot_id)
+
+
+# ---- 시각 ----
+def iso(t: Time) -> str:
+    """ROS 시각 → UTC ISO 문자열 (마이크로초까지)."""
+    return datetime.fromtimestamp(t.sec, tz=timezone.utc).replace(
+        microsecond=t.nanosec // 1000).isoformat()
+
+
+def to_time(dt: datetime) -> Time:
+    dt = dt.astimezone(timezone.utc)
+    return Time(sec=int(dt.replace(microsecond=0).timestamp()), nanosec=dt.microsecond * 1000)
+
+
+# ---- 운반 건 넘기기 ----
+def submit_request(item: DispatchItem) -> SubmitTrip.Request:
+    return SubmitTrip.Request(
+        trip_id=item.trip_id,
+        order_id=item.order_id,
+        trip_index=item.trip_index,
+        trip_count=item.trip_count,
+        items=[OrderItem(kind=k, count=n) for k, n in item.items.items()],
+        submitted_at=to_time(item.submitted_at),
+    )
+
+
+# ---- 로봇 상태 (웹 화면용). order_id는 웹에서 trip_id라 부른다 ----
+def robots(msg: RobotStatusArray) -> list[dict]:
+    return [
+        {"robot_id": r.robot_id, "fsm_state": r.fsm_state, "fault": r.fault,
+         "battery": float(r.battery), "x": float(r.x), "y": float(r.y), "trip_id": r.order_id}
+        for r in msg.robots
+    ]
