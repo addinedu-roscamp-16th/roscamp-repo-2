@@ -11,7 +11,7 @@ export function initialState(accountId) {
   return {
     accountId, products: [], orders: [], cart: {}, key: null, sending: false,
     online: false, notice: null, reject: null, maxItems: DEFAULT_MAX_ITEMS,
-    query: "", knownItems: {}, pendingChanges: {}, attempts: 0,
+    query: "", knownItems: {}, pendingChanges: {}, busyAttempts: 0, netAttempts: 0,
   };
 }
 
@@ -111,7 +111,9 @@ export function canOrder(s) {
 export function beginSend(s) {
   const key = s.key || crypto.randomUUID();
   const body = { items: Object.entries(s.cart).map(([id, qty]) => ({ product_id: Number(id), qty })) };
-  const state = { ...s, key, sending: true, reject: null, attempts: s.sending ? s.attempts : 0 };
+  const fresh = !s.sending;
+  const state = { ...s, key, sending: true, reject: null,
+    busyAttempts: fresh ? 0 : s.busyAttempts, netAttempts: fresh ? 0 : s.netAttempts };
   return { state, key, body };
 }
 
@@ -127,24 +129,24 @@ export function applyResponse(s, resp, sentBody) {
     const pendingChanges = { ...s.pendingChanges }; delete pendingChanges[id];
     return {
       state: { ...s, orders, pendingChanges, knownItems: { ...s.knownItems, [id]: items },
-               cart: {}, key: null, sending: false, attempts: 0, reject: null },
+               cart: {}, key: null, sending: false, busyAttempts: 0, netAttempts: 0, reject: null },
       retryAfterMs: null,
     };
   }
-  const attempts = s.attempts + 1;
-  if (status === 503 && body && body.code === "BUSY" && attempts <= MAX_BUSY_RETRIES) {
+  if (status === 503 && body && body.code === "BUSY" && s.busyAttempts < MAX_BUSY_RETRIES) {
+    const busyAttempts = s.busyAttempts + 1;
     const ra = Number(resp.headers && resp.headers.get && resp.headers.get("Retry-After"));
-    return { state: { ...s, attempts, reject: { text: "잠시 기다려 주세요.", action: null } },
+    return { state: { ...s, busyAttempts, reject: { text: "잠시 기다려 주세요.", action: null } },
              retryAfterMs: ra > 0 ? ra * 1000 : 1000 };
   }
   if (status === 0) {
-    if (attempts <= MAX_NET_RETRIES) return { state: { ...s, attempts }, retryAfterMs: 0 };
-    return { state: { ...s, attempts: 0, sending: false, reject: { text: "주문이 접수됐는지 확인 중입니다.", action: "reload" } },
+    if (s.netAttempts < MAX_NET_RETRIES) return { state: { ...s, netAttempts: s.netAttempts + 1 }, retryAfterMs: 0 };
+    return { state: { ...s, busyAttempts: 0, netAttempts: 0, sending: false, reject: { text: "주문이 접수됐는지 확인 중입니다.", action: "reload" } },
              retryAfterMs: null };
   }
   // 그 밖의 거절: 안내 문구를 채우고 버튼을 푼다
   const reject = rejectMessage(status, body, namesOf(s));
-  let next = { ...s, attempts: 0, sending: false, reject };
+  let next = { ...s, busyAttempts: 0, netAttempts: 0, sending: false, reject };
   if (reject.action === "lower") {
     const products = next.products.map(p => ({ ...p }));
     const cart = { ...next.cart };
@@ -166,10 +168,11 @@ export function applyResponse(s, resp, sentBody) {
 // ---- 화면용 계산 ----
 export function orderView(s) {
   const names = namesOf(s);
-  const allDated = s.orders.length > 0 && s.orders.every(o => o.created_at);
-  const ordered = allDated
-    ? [...s.orders].sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))
-    : [...s.orders].reverse();
+  // created_at 있는 주문이 먼저(최신 순, Date.parse), 없는 주문은 그 뒤에 받은 순서 거꾸로
+  const time = (o) => Date.parse(o.created_at);
+  const dated = s.orders.filter(o => !Number.isNaN(time(o)));
+  const undated = s.orders.filter(o => Number.isNaN(time(o))).reverse();
+  const ordered = [...dated].sort((a, b) => time(b) - time(a)).concat(undated);
   return ordered.map(o => ({
     orderId: o.order_id,
     statusText: o.status_text,

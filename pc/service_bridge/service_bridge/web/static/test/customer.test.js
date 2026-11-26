@@ -204,3 +204,33 @@ test("words: 고객 거절 문구에 내부 말이 없음", () => {
     ok(!bad.test(t), `${st} ${body && body.code}: ${t}`);
   }
 });
+
+test("customer: BUSY 한 번 뒤 망 오류도 같은 키로 한 번 다시", () => {
+  let s = setQty(ready(), 1, 1);
+  let cur = beginSend(s); s = cur.state;
+  let r = applyResponse(s, busy(), cur.body); s = r.state; eq(r.retryAfterMs, 1000);
+  cur = beginSend(s); s = cur.state;
+  r = applyResponse(s, net(), cur.body); s = r.state; eq(r.retryAfterMs, 0); ok(s.sending);
+  const again = beginSend(s); eq(again.key, cur.key); s = again.state;
+  r = applyResponse(s, net(), again.body);
+  eq(r.retryAfterMs, null); ok(!r.state.sending);
+});
+
+test("customer: 망 오류 뒤에도 BUSY는 세 번까지", () => {
+  let s = setQty(ready(), 1, 1);
+  let cur = beginSend(s); s = cur.state;
+  let r = applyResponse(s, net(), cur.body); s = r.state; eq(r.retryAfterMs, 0);
+  const waits = [];
+  for (let i = 0; i < 3; i++) {
+    cur = beginSend(s); s = cur.state;
+    r = applyResponse(s, busy(), cur.body); s = r.state; waits.push(r.retryAfterMs);
+  }
+  eq(waits, [1000, 1000, 1000]);
+});
+
+test("customer: created_at 없는 스냅샷이어도 방금 넣은 주문이 맨 위", () => {
+  let s = setQty(ready({ orders: [{ order_id: "A", status_text: "접수됨" }, { order_id: "B", status_text: "접수됨" }] }), 1, 1);
+  const a = beginSend(s);
+  s = applyResponse(a.state, ok202("N"), a.body).state;
+  eq(orderView(s).map(o => o.orderId), ["N", "B", "A"]);
+});
