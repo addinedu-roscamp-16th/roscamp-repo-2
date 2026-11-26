@@ -55,9 +55,9 @@ export const FSM_TEXT = {
   ERROR: { text: "오류", tone: "bad" },
 };
 
-// fault가 NONE이 아니면 오류, 아니면 표, 표에 없으면 원래 값
+// fault가 있고 NONE이 아니면 오류(없으면 정상), 아니면 표, 표에 없으면 원래 값
 export function robotWord(robot) {
-  if (robot.fault !== "NONE") return { text: "오류", tone: "bad" };
+  if (robot.fault && robot.fault !== "NONE") return { text: "오류", tone: "bad" };
   if (Object.hasOwn(FSM_TEXT, robot.fsm_state)) return { ...FSM_TEXT[robot.fsm_state] };
   return { text: robot.fsm_state, tone: "busy" };
 }

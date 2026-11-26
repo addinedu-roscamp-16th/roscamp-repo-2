@@ -29,3 +29,8 @@ test("words: 그 밖 거절은 코드를 보임", () => ok(rejectMessage(404, {c
 test("words: 고객 말에 내부 말 없음", () => {
   for (const w of PROGRESS_STEPS) ok(!/장애|보류|일시|마감|결품|배정|운반/.test(w), w);
 });
+
+test("words: fault가 없으면 정상으로 본다", () => {
+  eq(robotWord({fsm_state: "IDLE"}), {text: "대기", tone: "ok"});
+  eq(robotWord({fsm_state: "IDLE", fault: null}), {text: "대기", tone: "ok"});
+});
