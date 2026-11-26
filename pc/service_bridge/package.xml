@@ -10,7 +10,12 @@
   <exec_depend>rcl_interfaces</exec_depend>
   <exec_depend>fleet_core</exec_depend>
   <exec_depend>ament_index_python</exec_depend>
+  <!-- 웹(설계 6.1 · 9). rosdep 키는 있으나 실제로 쓰는 판은 venv pip(pc/requirements.txt)의 고정 판 -->
+  <exec_depend>python3-fastapi</exec_depend>
+  <exec_depend>python3-uvicorn</exec_depend>
+  <exec_depend>python3-websockets</exec_depend>
   <test_depend>python3-pytest</test_depend>
+  <test_depend>python3-httpx</test_depend>
   <test_depend>central</test_depend>
   <export><build_type>ament_python</build_type></export>
 </package>
