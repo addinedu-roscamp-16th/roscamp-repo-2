@@ -35,9 +35,10 @@ export async function openSource({ view, accountId, demo }) {
     const src = createDemo({ view, accountId, scene: demo });
     const band = document.createElement("div");
     band.textContent = `가짜 데이터: ${demo}`;
-    band.style.cssText = "position:fixed;left:0;right:0;bottom:0;z-index:9999;padding:4px 8px;" +
-      "background:#fbbf24;color:#111418;font:600 13px sans-serif;text-align:center;";
-    document.body.appendChild(band);
+    // 화면 위쪽 띠: 흐름 안의 첫 자식이라 머리 버튼을 가리지 않는다
+    band.style.cssText = "padding:4px 8px;background:#fbbf24;color:#111418;" +
+      "font:600 13px sans-serif;text-align:center;";
+    document.body.insertBefore(band, document.body.firstChild);
     return src;
   }
   const { createLive } = await import("./live.js");
