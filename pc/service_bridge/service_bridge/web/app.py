@@ -5,6 +5,7 @@ import datetime
 import logging
 import threading
 from collections.abc import Callable
+from pathlib import Path
 
 import anyio.from_thread
 import psycopg
@@ -12,6 +13,7 @@ from fastapi import FastAPI, Header, Request, WebSocket
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from psycopg.errors import LockNotAvailable, QueryCanceled
 from psycopg_pool import ConnectionPool, PoolTimeout, TooManyRequests
 from pydantic import BaseModel, ConfigDict
@@ -27,6 +29,8 @@ log = logging.getLogger("service_bridge.web")
 
 ROBOTS_PERIOD = 0.2   # robots를 보내는 간격(초). 새 값이 있을 때만 보낸다
 CLOSE_UNKNOWN_ACCOUNT = 4404
+# 화면 파일 폴더 (N-07). 설치본에도 같은 자리에 깔린다(setup.py package_data)
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 # 잠금 · 풀 대기 초과, 기다리는 요청 넘침, statement_timeout: 잠시 뒤 다시 보내면 되는 오류 (503 BUSY)
 BUSY_ERRORS = (LockNotAvailable, PoolTimeout, TooManyRequests, QueryCanceled)
 
@@ -291,6 +295,10 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
             await ws.close(code=1011)
             return
         await hub.serve(client, initial)
+
+    # ---- 화면 파일 (N-07): /customer/ 고객, /admin/ 관리자, / → 고객 화면 ----
+    # 모든 경로를 받는 마운트라 API · WS 경로를 다 등록한 뒤 맨 끝에 붙인다(먼저 붙이면 가로챔)
+    app.mount("/", StaticFiles(directory=STATIC_DIR, html=True), name="static")
 
     return app
 

@@ -5,6 +5,7 @@
 - `service_bridge/core/`: ROS 없는 판단 코드(DB 트랜잭션, 상태 전이, 재시도). `pytest`만으로 시험합니다.
 - `service_bridge/ros/`: rclpy 노드와 어댑터.
 - `service_bridge/web/`: FastAPI 앱(REST · WS · LISTEN 사건 전달). ROS를 부르지 않습니다.
+- `service_bridge/web/static/`: 고객 · 관리자 화면 파일. 웹이 `/`에 내줍니다(고객 `/customer/`, 관리자 `/admin/`, 주소에 `?account=<id>`). 화면 시험은 `web/static/test/run_headless.sh`.
 - `service_bridge/main.py`: `bridge` 진입점. 웹(uvicorn)은 메인 스레드, 노드 실행기는 뒷 스레드에서 돕니다.
 - `service_bridge/tools/`: 시험 도구(`setup_db`, `submit_trip`, `fake_fleet`, `order`, `ws_watch`).
 

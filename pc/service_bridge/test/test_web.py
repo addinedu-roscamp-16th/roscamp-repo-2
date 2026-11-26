@@ -194,7 +194,10 @@ def test_snapshot_rest(client, seeded):
     r = client.get("/api/snapshot", params={"view": "customer",
                                             "account_id": seeded["accounts"]["tester"]})
     assert r.status_code == 200
-    assert r.json()["orders"] == [{"order_id": oid, "status_text": "접수됨"}]
+    o, = r.json()["orders"]
+    assert (o["order_id"], o["status_text"]) == (oid, "접수됨")
+    assert o["items"] and o["created_at"]
+    assert r.json()["limits"] == {"max_order_items": 8}
     assert r.json()["notice"] is None
     r = client.get("/api/snapshot", params={"view": "admin"})
     assert r.status_code == 200
@@ -221,7 +224,7 @@ def test_ws_first_message_is_snapshot(client, seeded):
     with client.websocket_connect(f"/ws/customer?account_id={acc}") as ws:
         m = recv(ws)
         assert m["type"] == "snapshot"
-        assert set(m["data"]) == {"orders", "stock", "notice"}
+        assert set(m["data"]) == {"orders", "stock", "limits", "notice"}
         assert drain(ws, 0.2) == []  # NORMAL이면 customer_notice 없음
 
 
@@ -283,7 +286,10 @@ def test_stock_sent_after_order(client, conn, seeded):
             m = recv_until(ws, "stock")
             assert "seq" not in m
             a = [i for i in m["data"]["items"] if i["product_id"] == seeded["products"]["A"]]
-            assert a == [{"product_id": seeded["products"]["A"], "stock_qty": 18}]
+            # N-05: WS stock도 스냅샷과 같은 모양 {product_id, kind, name, stock_qty}
+            assert [(i["product_id"], i["kind"], i["stock_qty"]) for i in a] == [
+                (seeded["products"]["A"], "A", 18)]
+            assert set(a[0]) == {"product_id", "kind", "name", "stock_qty"}
 
 
 def test_robots_throttled(client, seeded):
@@ -323,7 +329,8 @@ def test_listener_reconnect_resends_snapshot(client, conn, seeded):
         old = app.state.listener_pid
         conn.execute("SELECT pg_terminate_backend(%s)", (old,))
         assert recv_until(wa, "snapshot", timeout=5)["data"]["work_state"]
-        assert set(recv_until(wc, "snapshot", timeout=5)["data"]) == {"orders", "stock", "notice"}
+        assert set(recv_until(wc, "snapshot", timeout=5)["data"]) == {
+            "orders", "stock", "limits", "notice"}
         _wait_listener(app, old)
         # 다시 붙은 LISTEN으로 사건이 계속 온다
         _post(client, _body(seeded))
@@ -440,3 +447,27 @@ def test_db_busy_is_503(client, seeded, monkeypatch, make):
     assert r.json()["code"] == "BUSY"
     assert r.headers["Retry-After"] == "1"
     assert client.wake.count == 0
+
+
+# ---- 화면 파일 (N-07) ----
+def test_static_screens_served(client, seeded):
+    r = client.get("/customer/")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    r = client.get("/admin/")
+    assert r.status_code == 200 and "text/html" in r.headers["content-type"]
+    assert client.get("/common/live.js").status_code == 200
+    # / 는 고객 화면으로 넘기는 index.html
+    r = client.get("/")
+    assert r.status_code == 200 and 'location.replace("customer/"' in r.text
+    # 끝 / 없이 오면 폴더로 넘긴다
+    r = client.get("/admin", follow_redirects=False)
+    assert r.status_code in (301, 307) and r.headers["location"].endswith("/admin/")
+    assert client.get("/nope.html").status_code == 404
+
+
+def test_static_mount_does_not_shadow_api(client, seeded):
+    """마운트가 API 경로를 가로채지 않는다: 없는 API는 정적 404가 아니라 API 답."""
+    r = client.get("/api/snapshot", params={"view": "nope"})
+    assert (r.status_code, r.json()["code"]) == (400, "BAD_REQUEST")
+    r = _post(client, _body(seeded))
+    assert r.status_code == 202
