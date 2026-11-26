@@ -18,7 +18,7 @@ from service_bridge.core.types import ReportIn, ReportOut
 
 log = logging.getLogger(__name__)
 
-# 원장 잠금 키. 이번 조각은 원장에 쓰지 않지만 출고 차감이 들어와도 순서가 같게 처음부터 잡는다
+# 원장 잠금 키. 이번 단계는 원장에 쓰지 않지만 출고 차감이 들어와도 순서가 같게 처음부터 잡는다
 LOCK_LEDGER = 7001
 INT_MIN, INT_MAX = -(2**31), 2**31 - 1
 

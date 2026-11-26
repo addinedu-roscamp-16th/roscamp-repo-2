@@ -11,7 +11,7 @@ from service_bridge.core.types import HelloIn, HelloOut
 
 log = logging.getLogger(__name__)
 
-NODE = "fleet"  # 이번 조각에서 Hello를 받는 유일한 node 값
+NODE = "fleet"  # 이번 단계에서 Hello를 받는 유일한 node 값
 
 
 # ---- 서버 콜백이 부르는 입구 ----

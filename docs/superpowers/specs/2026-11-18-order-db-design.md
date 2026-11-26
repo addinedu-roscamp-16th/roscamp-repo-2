@@ -90,7 +90,7 @@
 
 ## 4. 테이블
 
-`※` 표시는 설계자 판단(7절)이다. 자료형은 PostgreSQL 기준. 테이블은 16개다 (11-20에 `ws_event` · `bridge_session` 추가, 11-25에 `trip_dispatch` 추가. `trip_dispatch`의 DBML · DDL은 브리지 2조각에서 넣는다).
+`※` 표시는 설계자 판단(7절)이다. 자료형은 PostgreSQL 기준. 테이블은 16개다 (11-20에 `ws_event` · `bridge_session` 추가, 11-25에 `trip_dispatch` 추가. `trip_dispatch`의 DBML · DDL은 브리지 2단계에서 넣는다).
 
 ### 4.1 account — 계정 · 역할 (OMS-01, SCR-01)
 
