@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>화면 시험</title>
+</head>
+<body>
+<script type="module">
+// ---- 시험 파일을 모두 불러온 뒤 실행 (파일을 더하면 여기에 줄 추가) ----
+import { run } from "./harness.js";
+const files = ["./words.test.js"];
+try {
+  for (const f of files) await import(f);
+} catch (e) {
+  const pre = document.createElement("pre");
+  pre.textContent = `결과: 통과 0 · 실패 1\n실패: 불러오기 오류 - ${e.message}`;
+  document.body.appendChild(pre);
+  throw e;
+}
+await run();
+</script>
+</body>
+</html>
