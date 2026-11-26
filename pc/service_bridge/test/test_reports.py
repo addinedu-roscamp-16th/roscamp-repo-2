@@ -45,10 +45,10 @@ def trip_state(conn, trip):
 
 
 def test_normal_flow_applies_four_reports(pool, conn, seeded):  # 완료 기준 2
-    t = trip_of(seeded, conn, {"A": 1, "C": 1})
+    t = trip_of(seeded, conn, {"mentos": 1, "mygummy": 1})
     rep = rep_for(t)
     for n, st in enumerate(["ASSIGNED", "FILLING", "TRANSPORTING", "SHIPPED"], 1):
-        placed = {"A": 1, "C": 1} if st in ("TRANSPORTING", "SHIPPED") else {}
+        placed = {"mentos": 1, "mygummy": 1} if st in ("TRANSPORTING", "SHIPPED") else {}
         assert apply_report(pool, rep(n, st, placed=placed), D()) == ReportOut(True, "APPLIED")
     row = conn.execute(
         "select status, report_epoch, report_n, finished_at is not null, "
@@ -61,7 +61,7 @@ def test_normal_flow_applies_four_reports(pool, conn, seeded):  # 완료 기준 
 
 
 def test_same_report_twice_is_duplicate_and_changes_nothing(pool, conn, seeded):  # 완료 기준 3
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
     assert apply_report(pool, rep(1, "ASSIGNED"), D()) == ReportOut(True, "APPLIED")
     before = trip_state(conn, t)
@@ -72,7 +72,7 @@ def test_same_report_twice_is_duplicate_and_changes_nothing(pool, conn, seeded):
 
 
 def test_smaller_number_is_duplicate(pool, conn, seeded):
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
     assert apply_report(pool, rep(1, "ASSIGNED", epoch=8), D()) == ReportOut(True, "APPLIED")
     before = trip_state(conn, t)
@@ -81,9 +81,9 @@ def test_smaller_number_is_duplicate(pool, conn, seeded):
 
 
 def test_terminal_then_other_status_is_late_report_once(pool, conn, seeded):
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
-    assert apply_report(pool, rep(4, "SHIPPED", placed={"A": 1}), D()) == ReportOut(True, "APPLIED")
+    assert apply_report(pool, rep(4, "SHIPPED", placed={"mentos": 1}), D()) == ReportOut(True, "APPLIED")
     before = trip_state(conn, t)
     late = ReportOut(True, "LATE_REPORT", "NOT_ALLOWED")
     assert apply_report(pool, rep(5, "FILLING"), D()) == late
@@ -103,10 +103,10 @@ def test_unknown_trip_is_late_report_not_found(pool, conn, seeded):
     assert row == (None, None, "O-NONE-1", "LATE:O-NONE-1:7:1")
 
 
-@pytest.mark.parametrize("kw", [dict(placed={"A": 2}), dict(placed={"Z": 1}),
-                                dict(missing={"A": -1}), dict(n=2**31)])
+@pytest.mark.parametrize("kw", [dict(placed={"mentos": 2}), dict(placed={"Z": 1}),
+                                dict(missing={"mentos": -1}), dict(n=2**31)])
 def test_invalid_values_are_late_report(kw, pool, conn, seeded):
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
     before = trip_state(conn, t)
     args = {"n": 1, "status": "FILLING", **kw}
@@ -117,7 +117,7 @@ def test_invalid_values_are_late_report(kw, pool, conn, seeded):
 
 
 def test_unknown_reason_applies_and_keeps_value(pool, conn, seeded):
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
     assert apply_report(pool, rep(1, "FILLING", reason="DISTANCE_STOP"), D()) == \
         ReportOut(True, "APPLIED")
@@ -139,7 +139,7 @@ def test_db_down_gives_db_error():
 
 
 def test_exclusive_7001_gives_db_error_within_deadline(pool, conn, seeded):  # Review Focus 2
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
     with psycopg.connect(pool.conninfo) as holder:  # autocommit 아님: 트랜잭션 안에서 잡음
         holder.execute("select pg_advisory_xact_lock(7001)")
@@ -152,20 +152,20 @@ def test_exclusive_7001_gives_db_error_within_deadline(pool, conn, seeded):  # R
 
 
 def test_report_quantities_are_cumulative_absent_kind_is_zero(pool, conn, seeded):  # IR-23
-    t = trip_of(seeded, conn, {"A": 1, "C": 1})
+    t = trip_of(seeded, conn, {"mentos": 1, "mygummy": 1})
     rep = rep_for(t)
-    assert apply_report(pool, rep(3, "TRANSPORTING", placed={"A": 1, "C": 1}), D()) == \
+    assert apply_report(pool, rep(3, "TRANSPORTING", placed={"mentos": 1, "mygummy": 1}), D()) == \
         ReportOut(True, "APPLIED")
-    assert apply_report(pool, rep(4, "SHIPPED", placed={"A": 1}, missing={"C": 1}), D()) == \
+    assert apply_report(pool, rep(4, "SHIPPED", placed={"mentos": 1}, missing={"mygummy": 1}), D()) == \
         ReportOut(True, "APPLIED")
     rows = conn.execute(
         "select p.kind, ti.qty_placed, ti.qty_missing from trip_item ti "
         "join product p using (product_id) where ti.trip_id = %s order by p.kind", (t,)).fetchall()
-    assert rows == [("A", 1, 0), ("C", 0, 1)]
+    assert rows == [("mentos", 1, 0), ("mygummy", 0, 1)]
 
 
 def test_late_report_detail_has_stamp(pool, conn, seeded):
-    t = trip_of(seeded, conn, {"A": 1})
+    t = trip_of(seeded, conn, {"mentos": 1})
     rep = rep_for(t)
     stamp = "2025-11-24T16:00:00+00:00"
     assert apply_report(pool, rep(1, "CANCELLED"), D()).result == "APPLIED"

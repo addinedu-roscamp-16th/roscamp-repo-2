@@ -101,7 +101,7 @@ def drain(ws, window):
     return got
 
 
-def _body(seeded, account="tester", items=(("A", 1),)):
+def _body(seeded, account="tester", items=(("mentos", 1),)):
     return {"account_id": seeded["accounts"][account],
             "items": [{"product_id": seeded["products"][k], "qty": q} for k, q in items]}
 
@@ -113,7 +113,7 @@ def _post(client, body, key=None):
 
 # ---- POST /api/orders ----
 def test_post_order_202(client, seeded):
-    r = _post(client, _body(seeded, items=(("A", 3), ("B", 3))))
+    r = _post(client, _body(seeded, items=(("mentos", 3), ("choco_bar", 3))))
     assert r.status_code == 202
     body = r.json()
     assert body["status"] == "RECEIVED"
@@ -140,7 +140,7 @@ def test_post_order_needs_key(client, seeded):
 
 def test_post_order_bad_shape(client, seeded):
     for body in ({"account_id": 1}, {"account_id": "x", "items": []},
-                 _body(seeded, items=(("A", 0),)), _body(seeded, items=())):
+                 _body(seeded, items=(("mentos", 0),)), _body(seeded, items=())):
         r = _post(client, body)
         assert r.status_code == 400, body
         assert set(r.json()) == {"code", "message", "detail"}
@@ -150,7 +150,7 @@ def test_post_order_bad_shape(client, seeded):
 def test_post_order_maps_errors(client, conn, seeded):
     key = str(uuid.uuid4())
     assert _post(client, _body(seeded), key).status_code == 202
-    r = _post(client, _body(seeded, items=(("B", 1),)), key)
+    r = _post(client, _body(seeded, items=(("choco_bar", 1),)), key)
     assert (r.status_code, r.json()["code"]) == (409, "IDEMPOTENCY_CONFLICT")
 
     r = _post(client, {"account_id": 999999, "items": [{"product_id": 1, "qty": 1}]})
@@ -160,12 +160,12 @@ def test_post_order_maps_errors(client, conn, seeded):
                        "items": [{"product_id": 999999, "qty": 1}]})
     assert (r.status_code, r.json()["code"]) == (422, "UNKNOWN_PRODUCT")
 
-    r = _post(client, _body(seeded, items=(("A", 5), ("B", 4))))
+    r = _post(client, _body(seeded, items=(("mentos", 5), ("choco_bar", 4))))
     assert (r.status_code, r.json()["code"]) == (422, "OVER_MAX_ITEMS")
 
     conn.execute("INSERT INTO stock_ledger (product_id, entry_type, change_qty, reason) "
-                 "VALUES (%s, 'OUTBOUND', -16, 'DAMAGED')", (seeded["products"]["C"],))
-    r = _post(client, _body(seeded, items=(("C", 5),)))
+                 "VALUES (%s, 'OUTBOUND', -16, 'DAMAGED')", (seeded["products"]["mygummy"],))
+    r = _post(client, _body(seeded, items=(("mygummy", 5),)))
     assert (r.status_code, r.json()["code"]) == (422, "OUT_OF_STOCK")
     assert r.json()["detail"]["items"][0]["stock_qty"] == 4
     assert client.wake.count == 1
@@ -254,7 +254,7 @@ def test_admin_gets_trip_changed(client, seeded):
         got = {m["type"]: m for m in drain(ws, 0.7)}
         trip = got["trip_changed"]["data"]
         assert (trip["trip_id"], trip["order_id"], trip["status"]) == (f"{oid}-1", oid, "RECEIVED")
-        assert trip["items"] == [{"product_id": seeded["products"]["A"], "qty_ordered": 1,
+        assert trip["items"] == [{"product_id": seeded["products"]["mentos"], "qty_ordered": 1,
                                   "qty_placed": 0, "qty_missing": 0}]
         assert got["order_changed"]["data"] == {"order_id": oid, "status": "RECEIVED"}
         assert got["order_changed"]["seq"] < got["trip_changed"]["seq"]
@@ -280,15 +280,15 @@ def test_stock_sent_after_order(client, conn, seeded):
         recv(wa), recv(wc)
         # 접수는 재고를 줄이지 않으므로, 보낸 값이 지금 DB 값인지 보려고 재고를 먼저 바꿔 둔다
         conn.execute("INSERT INTO stock_ledger (product_id, entry_type, change_qty, reason) "
-                     "VALUES (%s, 'OUTBOUND', -2, 'DAMAGED')", (seeded["products"]["A"],))
-        _post(client, _body(seeded, items=(("A", 2),)))
+                     "VALUES (%s, 'OUTBOUND', -2, 'DAMAGED')", (seeded["products"]["mentos"],))
+        _post(client, _body(seeded, items=(("mentos", 2),)))
         for ws in (wa, wc):
             m = recv_until(ws, "stock")
             assert "seq" not in m
-            a = [i for i in m["data"]["items"] if i["product_id"] == seeded["products"]["A"]]
+            a = [i for i in m["data"]["items"] if i["product_id"] == seeded["products"]["mentos"]]
             # N-05: WS stock도 스냅샷과 같은 모양 {product_id, kind, name, stock_qty}
             assert [(i["product_id"], i["kind"], i["stock_qty"]) for i in a] == [
-                (seeded["products"]["A"], "A", 18)]
+                (seeded["products"]["mentos"], "mentos", 18)]
             assert set(a[0]) == {"product_id", "kind", "name", "stock_qty"}
 
 

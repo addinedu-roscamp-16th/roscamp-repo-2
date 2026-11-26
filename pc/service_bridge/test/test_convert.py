@@ -11,8 +11,8 @@ from service_bridge.ros import convert  # noqa: E402
 
 def test_report_in_sums_same_kind():
     req = ReportTrip.Request(trip_id="t", report_epoch=7, report_n=1, status="FILLING",
-                             placed=[OrderItem(kind="A", count=1), OrderItem(kind="A", count=1)])
-    assert convert.report_in(req).placed == {"A": 2}
+                             placed=[OrderItem(kind="mentos", count=1), OrderItem(kind="mentos", count=1)])
+    assert convert.report_in(req).placed == {"mentos": 2}
 
 
 def test_robots_renames_order_id():

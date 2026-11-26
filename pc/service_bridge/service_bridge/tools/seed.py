@@ -1,7 +1,16 @@
-# ---- 시험 데이터: 상품 A ~ D(재고 20, 원장 입고)와 시험 계정 ----
+# ---- 시험 데이터: 실제 상품 다섯 개(재고 20, 원장 입고)와 시험 계정 ----
 import psycopg
 
-KINDS = ("A", "B", "C", "D")  # sim/fake_robots/scenarios와 같은 이름
+# (kind, name). kind는 ROS OrderItem.kind · 비전 클래스 이름과 같다(영문 소문자와 _).
+# sim/fake_robots/scenarios의 팔 재고 · 주문 코드와 같게 둔다
+PRODUCTS = (
+    ("mentos", "미니멘토스 레인보우"),
+    ("choco_bar", "자유시간 Mini"),
+    ("mygummy", "과즙팡 비타민 마이구미"),
+    ("choco_ball", "M&M's"),
+    ("bungeo_cake", "참붕어빵"),
+)
+KINDS = tuple(k for k, _ in PRODUCTS)
 STOCK = 20
 TEST_LOGIN = "tester"
 
@@ -22,10 +31,10 @@ def seed(conn: psycopg.Connection) -> dict:
                 (login, role, login)).fetchone()[0]
         account_id = accounts[TEST_LOGIN]
         products = {}
-        for kind in KINDS:
+        for kind, name in PRODUCTS:
             pid = conn.execute(
                 "INSERT INTO product (kind, name) VALUES (%s, %s) RETURNING product_id",
-                (kind, kind)).fetchone()[0]
+                (kind, name)).fetchone()[0]
             conn.execute(
                 "INSERT INTO stock_ledger (product_id, entry_type, change_qty, reason) "
                 "VALUES (%s, 'INBOUND', %s, 'REGULAR')", (pid, STOCK))

@@ -54,7 +54,7 @@ def _count(conn, table):
 
 
 def test_place_order_writes_everything(conn, seeded):
-    req = _req(seeded, [("A", 3), ("B", 3)])
+    req = _req(seeded, [("mentos", 3), ("choco_bar", 3)])
     res = place_order(conn, req, "key-1")
     assert isinstance(res, PlaceOk) and not res.replayed
     oid = res.order_id
@@ -66,8 +66,8 @@ def test_place_order_writes_everything(conn, seeded):
         (f"{oid}-1", 1, "RECEIVED"), (f"{oid}-2", 2, "RECEIVED")]
     assert conn.execute("SELECT trip_id, product_id, qty_ordered FROM trip_item "
                         "ORDER BY trip_id, product_id").fetchall() == [
-        (f"{oid}-1", seeded["products"]["A"], 3), (f"{oid}-1", seeded["products"]["B"], 1),
-        (f"{oid}-2", seeded["products"]["B"], 2)]
+        (f"{oid}-1", seeded["products"]["mentos"], 3), (f"{oid}-1", seeded["products"]["choco_bar"], 1),
+        (f"{oid}-2", seeded["products"]["choco_bar"], 2)]
     assert conn.execute("SELECT trip_id, attempts, central_acked_at FROM trip_dispatch "
                         "ORDER BY trip_id").fetchall() == [
         (f"{oid}-1", 0, None), (f"{oid}-2", 0, None)]
@@ -87,16 +87,16 @@ def test_place_order_writes_everything(conn, seeded):
 
 
 def test_same_key_same_body_replays(conn, seeded):
-    first = place_order(conn, _req(seeded, [("A", 3), ("B", 3)]), "k")
-    second = place_order(conn, _req(seeded, [("B", 3), ("A", 3)]), "k")  # 순서가 달라도 같음
+    first = place_order(conn, _req(seeded, [("mentos", 3), ("choco_bar", 3)]), "k")
+    second = place_order(conn, _req(seeded, [("choco_bar", 3), ("mentos", 3)]), "k")  # 순서가 달라도 같음
     assert second.replayed is True
     assert (second.order_id, second.trip_ids) == (first.order_id, first.trip_ids)
     assert (_count(conn, "orders"), _count(conn, "trip"), _count(conn, "status_history")) == (1, 2, 3)
 
 
 def test_same_key_other_body_conflicts(conn, seeded):
-    place_order(conn, _req(seeded, [("A", 2)]), "k")
-    for other in (_req(seeded, [("A", 3)]), _req(seeded, [("A", 2)], "tester2")):
+    place_order(conn, _req(seeded, [("mentos", 2)]), "k")
+    for other in (_req(seeded, [("mentos", 3)]), _req(seeded, [("mentos", 2)], "tester2")):
         res = place_order(conn, other, "k")
         assert isinstance(res, PlaceError) and (res.status, res.code) == (409, "IDEMPOTENCY_CONFLICT")
     assert _count(conn, "orders") == 1
@@ -120,7 +120,7 @@ def _threads(n, fn):
 
 
 def test_same_key_concurrent(pool, conn, seeded):
-    req = _req(seeded, [("A", 5)])
+    req = _req(seeded, [("mentos", 5)])
 
     def go(_):
         with pool.connection() as c:
@@ -136,8 +136,8 @@ def test_same_key_race_replays_committed(pool, seeded, test_db):
     # 옆 연결이 7002를 쥔 채 키 'same' 주문을 써 둔다(커밋 전). place_order는 재생 확인(아직 안 보임)을
     # 지나 7002에서 막히고, 옆 연결이 커밋하면 orders 삽입이 idem_key 충돌 -> _KeyRace -> 재생 답
     from conftest import _dsn
-    req = _req(seeded, [("A", 2)])
-    pid = seeded["products"]["A"]
+    req = _req(seeded, [("mentos", 2)])
+    pid = seeded["products"]["mentos"]
     side = psycopg.connect(_dsn(test_db), autocommit=False)
     try:
         side.execute("SELECT pg_advisory_xact_lock(7002)")
@@ -168,7 +168,7 @@ def test_same_key_race_replays_committed(pool, seeded, test_db):
 
 
 def test_out_of_stock_rejects_and_counts_low_stock(conn, seeded):
-    pid = seeded["products"]["A"]
+    pid = seeded["products"]["mentos"]
     # 재고를 5로 줄인다(원장 반출 15). 6개는 max_order_items(8) 안이라 재고 검사까지 간다
     conn.execute("INSERT INTO stock_ledger (product_id, entry_type, change_qty, reason) "
                  "VALUES (%s, 'OUTBOUND', -15, 'DAMAGED')", (pid,))
@@ -185,7 +185,7 @@ def test_out_of_stock_rejects_and_counts_low_stock(conn, seeded):
 
 
 def test_over_max_items(conn, seeded):
-    res = place_order(conn, _req(seeded, [("A", 5), ("B", 4)]), "k")
+    res = place_order(conn, _req(seeded, [("mentos", 5), ("choco_bar", 4)]), "k")
     assert (res.status, res.code) == (422, "OVER_MAX_ITEMS")
     assert _count(conn, "orders") == 0 and _count(conn, "alert") == 0
 
@@ -197,7 +197,7 @@ def test_unknown_product(conn, seeded):
 
 
 def test_unknown_account(conn, seeded):
-    res = place_order(conn, OrderRequest(99999, (OrderLine(seeded["products"]["A"], 1),)), "k")
+    res = place_order(conn, OrderRequest(99999, (OrderLine(seeded["products"]["mentos"], 1),)), "k")
     assert (res.status, res.code) == (404, "UNKNOWN_ACCOUNT")
     assert _count(conn, "orders") == 0
 
@@ -209,7 +209,7 @@ def test_waits_for_close_lock(pool, conn, seeded, test_db):
         holder.execute("SELECT pg_advisory_xact_lock(7001)")
         started = time.monotonic()
         with pool.connection() as c, pytest.raises(LockNotAvailable):
-            place_order(c, _req(seeded, [("A", 1)]), "k")
+            place_order(c, _req(seeded, [("mentos", 1)]), "k")
         assert 0.4 < time.monotonic() - started < 1.5
     finally:
         holder.rollback()
@@ -221,7 +221,7 @@ def test_order_ids_unique_under_concurrency(pool, conn, seeded):
     # 풀 연결이 4개라 동시에 겹치는 접수는 최대 4개. 열 건을 네 스레드로 밀어 넣는다
     def go(i):
         with pool.connection() as c:
-            return place_order(c, _req(seeded, [("A", 1)]), f"key-{i}")
+            return place_order(c, _req(seeded, [("mentos", 1)]), f"key-{i}")
     with ThreadPoolExecutor(max_workers=4) as ex:
         res = list(ex.map(go, range(10)))
     assert all(isinstance(r, PlaceOk) for r in res)

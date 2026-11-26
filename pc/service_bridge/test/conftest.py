@@ -62,5 +62,5 @@ def conn(test_db):
 
 @pytest.fixture
 def seeded(conn):
-    """USER 계정 하나와 A~D 상품(재고 20). setup_db와 같은 seed."""
+    """USER 계정 하나와 시험 상품 다섯 개(재고 20, seed.PRODUCTS). setup_db와 같은 seed."""
     return seed(conn)

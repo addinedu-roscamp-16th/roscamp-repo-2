@@ -310,6 +310,8 @@ DB 트랜잭션 커밋 → NOTIFY ifp_events {"seq", "t", "id", "status"}
 
 `tools/seed.py`의 시험 계정을 고객 둘(`tester`, `tester2`)과 관리자 하나(`admin`, role `ADMIN`)로 늘린다. 고객 거르기를 시험하기 위해서다.
 
+시험 상품은 실제 상품 다섯 개다(2026-11-26 사용자 결정, 각 재고 20). `kind`는 비전 클래스 이름과 같고 영문 소문자와 `_`만 쓴다: `mentos`(미니멘토스 레인보우) · `choco_bar`(자유시간 Mini) · `mygummy`(과즙팡 비타민 마이구미) · `choco_ball`(M&M's) · `bungeo_cake`(참붕어빵). 원본은 `seed.PRODUCTS`이고, `sim/fake_robots/scenarios`의 실물 시나리오는 두 팔에 같은 상품을 10개씩 둔다(팔별 배치는 비전이 정하므로 고정하지 않음).
+
 ## 9. 시험 도구
 
 | 명령 | 하는 일 |

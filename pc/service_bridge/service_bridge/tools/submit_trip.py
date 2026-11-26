@@ -1,5 +1,5 @@
 # ---- 웹 대신 운반 건 하나를 접수하고 central에 넘긴다 ----
-#     ros2 run service_bridge submit_trip --items A:1,C:1
+#     ros2 run service_bridge submit_trip --items mentos:1,mygummy:1
 #     ros2 run service_bridge submit_trip --trip-id O-20261125-0001-1   # DB에 넣지 않고 다시 보냄
 from __future__ import annotations
 
@@ -72,7 +72,7 @@ def _prepare(opts) -> tuple[str, str, dict[str, int]]:
 def main(args=None) -> int:
     parser = argparse.ArgumentParser(description="운반 건 하나를 접수하고 central에 넘긴다")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--items", help="예: A:1,C:1")
+    group.add_argument("--items", help="예: mentos:1,mygummy:1")
     group.add_argument("--trip-id", help="DB에 넣지 않고 이 운반 건을 다시 보냄")
     ros_args = rclpy.utilities.remove_ros_args(args if args is not None else sys.argv)
     opts = parser.parse_args(ros_args[1:])

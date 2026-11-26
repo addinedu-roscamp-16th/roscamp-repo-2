@@ -36,8 +36,8 @@ def _row(conn, trip_id):
 
 
 def test_head_is_oldest_pending(conn, seeded):
-    a = _place(conn, seeded, [("A", 5)], "k1")      # -1, -2
-    b = _place(conn, seeded, [("B", 1)], "k2")
+    a = _place(conn, seeded, [("mentos", 5)], "k1")      # -1, -2
+    b = _place(conn, seeded, [("choco_bar", 1)], "k2")
     assert head_item(conn).trip_id == a.trip_ids[0]
     record_ack(conn, a.trip_ids[0], True, "")
     assert head_item(conn).trip_id == a.trip_ids[1]
@@ -48,22 +48,22 @@ def test_head_is_oldest_pending(conn, seeded):
 
 
 def test_head_item_fields(conn, seeded):
-    res = _place(conn, seeded, [("A", 3), ("B", 3)], "k1")   # -1: A3 B1, -2: B2
+    res = _place(conn, seeded, [("mentos", 3), ("choco_bar", 3)], "k1")   # -1: A3 B1, -2: B2
     h = head_item(conn)
     assert (h.trip_id, h.order_id, h.trip_index, h.trip_count) == (
         res.trip_ids[0], res.order_id, 1, 2)
-    assert h.items == {"A": 3, "B": 1}
+    assert h.items == {"mentos": 3, "choco_bar": 1}
     assert h.attempts == 0 and h.next_attempt_at is None
     created = conn.execute("SELECT created_at FROM trip WHERE trip_id = %s",
                            (h.trip_id,)).fetchone()[0]
     assert h.submitted_at == created
     record_ack(conn, res.trip_ids[0], True, "")
     h2 = head_item(conn)
-    assert (h2.trip_index, h2.trip_count, h2.items) == (2, 2, {"B": 2})
+    assert (h2.trip_index, h2.trip_count, h2.items) == (2, 2, {"choco_bar": 2})
 
 
 def test_ack_marks_and_resolves_alert(conn, seeded):
-    res = _place(conn, seeded, [("A", 5)], "k1")
+    res = _place(conn, seeded, [("mentos", 5)], "k1")
     t = res.trip_ids[0]
     _fail(conn, t, 5)
     assert [a[5] for a in _alerts(conn, t)] == ["OPEN"]
@@ -75,14 +75,14 @@ def test_ack_marks_and_resolves_alert(conn, seeded):
 
 
 def test_ack_rejected_records_reason(conn, seeded):
-    t = _place(conn, seeded, [("A", 1)], "k1").trip_ids[0]
+    t = _place(conn, seeded, [("mentos", 1)], "k1").trip_ids[0]
     record_ack(conn, t, False, "BAD_ITEMS")
     attempts, _, _, last, acked = _row(conn, t)
     assert (attempts, last) == (1, "BAD_ITEMS") and acked is not None
 
 
 def test_four_failures_no_rest(conn, seeded):
-    t = _place(conn, seeded, [("A", 1)], "k1").trip_ids[0]
+    t = _place(conn, seeded, [("mentos", 1)], "k1").trip_ids[0]
     assert _fail(conn, t, 4, "NOT_READY") == 4
     attempts, next_at, unknown, last, _ = _row(conn, t)
     assert (attempts, next_at, unknown, last) == (4, None, None, "NOT_READY")
@@ -90,7 +90,7 @@ def test_four_failures_no_rest(conn, seeded):
 
 
 def test_fifth_failure_rests_and_alerts(conn, seeded, caplog):
-    res = _place(conn, seeded, [("A", 5)], "k1")     # 두 건: 뒤에 한 건
+    res = _place(conn, seeded, [("mentos", 5)], "k1")     # 두 건: 뒤에 한 건
     t = res.trip_ids[0]
     _fail(conn, t, 4)
     # ROS 환경에서는 이 로거의 propagate가 꺼져 있어 caplog 핸들러를 로거에 직접 단다
@@ -114,7 +114,7 @@ def test_fifth_failure_rests_and_alerts(conn, seeded, caplog):
 
 
 def test_more_failures_keep_one_alert(conn, seeded):
-    t = _place(conn, seeded, [("A", 1)], "k1").trip_ids[0]
+    t = _place(conn, seeded, [("mentos", 1)], "k1").trip_ids[0]
     _fail(conn, t, 5)
     first = _row(conn, t)[2]
     _fail(conn, t, 2, "NOT_READY")
@@ -128,8 +128,8 @@ def test_more_failures_keep_one_alert(conn, seeded):
 
 
 def test_rest_survives_restart(conn, seeded):
-    res = _place(conn, seeded, [("A", 1)], "k1")
-    _place(conn, seeded, [("B", 1)], "k2")
+    res = _place(conn, seeded, [("mentos", 1)], "k1")
+    _place(conn, seeded, [("choco_bar", 1)], "k2")
     t = res.trip_ids[0]
     _fail(conn, t, 5)
     h = head_item(conn)          # 새 프로세스가 읽어도 같은 건 + 쉼이 DB에 남아 있음

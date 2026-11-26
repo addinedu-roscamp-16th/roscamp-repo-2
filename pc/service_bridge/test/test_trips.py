@@ -8,18 +8,18 @@ from test_reports import count
 
 
 def test_insert_trip_ids_and_history(conn, seeded):
-    o, t = insert_trip(conn, seeded["account_id"], {"A": 1, "C": 1})
+    o, t = insert_trip(conn, seeded["account_id"], {"mentos": 1, "mygummy": 1})
     assert re.fullmatch(r"O-\d{8}-0001", o) and t == f"{o}-1"
     assert count(conn, "status_history where order_id=%s", o) == 2
     assert count(conn, "status_history where trip_id=%s and actor='USER'", t) == 1
     assert count(conn, "trip_item where trip_id=%s", t) == 2
-    o2, _ = insert_trip(conn, seeded["account_id"], {"B": 2})
+    o2, _ = insert_trip(conn, seeded["account_id"], {"choco_bar": 2})
     assert o2 == o[:-4] + "0002"
 
 
 def test_insert_trip_over_basket_capacity_rejected(conn, seeded):
     with pytest.raises(ValueError):
-        insert_trip(conn, seeded["account_id"], {"A": 3, "B": 2})
+        insert_trip(conn, seeded["account_id"], {"mentos": 3, "choco_bar": 2})
     assert count(conn, "orders") == 0
 
 

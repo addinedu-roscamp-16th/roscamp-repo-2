@@ -112,8 +112,8 @@ def test_order_to_shipped_over_ws(pool, web_pool, conn, seeded):
                 assert recv(ws)["type"] == "snapshot"
                 # 4개 → 운반 건 하나 (설계 5.3)
                 r = _post(client, {"account_id": acc, "items": [
-                    {"product_id": p["A"], "qty": 2}, {"product_id": p["B"], "qty": 1},
-                    {"product_id": p["C"], "qty": 1}]})
+                    {"product_id": p["mentos"], "qty": 2}, {"product_id": p["choco_bar"], "qty": 1},
+                    {"product_id": p["mygummy"], "qty": 1}]})
                 assert r.status_code == 202, r.text
                 order_id = r.json()["order_id"]
                 (trip_id,) = r.json()["trip_ids"]
@@ -150,7 +150,7 @@ def test_test_mode_blocks_orders(pool, web_pool, seeded):  # 목표 3
         with TestClient(loop.app) as client:
             _wait_listener(loop.app)
             r = _post(client, {"account_id": acc,
-                               "items": [{"product_id": seeded["products"]["A"], "qty": 1}]})
+                               "items": [{"product_id": seeded["products"]["mentos"], "qty": 1}]})
             assert (r.status_code, r.json()["code"]) == (503, "MAINTENANCE")
             with client.websocket_connect(f"/ws/customer?account_id={acc}") as ws:
                 assert recv(ws)["type"] == "snapshot"
