@@ -23,6 +23,16 @@ let source = null;
 let connText = "연결 중", connTone = "wait";
 let reloading = false;
 const warned = new Set();
+// ---- 상품 그림 상태: 종류마다 한 번만 불러 보고(ok · fail), 실패한 종류는 다시 요청하지 않음 ----
+const imgState = new Map();
+function probeImage(kind) {
+  if (imgState.has(kind)) return;
+  imgState.set(kind, "loading");
+  const im = new Image();
+  im.onload = () => { imgState.set(kind, "ok"); render(); };
+  im.onerror = () => { imgState.set(kind, "fail"); };
+  im.src = `../img/${kind}.png`;
+}
 
 // ---- 그리기 ----
 function renderConn() {
@@ -42,11 +52,14 @@ function renderProducts() {
     const card = h("div", "card" + (v.soldOut ? " sold" : ""));
     const thumb = h("div", "thumb", "상품 이미지");
     if (v.kind) {
-      const img = document.createElement("img");
-      img.alt = v.name;
-      img.onerror = () => { img.remove(); thumb.textContent = "상품 이미지"; };
-      img.onload = () => { thumb.textContent = ""; thumb.append(img); };
-      img.src = `../img/${v.kind}.png`;
+      probeImage(v.kind);
+      if (imgState.get(v.kind) === "ok") {
+        const img = document.createElement("img");
+        img.alt = v.name;
+        img.src = `../img/${v.kind}.png`;
+        thumb.textContent = "";
+        thumb.append(img);
+      }
     }
     const stock = h("div", "p-stock" + (v.soldOut ? " out" : ""), v.soldOut ? "품절" : `재고 ${v.stock}`);
     const step = h("div", "stepper");
@@ -136,11 +149,12 @@ async function send(first) {
     s = out.state; render();
     if (out.retryAfterMs === null) break;
     await sleep(out.retryAfterMs);
-    r = beginSend(s);
+    // 같은 키 · 같은 본문으로 다시 보냄(기다리는 동안 장바구니가 바뀌어도 이미 나간 요청은 끝까지 마무리)
+    r = { state: { ...s, sending: true }, key: r.key, body: r.body };
   }
   if (s.reject && s.reject.action === "reload") {
     reloading = true; render();
-    try { await source.reloadSnapshot(); } finally { reloading = false; render(); }
+    try { await source.reloadSnapshot(); } finally { reloading = false; s = { ...s, reject: null }; render(); }
   }
 }
 

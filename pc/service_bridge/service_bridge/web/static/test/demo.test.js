@@ -60,7 +60,7 @@ test("demo: normal 주문 흐름", async () => {
   eq(ev.map(m => m.data.status_text), ["접수됨", "준비 중", "출고 중", "출고 완료"]);
   eq(ev.map(m => m.seq), [1, 2, 3, 4].map(n => ev[0].seq + n - 1));
   const stock = d.msgs.find(m => m.type === "stock");
-  eq(stock.data.items.find(i => i.product_id === 1).stock_qty, 10);
+  eq(stock.data.items.find(i => i.product_id === 1).stock_qty, 12);
 });
 test("demo: stock 장면은 첫 주문을 OUT_OF_STOCK으로 거절", async () => {
   const d = open("customer", "stock");

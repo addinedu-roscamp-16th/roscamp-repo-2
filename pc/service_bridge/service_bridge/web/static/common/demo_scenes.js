@@ -63,10 +63,7 @@ function acceptOrder(ctx, body, { first = 0, stockDelay = 0 } = {}) {
   const items = ((body && body.items) || []).map(i => ({ product_id: i.product_id, qty: i.qty }));
   const order = { order_id, status_text: FLOW[0], created_at: new Date(ctx.now()).toISOString(), items };
   d.orders.push(order);
-  for (const it of items) {
-    const p = d.stock.items.find(s => s.product_id === it.product_id);
-    if (p) p.stock_qty = Math.max(0, p.stock_qty - it.qty);
-  }
+  // 재고는 주문 때 줄지 않고 출고 때 준다(이번 주 백엔드는 바꾸지 않음): stock 메시지는 같은 값을 다시 보냄
   const trip_ids = [tripNo(order_id, 1)];
   for (let i = first; i < FLOW.length; i++) {
     ctx.after(STEP_MS * (i - first + 1), () => {
