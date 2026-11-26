@@ -104,16 +104,15 @@ def _place(conn: psycopg.Connection, req: OrderRequest, idem_key: str) -> PlaceO
         raise _Rollback(PlaceError(422, "UNKNOWN_PRODUCT", "모르는 상품",
                                    {"product_ids": unknown}))
     settings = dict(conn.execute("SELECT key, value FROM app_setting").fetchall())
-    # 재고 부족을 품목 합 한도보다 먼저 본다(재고 20인 상품 21개는 재고 부족으로 답)
-    short = [{"product_id": line.product_id, "qty": line.qty, "stock_qty": stock[line.product_id]}
-             for line in req.items if line.qty > stock[line.product_id]]
-    if short:
-        raise _Rollback(PlaceError(422, "OUT_OF_STOCK", "재고가 모자람", {"items": short}))
     total = sum(line.qty for line in req.items)
     if total > settings["max_order_items"]:
         raise _Rollback(PlaceError(
             422, "OVER_MAX_ITEMS", "품목 합이 한도를 넘음",
             {"total": total, "max_order_items": settings["max_order_items"]}))
+    short = [{"product_id": line.product_id, "qty": line.qty, "stock_qty": stock[line.product_id]}
+             for line in req.items if line.qty > stock[line.product_id]]
+    if short:
+        raise _Rollback(PlaceError(422, "OUT_OF_STOCK", "재고가 모자람", {"items": short}))
     # 4. 주문 번호 · orders · order_item
     order_id = _insert_order(conn, req, idem_key)
     for line in req.items:
@@ -164,7 +163,8 @@ def _replay_or_conflict(conn: psycopg.Connection, req: OrderRequest,
 # ---- 주문 번호 (설계 5.4) ----
 def _insert_order(conn: psycopg.Connection, req: OrderRequest, idem_key: str) -> str:
     prefix = f"O-{datetime.date.today():%Y%m%d}-"
-    # 번호 매기기는 커밋까지 한 줄로 세운다(7002). 안 그러면 최댓값 + 1이 계속 겹쳐
+    # 번호 매기기는 커밋까지 한 줄로 세운다(7002, 순서 7001 공유 → 7002 → orders라 마감과 교착 없음).
+    # 안 그러면 최댓값 + 1이 계속 겹쳐
     # 늦게 온 접수가 다시 매기기를 다 써 버릴 수 있다. 위의 겹침 처리는 안전망으로 남긴다
     conn.execute("SELECT pg_advisory_xact_lock(7002)")
     for _ in range(ORDER_ID_TRIES):

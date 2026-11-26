@@ -134,10 +134,13 @@ def test_same_key_concurrent(pool, conn, seeded):
 
 def test_out_of_stock_rejects_and_counts_low_stock(conn, seeded):
     pid = seeded["products"]["A"]
-    req = OrderRequest(seeded["account_id"], (OrderLine(pid, 21),))
+    # 재고를 5로 줄인다(원장 반출 15). 6개는 max_order_items(8) 안이라 재고 검사까지 간다
+    conn.execute("INSERT INTO stock_ledger (product_id, entry_type, change_qty, reason) "
+                 "VALUES (%s, 'OUTBOUND', -15, 'DAMAGED')", (pid,))
+    req = OrderRequest(seeded["account_id"], (OrderLine(pid, 6),))
     res = place_order(conn, req, "k1")
     assert (res.status, res.code) == (422, "OUT_OF_STOCK")
-    assert res.detail == {"items": [{"product_id": pid, "qty": 21, "stock_qty": 20}]}
+    assert res.detail == {"items": [{"product_id": pid, "qty": 6, "stock_qty": 5}]}
     assert _count(conn, "orders") == 0
     place_order(conn, req, "k2")
     rows = conn.execute("SELECT alert_id, status, detail FROM alert WHERE code = 'LOW_STOCK' "
