@@ -85,7 +85,7 @@ class GoalServers:
                 cmds = self._fsm.retreat(key, now, req.distance_m, req.speed_mps, path, here)
             elif self._nm is not None:
                 # TODO(no-motion): pode_dock이 오면 지운다. dock_s 뒤 성공(PC 도킹 대역과 같게)
-                # 거리는 보지 않는다. 모르는 도킹 이름이면 경고만 남긴다
+                # 거리는 보지 않는다. 모르는 도킹 이름이면 경고만 남긴다(2026-11-24 결정)
                 warning = dock_warning(req.dock_id, self._nm.p.dock_ids)
                 if warning:
                     self._node.get_logger().warn(warning)
