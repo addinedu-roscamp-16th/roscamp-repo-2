@@ -142,3 +142,46 @@ def test_held_report_is_accepted_kept_on_board_and_logged():
         peer.destroy_node()
     finally:
         rclpy.shutdown()
+
+
+def test_held_report_for_a_finished_trip_warns_as_already_finished():
+    rclpy.init(domain_id=58)
+    try:
+        node = CentralNode()
+        warns = []
+
+        class _Log:
+            def warn(self, msg):
+                warns.append(msg)
+
+            def info(self, msg):
+                pass
+
+        node.get_logger = lambda: _Log()
+        peer = rclpy.create_node("central_test_peer")
+        ex = SingleThreadedExecutor()
+        ex.add_node(node)
+        ex.add_node(peer)
+        submit = peer.create_client(SubmitTrip, "/central/submit_trip")
+        report = peer.create_client(ReportOrder, "/central/report_order")
+        assert submit.wait_for_service(timeout_sec=5)
+        request = SubmitTrip.Request(trip_id="t1", order_id="o1", trip_index=0, trip_count=1)
+        request.items = [OrderItem(kind="A", count=1)]
+        assert _call(ex, submit, request).accepted is True
+        done = ReportOrder.Request(order_id="t1", status=ReportOrder.Request.STATUS_SHIPPED)
+        assert _call(ex, report, done).accepted is True
+        held = ReportOrder.Request(
+            order_id="t1", status=ReportOrder.Request.STATUS_HELD,
+            hold_reason=ReportOrder.Request.HOLD_ROBOT_FAULT)
+        assert _call(ex, report, held).accepted is True
+        assert len(warns) == 1 and "이미 끝난 건" in warns[0] and "t1" in warns[0]
+        assert "모르는 order_id" not in warns[0]
+        unknown = ReportOrder.Request(
+            order_id="zz", status=ReportOrder.Request.STATUS_HELD,
+            hold_reason=ReportOrder.Request.HOLD_ROBOT_FAULT)
+        _call(ex, report, unknown)
+        assert "모르는 order_id" in warns[-1]
+        node.destroy_node()
+        peer.destroy_node()
+    finally:
+        rclpy.shutdown()

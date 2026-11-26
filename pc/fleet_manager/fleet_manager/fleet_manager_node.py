@@ -368,8 +368,10 @@ class FleetManagerNode(Node):
     def _flush_reports(self, now: float) -> None:
         # IR-41: 응답 한도를 넘긴 요청은 그 클라이언트에서 버린다 (대기열이 다시 보낼 때를 정함)
         for key in self._reports.expire(now):
-            kind, future = self._pending.pop(key)
-            self._report_clients[kind].remove_pending_request(future)
+            pending = self._pending.pop(key, None)
+            if pending is not None:
+                kind, future = pending
+                self._report_clients[kind].remove_pending_request(future)
         ready = {kind: client.service_is_ready() for kind, client in self._report_clients.items()}
         for send in self._reports.due(now, ready):
             future = self._report_clients[send.kind].call_async(_REQUEST[send.kind](send.payload))

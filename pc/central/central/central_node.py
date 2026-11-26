@@ -57,6 +57,8 @@ class CentralNode(Node):
                 self.get_logger().info(
                     f"관리자 조치 대기: order_id={request.order_id} "
                     f"hold_reason={request.hold_reason}")
+            elif self._board.knows(request.order_id):
+                self.get_logger().warn(f"이미 끝난 건에 HELD 보고: {request.order_id}")
             else:
                 self.get_logger().warn(f"모르는 order_id 보고: {request.order_id}")
         elif request.status not in FINAL_STATUSES:

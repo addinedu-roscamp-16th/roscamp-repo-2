@@ -258,3 +258,12 @@ def test_a_late_answer_after_expiry_is_ignored():
     assert q.due(5.2, READY) == []
     assert q.answer(t.key, 5.3, True) is None
     assert q.due(5.4, READY) == []
+
+
+@pytest.mark.parametrize("rand, resend_at", [(0.0, 3.8), (1.0, 4.2)])
+def test_retry_delay_is_within_plus_minus_20_percent(rand, resend_at):
+    q = ReportQueue("boot-1", 1.0, 10.0, 3.0, 4, rand=lambda: rand)
+    [s] = q.due(0.0, READY)
+    assert q.expire(3.0) == [s.key]  # 응답 한도 3.0초 뒤 실패
+    assert q.due(resend_at - 0.05, READY) == []
+    assert q.due(resend_at + 0.05, READY)[0].kind == HELLO

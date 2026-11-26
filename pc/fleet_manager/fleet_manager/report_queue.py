@@ -9,7 +9,8 @@ import random
 from dataclasses import dataclass
 
 from fleet_core.common.commands import CANCELED, ReportOrderCmd
-from fleet_core.common.params import RETRY_JITTER
+
+from fleet_manager.goal_tracker import _factor
 
 HELLO, TRIP, ORDER = "hello", "trip", "order"
 _CANCELLED = "CANCELLED"  # 브리지 ReportTrip 철자 (주문판은 CANCELED)
@@ -133,7 +134,9 @@ class ReportQueue:
 
     def _put(self, kind: str, trip_id: str, cmd) -> None:
         slot = self._slots.setdefault((kind, trip_id), _Slot(kind))
-        slot.waiting = cmd  # 기다리는 것이 있으면 바꿔 끼움
+        # 기다리는 것이 있으면 바꿔 끼움. 기다리던 HELD(ReportOrderCmd)가 더 새 ReportTripCmd로
+        # 바뀌면 그 보류는 보고하지 않음 (IR-23 최신 상태 규칙)
+        slot.waiting = cmd
 
     def _payload(self, kind: str, cmd, now: float):
         if kind == ORDER:
@@ -151,7 +154,6 @@ class ReportQueue:
         # TODO(Q-09): IR-40 표에 Hello · ReportOrder 줄이 없어 Report* 값을 임시로 씀
         slot = self._slots[request.slot_id]
         interval = min(self._first_s * 2 ** slot.step, self._max_s)
-        factor = 1.0 - RETRY_JITTER + 2.0 * RETRY_JITTER * self._rand()
         slot.key = None
-        slot.next_at = now + interval * factor
+        slot.next_at = now + interval * _factor(self._rand)
         slot.step += 1
