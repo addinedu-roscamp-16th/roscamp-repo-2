@@ -13,6 +13,7 @@ class ReportIn:
     robot_id: str
     placed: dict[str, int]   # kind -> 지금까지 담은 수 전체(IR-23)
     missing: dict[str, int]  # kind -> 지금까지 못 담은 수 전체
+    stamp: str = ""          # fleet이 보고를 만든 시각(ISO, UTC). 늦은 보고 알림에 남김
 
 
 @dataclass(frozen=True)
