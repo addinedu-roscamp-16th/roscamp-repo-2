@@ -8,7 +8,7 @@ from fleet_interfaces.msg import Order, OrderBoard, OrderItem, SystemMode
 from fleet_interfaces.srv import ReportOrder, SubmitTrip
 from rclpy.node import Node
 
-from central.board import FINAL_STATUSES, Board
+from central.board import FINAL_STATUSES, HELD, Board
 
 
 # ---- 요청 품목 합치기 ----
@@ -50,8 +50,16 @@ class CentralNode(Node):
         return response
 
     def _report(self, request, response):
-        # 끝 상태가 아니면 WARN 뒤 accepted=false. 이미 뺐거나 모르는 건도 accepted=true(F-10)
-        if request.status not in FINAL_STATUSES:
+        # 끝 상태도 HELD도 아니면 WARN 뒤 accepted=false. 이미 뺐거나 모르는 건도 accepted=true(F-10)
+        # HELD는 주문판에 남기고 관리자 조치 대기로 표시한다
+        if request.status == HELD:
+            if self._board.on_board(request.order_id):
+                self.get_logger().info(
+                    f"관리자 조치 대기: order_id={request.order_id} "
+                    f"hold_reason={request.hold_reason}")
+            else:
+                self.get_logger().warn(f"모르는 order_id 보고: {request.order_id}")
+        elif request.status not in FINAL_STATUSES:
             self.get_logger().warn(
                 f"끝 상태가 아닌 ReportOrder 거절: order_id={request.order_id} "
                 f"status={request.status} (ReportOrder 철자는 CANCELED)")

@@ -30,7 +30,7 @@ def test_invalid_request_is_remembered():
     assert b.entries() == []
 
 
-@pytest.mark.parametrize("st", ["SHIPPED", "PARTIAL", "CANCELED", "HELD"])
+@pytest.mark.parametrize("st", ["SHIPPED", "PARTIAL", "CANCELED"])
 def test_final_report_removes_once(st):
     b = Board()
     b.submit("t1", {"A": 1}, NOW)
@@ -45,3 +45,27 @@ def test_report_unknown_accepted_non_final_rejected():
     assert b.report("zz", "SHIPPED") is True
     assert b.report("t1", "FILLING") is False
     assert [e.trip_id for e in b.entries()] == ["t1"]
+
+
+def test_held_stays_on_the_board_and_is_marked():
+    b = Board()
+    b.submit("t1", {"A": 1}, NOW)
+    assert b.report("t1", "HELD") is True and b.report("t1", "HELD") is True
+    assert [e.trip_id for e in b.entries()] == ["t1"] and b.held() == {"t1"}
+
+
+@pytest.mark.parametrize("st", ["SHIPPED", "PARTIAL", "CANCELED"])
+def test_held_then_final_removes(st):
+    b = Board()
+    b.submit("t1", {"A": 1}, NOW)
+    b.report("t1", "HELD")
+    assert b.report("t1", st) is True
+    assert b.entries() == [] and b.held() == set()
+
+
+def test_held_for_an_unknown_trip_is_accepted():
+    b = Board()
+    assert b.report("zz", "HELD") is True and b.held() == set()
+    b.submit("t1", {"A": 1}, NOW)
+    b.report("t1", "SHIPPED")
+    assert b.report("t1", "HELD") is True and b.held() == set()

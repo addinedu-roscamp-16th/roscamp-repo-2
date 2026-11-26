@@ -100,3 +100,45 @@ def test_report_with_non_final_status_is_rejected_and_warned():
         peer.destroy_node()
     finally:
         rclpy.shutdown()
+
+
+def test_held_report_is_accepted_kept_on_board_and_logged():
+    rclpy.init(domain_id=57)
+    try:
+        node = CentralNode()
+        infos, warns = [], []
+
+        class _Log:
+            def warn(self, msg):
+                warns.append(msg)
+
+            def info(self, msg):
+                infos.append(msg)
+
+        node.get_logger = lambda: _Log()
+        peer = rclpy.create_node("central_test_peer")
+        ex = SingleThreadedExecutor()
+        ex.add_node(node)
+        ex.add_node(peer)
+        boards = []
+        peer.create_subscription(OrderBoard, "/central/orders", boards.append, 10)
+        submit = peer.create_client(SubmitTrip, "/central/submit_trip")
+        report = peer.create_client(ReportOrder, "/central/report_order")
+        assert submit.wait_for_service(timeout_sec=5)
+        request = SubmitTrip.Request(trip_id="t1", order_id="o1", trip_index=0, trip_count=1)
+        request.items = [OrderItem(kind="A", count=1)]
+        assert _call(ex, submit, request).accepted is True
+        held = ReportOrder.Request(
+            order_id="t1", status=ReportOrder.Request.STATUS_HELD,
+            hold_reason=ReportOrder.Request.HOLD_ROBOT_FAULT)
+        assert _call(ex, report, held).accepted is True
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            ex.spin_once(timeout_sec=0.1)
+        assert [o.order_id for o in boards[-1].orders] == ["t1"]
+        assert any("관리자 조치 대기" in m and "t1" in m and "ROBOT_FAULT" in m for m in infos)
+        assert warns == []
+        node.destroy_node()
+        peer.destroy_node()
+    finally:
+        rclpy.shutdown()
