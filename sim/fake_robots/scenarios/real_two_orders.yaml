@@ -5,7 +5,11 @@ map: v7
 seed: 65
 speed_factor: 1.0
 timeout_s: 1800
-stock: {arm_left: {A: 20, B: 20}, arm_right: {C: 20, D: 20}}
+# 두 팔에 같은 상품을 같은 수로 둔다. 실물은 비전이 보고 담을 팔을 정하므로 팔별 배치를 고정하지 않는다.
+# 상품마다 합 20개 = service_bridge tools/seed.py STOCK
+stock:
+  arm_left: {A: 10, B: 10, C: 10, D: 10}
+  arm_right: {A: 10, B: 10, C: 10, D: 10}
 orders:
   - {at_s: 20, id: R-001, items: {A: 1, C: 1}}
   - {at_s: 40, id: R-002, items: {B: 1}}
