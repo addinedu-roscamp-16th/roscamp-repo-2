@@ -1,8 +1,8 @@
-# ---- 액션 goal 추적과 보고 재전송 대기열 ----
+# ---- 액션 goal 추적 ----
 from __future__ import annotations
 
 import random
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from fleet_core.common.params import RETRY_JITTER
 
@@ -102,72 +102,3 @@ class GoalTracker:
                 handle.cancel_goal_async()
         return unconfirmed
 
-
-# ---- 주문 보고 재전송 대기열 ----
-@dataclass
-class _Report:
-    item: object
-    sent_at: float | None = None
-    factor: float = 1.0
-    requests: list = field(default_factory=list)  # 답을 기다리는 [보낸 시각, future]
-
-
-class ReportOutbox:
-    def __init__(self, rand=random.random):
-        self._rand = rand
-        self._items: dict = {}
-        self._next_id = 0
-
-    def add(self, item) -> None:
-        self._items[self._next_id] = _Report(item)
-        self._next_id += 1
-
-    def due(self, now: float, ready: bool, retry_s: float, limit: int) -> list:
-        if not ready:
-            return []
-        # IR-41: 답을 기다리는 요청 수가 상한이다. 다시 보내기도 요청 하나다
-        in_flight = sum(len(report.requests) for report in self._items.values())
-        out = []
-        for report_id, report in list(self._items.items()):
-            if report.sent_at is not None and now - report.sent_at < retry_s * report.factor:
-                continue
-            if in_flight >= limit:
-                continue
-            in_flight += 1
-            report.sent_at = now
-            report.factor = _factor(self._rand)
-            report.requests.append([now, None])
-            out.append((report_id, report.item))
-        return out
-
-    def track(self, report_id, future) -> None:
-        # due가 연 마지막 요청에 future를 붙인다
-        report = self._items.get(report_id)
-        if report is not None and report.requests and report.requests[-1][1] is None:
-            report.requests[-1][1] = future
-
-    def expire(self, now: float, reply_limit_s: float) -> list:
-        # IR-41: 응답 한도를 넘긴 요청을 빼고 그 future를 돌려준다(클라이언트에서 버림)
-        expired = []
-        for report in self._items.values():
-            keep = []
-            for sent, future in report.requests:
-                if now - sent < reply_limit_s:
-                    keep.append([sent, future])
-                elif future is not None:
-                    expired.append(future)
-            report.requests = keep
-        return expired
-
-    def forget(self, report_id, future) -> None:
-        # 실패로 끝난 요청은 자리를 비운다. 보고는 남아 다시 보낸다
-        report = self._items.get(report_id)
-        if report is not None:
-            report.requests = [r for r in report.requests if r[1] is not future]
-
-    def finish(self, report_id, future):
-        # 보고를 끝내고 아직 답을 기다리는 다른 요청을 돌려준다. 이미 끝났으면 None
-        report = self._items.pop(report_id, None)
-        if report is None:
-            return None
-        return [f for _, f in report.requests if f is not None and f is not future]

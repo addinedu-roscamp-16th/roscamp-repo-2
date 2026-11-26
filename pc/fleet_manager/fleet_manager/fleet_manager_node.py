@@ -5,6 +5,7 @@ import argparse
 import math
 import threading
 import time
+import uuid
 from functools import partial, wraps
 
 import fleet_interfaces.srv
@@ -20,6 +21,7 @@ from fleet_core.common.commands import (
     MoveCmd,
     MoveOrderCmd,
     ReportOrderCmd,
+    ReportTripCmd,
     RetreatCmd,
     SwapCmd,
 )
@@ -38,7 +40,15 @@ from fleet_interfaces.msg import (
     SystemMode,
     ZoneStateArray,
 )
-from fleet_interfaces.srv import CheckClear, ConfirmClear, Reinstate, ReportOrder, SetMode
+from fleet_interfaces.srv import (
+    CheckClear,
+    ConfirmClear,
+    Hello,
+    Reinstate,
+    ReportOrder,
+    ReportTrip,
+    SetMode,
+)
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.action import ActionClient
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -49,10 +59,11 @@ from rclpy.utilities import remove_ros_args
 from std_msgs.msg import Header
 
 from fleet_manager import adapters
-from fleet_manager.goal_tracker import GoalTracker, ReportOutbox
+from fleet_manager.goal_tracker import GoalTracker
 from fleet_manager.inbox import Inbox
 from fleet_manager.mode_sync import ModeSync
 from fleet_manager.order_goals import apply_overrides
+from fleet_manager.report_queue import HELLO, ORDER, TRIP, ReportQueue, Send
 
 
 # ---- 강제 출고 인터페이스: 주문 담당이 정의한다 ----
@@ -73,6 +84,12 @@ def force_ship_type(contract):
 
 
 SLOW_TICK_WARN_S = 5.0  # 느린 틱 경고 사이 최소 간격
+# 보고 종류마다 요청 만들기 (payload: HELLO는 boot_id, TRIP은 TripReport, ORDER는 ReportOrderCmd)
+_REQUEST = {
+    HELLO: adapters.hello_request,
+    TRIP: adapters.report_trip_request,
+    ORDER: adapters.report_request,
+}
 
 
 def _core_callback(method):
@@ -123,7 +140,12 @@ class FleetManagerNode(Node):
             self.core.record_to(lambda line: self._record_file.write(line + "\n"))
 
         self._goals = GoalTracker()
-        self._reports = ReportOutbox()
+        # 보고: Hello 뒤 ReportTrip, 끝 상태 · HELD는 브리지가 받은 뒤 ReportOrder
+        self._boot_id = str(uuid.uuid4())
+        self._reports = ReportQueue(self._boot_id, params.report_retry_s,
+                                    params.report_retry_max_s, REPORT_REPLY_LIMIT_S,
+                                    params.report_max_in_flight)
+        self._pending = {}  # 요청 번호 → (종류, 답을 기다리는 future)
         self._reached = set()
         self._last_zones = None
         self._last_assignments = None
@@ -210,8 +232,12 @@ class FleetManagerNode(Node):
                 self._swap[station.id] = ActionClient(
                     self, SwapBasket, name("swap_basket", arm=station.server),
                     callback_group=inbox)
-        self._report_client = self.create_client(ReportOrder, name("report_order"),
-                                                 callback_group=inbox)
+        # 순서 HELLO · TRIP · ORDER. Node가 이미 self._clients를 쓰므로 다른 이름
+        self._report_clients = {
+            HELLO: self.create_client(Hello, name("hello"), callback_group=inbox),
+            TRIP: self.create_client(ReportTrip, name("report_trip"), callback_group=inbox),
+            ORDER: self.create_client(ReportOrder, name("report_order"), callback_group=inbox),
+        }
         core = self._core_group
         self.create_service(ConfirmClear, name("confirm_clear"), self._on_confirm_clear,
                             callback_group=core)
@@ -340,36 +366,40 @@ class FleetManagerNode(Node):
             self.core.on_goal_lost(robot, goal_id)
 
     def _flush_reports(self, now: float) -> None:
-        params = self.core.params
-        # IR-41: 응답 한도를 넘긴 요청은 클라이언트에서 버린다
-        for old in self._reports.expire(now, REPORT_REPLY_LIMIT_S):
-            self._report_client.remove_pending_request(old)
-        for report_id, command in self._reports.due(now, self._report_client.service_is_ready(),
-                                                    params.report_retry_s,
-                                                    params.report_max_in_flight):
-            future = self._report_client.call_async(adapters.report_request(command))
-            self._reports.track(report_id, future)
-            future.add_done_callback(partial(self._post, self._report_answered, report_id,
-                                             command))
+        # IR-41: 응답 한도를 넘긴 요청은 그 클라이언트에서 버린다 (대기열이 다시 보낼 때를 정함)
+        for key in self._reports.expire(now):
+            kind, future = self._pending.pop(key)
+            self._report_clients[kind].remove_pending_request(future)
+        ready = {kind: client.service_is_ready() for kind, client in self._report_clients.items()}
+        for send in self._reports.due(now, ready):
+            future = self._report_clients[send.kind].call_async(_REQUEST[send.kind](send.payload))
+            self._pending[send.key] = (send.kind, future)
+            future.add_done_callback(partial(self._post, self._report_answered, send))
 
-    def _report_answered(self, report_id, command, future) -> None:
+    def _report_answered(self, send: Send, future) -> None:
+        self._pending.pop(send.key, None)
+        now = self._now()
+        epoch = 0
         try:
-            accepted = adapters.report_accepted(future.result())
+            response = future.result()
+            if send.kind == HELLO:
+                accepted, epoch = adapters.hello_answer(response)
+            elif send.kind == TRIP:
+                accepted = adapters.report_trip_accepted(response)
+            else:
+                accepted = adapters.report_accepted(response)
         except Exception as exc:
-            self.get_logger().warning(f"report of {command.order_id} got no reply: {exc}")
-            self._reports.forget(report_id, future)
+            self.get_logger().warning(f"{send.kind} report {send.key} got no reply: {exc}")
+            self._reports.answer(send.key, now, None)
             return
-        others = self._reports.finish(report_id, future)
-        if others is None:
-            return
-        # 끝난 보고의 다른 요청은 답을 기다리지 않는다
-        for old in others:
-            self._report_client.remove_pending_request(old)
-        if not accepted:
+        first = self._reports.epoch is None
+        refused = self._reports.answer(send.key, now, accepted, epoch)
+        if first and self._reports.epoch is not None:
+            self.get_logger().info(f"bridge epoch {self._reports.epoch} (boot_id {self._boot_id})")
+        if refused is not None:
             self._dispatch(EventOut("ERROR", "ORDER_REPORT_REFUSED",
-                                    f"{command.order_id} {command.status} refused by central, "
-                                    "nobody will work or report it now", command.robot),
-                           self._now())
+                                    f"{refused.order_id} {refused.status} refused by central, "
+                                    "nobody will work or report it now", refused.robot), now)
 
     def _publish_snapshots(self, now: float) -> None:
         zones = self.core.zones_view()
@@ -425,7 +455,7 @@ class FleetManagerNode(Node):
                 self._ask_clear(command)
             case CancelCmd():
                 self._goals.cancel((command.robot, command.goal_id), now)
-            case ReportOrderCmd():
+            case ReportTripCmd() | ReportOrderCmd():
                 self._reports.add(command)
             case EventOut():
                 self._events_pub.publish(adapters.event_to_msg(command, now))
