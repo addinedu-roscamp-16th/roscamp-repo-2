@@ -181,3 +181,18 @@ def test_robots_callback(spin, pool):
     assert _until(lambda: got, 5)
     assert isinstance(got[0], list) and got[0][0]["robot_id"] == "pode1"
     assert got[0][0]["trip_id"] == "T-1"
+
+
+def test_reply_while_waking_sends_once(spin, pool, conn, seeded):
+    res = _place(conn, seeded, [("B", 1)], "k1")
+    central = FakeCentral(delay=0.3)
+    bridge = _bridge(pool)
+    spin(central.node, bridge)
+    end = time.monotonic() + 1.5
+    while time.monotonic() < end:  # 응답이 오가는 동안 wake를 계속 울림
+        bridge.wake_dispatch()
+        time.sleep(0.01)
+    assert _until(lambda: conn.execute(
+        "select attempts from trip_dispatch where trip_id = %s and central_acked_at is not null",
+        (res.trip_ids[0],)).fetchone() == (1,), 3)
+    assert central.received == list(res.trip_ids)

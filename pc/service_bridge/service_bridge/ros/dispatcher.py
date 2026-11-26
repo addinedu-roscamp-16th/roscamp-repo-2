@@ -25,7 +25,10 @@ RETRYABLE_REASONS = frozenset({"NOT_READY"})
 
 
 class Dispatcher:
-    """맨 앞 건 하나만 보낸다. 응답 · 시간 초과 · 타이머 · wake는 모두 한 콜백 그룹이라 겹치지 않는다."""
+    """맨 앞 건 하나만 보낸다. 상태(_future · _due)는 _tick(한 콜백 그룹) 안에서만 바꾼다.
+
+    future의 done 콜백은 그룹 밖 실행기 작업으로 돌기 때문에 가드 조건만 울린다.
+    """
 
     def __init__(self, node: Node, pool: ConnectionPool, contract):
         self._node = node
@@ -57,7 +60,9 @@ class Dispatcher:
     def _tick(self) -> None:
         try:
             if self._future is not None:
-                if time.monotonic() - self._sent_at > REPLY_TIMEOUT_SEC:
+                if self._future.done():  # 응답이 먼저. 시간 초과 판정보다 앞
+                    self._handle_reply()
+                elif time.monotonic() - self._sent_at > REPLY_TIMEOUT_SEC:
                     self._abandon()
                 return
             if time.monotonic() < self._due:
@@ -82,23 +87,23 @@ class Dispatcher:
         self._trip_id = item.trip_id
         self._sent_at = time.monotonic()
         self._future = self._client.call_async(convert.submit_request(item))
-        self._future.add_done_callback(self._on_reply)
+        self._future.add_done_callback(lambda _f: self._guard.trigger())
 
-    # ---- 응답 (실행기 스레드, DB 짧은 트랜잭션 하나) ----
-    def _on_reply(self, future) -> None:
-        if future is not self._future:  # 이미 버린 요청의 늦은 응답
-            return
-        trip_id = self._trip_id
-        self._future = None
+    # ---- 응답 (_tick 안, DB 짧은 트랜잭션 하나). 버린 요청의 늦은 응답은 _future가 아니라 무시됨 ----
+    def _handle_reply(self) -> None:
+        future, trip_id = self._future, self._trip_id
         try:
             resp = future.result()
             if not resp.accepted and resp.reason in RETRYABLE_REASONS:
+                self._future = None
                 self._fail(trip_id, resp.reason)
                 return
             with self._pool.connection(timeout=DB_TIMEOUT_SEC) as conn:
                 record_ack(conn, trip_id, resp.accepted, resp.reason)
+            self._future = None  # DB에 적은 뒤에야 비운다
             self._due = 0.0  # 다음 건은 바로
         except Exception as e:
+            self._future = None
             self._node.get_logger().warning(f"넘기기 응답 처리 실패 {trip_id}: {e!r}")
             self._due = time.monotonic() + RETRY_SEC
 
