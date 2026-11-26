@@ -267,7 +267,7 @@ def _inside_traffic(source):
 
 
 def test_the_sim_files_are_found():
-    assert any(p.name == "planner.py" for p in _sim_files())
+    assert any(p.name == "block_watch.py" for p in _sim_files())
 
 
 def test_the_sim_does_not_reach_into_the_traffic_internals():

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 from core_helpers import cmds, codes
-from fleet_core.common.commands import DispatchCmd, DispatchResult, OrderRecord
+from fleet_core.common.commands import DispatchResult, OrderRecord
 from fleet_core.common.params import load_params
 from fleet_core.fleet_map import load_fleet_map
 from fleet_core.manager import FleetManager
@@ -293,7 +293,7 @@ def test_a_board_with_an_unknown_run_mode_is_dropped_whole(mode):
     core, _ = make()
     core.on_order_board(mode, [O1])
     assert core.traffic.running, "앞의 RUN이 유지된다"
-    assert core._board == []
+    assert core.orchestrator._board == []
     assert len(rejected(core.tick())) == 1
 
 
@@ -317,13 +317,13 @@ def test_a_malformed_order_keeps_the_last_orders_but_the_mode_is_applied(orders)
     core.tick()
     core.on_order_board("PAUSE", orders)
     assert not core.traffic.running
-    assert [o.order_id for o in core._board] == ["O-001", "O-002"]
+    assert [o.order_id for o in core.orchestrator._board] == ["O-001", "O-002"]
     assert len(rejected(core.tick())) == 1
 
 
 def test_stop_is_applied_even_with_a_malformed_order():
     core, _ = make()
-    core._route(DispatchCmd(1000, core._work))
+    core.on_order_board("RUN", [O1])
     for _ in range(3):
         core.tick()
     assert any(core.traffic.robot_view(r)["goal_id"] is not None for r in SPOTS)
@@ -448,6 +448,17 @@ def test_a_run_with_rejected_inputs_plays_back_the_same(tmp_path):
     assert json.loads(lines[0])["params"]["input_pose_margin_m"] == 1.0
 
 
+def test_a_force_ship_input_is_recorded_and_plays_back(tmp_path):
+    core, now, lines = _recorded()
+    assert core.force_ship("O-001") == (False, "NOT_IMPLEMENTED")
+    assert core.force_ship(None) == (False, "NOT_FOUND")
+    now[0] += 0.1
+    assert len(rejected(core.tick())) == 2
+    assert any('"in": "force_ship"' in line for line in lines)
+    result = _play(tmp_path, lines)
+    assert result.compared and result.same, result
+
+
 def _recorded():
     """기록을 켜고 주문 하나로 시작한 코어."""
     now = [0.0]
@@ -493,17 +504,6 @@ def test_a_board_of_the_wrong_shape_plays_back_the_same(tmp_path, orders):
     core, now, lines = _recorded()
     core.on_order_board("PAUSE", orders)
     assert len(rejected(core.tick())) == 1
-    result = _play(tmp_path, lines)
-    assert result.compared and result.same, result
-
-
-def test_a_force_ship_input_is_recorded_and_plays_back(tmp_path):
-    core, now, lines = _recorded()
-    assert core.force_ship("O-001") == (False, "NOT_IMPLEMENTED")
-    assert core.force_ship(None) == (False, "NOT_IMPLEMENTED")
-    now[0] += 0.1
-    assert len(rejected(core.tick())) == 2
-    assert any('"in": "force_ship"' in line for line in lines)
     result = _play(tmp_path, lines)
     assert result.compared and result.same, result
 

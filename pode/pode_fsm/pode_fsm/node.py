@@ -9,14 +9,14 @@ import uuid
 
 import rclpy
 from fleet_interfaces.msg import RobotState, RobotStatusArray
-from fleet_interfaces.srv import CheckClear, SetMode
+from fleet_interfaces.srv import CheckClear, ForceInput, RobotCommand, SetLock, SetMode
 from geometry_msgs.msg import Pose2D
 from nav2_msgs.msg import SpeedLimit
 from nav2_msgs.srv import ClearEntireCostmap
 from nav_msgs.msg import OccupancyGrid, Odometry
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.clock import Clock, ClockType
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import ExternalShutdownException, MultiThreadedExecutor, SingleThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, qos_profile_sensor_data
 from rclpy.time import Time
@@ -55,8 +55,6 @@ from pode_fsm.server_ros import GoalServers
 # ---- 배터리 미상 값과 마커 발행 주기 ----
 UNKNOWN_BATTERY = -1.0
 MARKER_PERIOD_S = 0.5
-# 동작 없음 모드의 상태 발행 기본 주기(설계 4.5: 초당 5번 안팎)
-NO_MOTION_STATE_HZ = 5.0
 
 
 # ---- Pode 상태 기계 노드 PodeFsmNode ----
@@ -94,7 +92,7 @@ class PodeFsmNode(Node):
         declare("costmap_topic", "local_costmap/costmap")
         declare("speed_limit_topic", "speed_limit")
         declare("battery_topic", "")
-        declare("state_rate_hz", NO_MOTION_STATE_HZ if no_motion else 10.0)
+        declare("state_rate_hz", 5.0)
         declare("control_rate_hz", 20.0)
         declare("pose_timeout_s", 1.0)
         declare("obstacle_look_m", 0.30)
@@ -123,6 +121,8 @@ class PodeFsmNode(Node):
         self._fsm = OrderFsm(
             fsm_params, order_params,
             horizon_check=self._maps.check, robot_id=self.robot_id)
+        self._nav_ready = False
+        self._fsm.set_nav_ready(False)
         self._markers = OrderMarkers(self, get("order_markers_topic").value, self._map_frame)
         self._last_state = ("", "")
         contract = load_contract(get("contract_file").value or default_contract_path())
@@ -136,11 +136,10 @@ class PodeFsmNode(Node):
         self._speed = (0.0, 0.0)
         self._costmap: tuple[Grid, str, float] | None = None
         self._battery = UNKNOWN_BATTERY
-        self._admin = AdminState(str(uuid.uuid4()))
+        self._admin = AdminState(self.robot_id, str(uuid.uuid4()))
 
         # ---- TF, 발행자, 구독자 만들기 ----
         self._tf = Buffer()
-        self._tf_listener = TransformListener(self._tf, self)
         self._speed_pub = self.create_publisher(SpeedLimit, get("speed_limit_topic").value, 10)
         self._state_pub = self.create_publisher(
             RobotState, contract.name("robot_state", pode=self.robot_id),
@@ -149,8 +148,6 @@ class PodeFsmNode(Node):
                                  to_ros_qos(contract.qos("heartbeat")), callback_group=group)
         self.create_subscription(RobotStatusArray, contract.name("robots"), self._on_fleet_robots,
                                  to_ros_qos(contract.qos("robots")), callback_group=group)
-        self.create_subscription(Odometry, get("odom_topic").value, self._on_odom,
-                                 qos_profile_sensor_data, callback_group=group)
         self.create_subscription(
             OccupancyGrid, get("costmap_topic").value, self._on_costmap,
             QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE), callback_group=group)
@@ -167,10 +164,17 @@ class PodeFsmNode(Node):
                                          callback_group=group)
         self.create_service(CheckClear, contract.name("check_clear", pode=self.robot_id),
                             self._on_check_clear, callback_group=group)
+        self.create_service(SetLock, contract.name("robot_set_lock", robot=self.robot_id),
+                            self._on_set_lock, callback_group=group)
         self.create_service(SetMode, contract.name("robot_set_mode", robot=self.robot_id),
                             self._on_set_mode, callback_group=group)
+        self.create_service(RobotCommand, contract.name("pode_charge_end", pode=self.robot_id),
+                            self._on_charge_end, callback_group=group)
+        self.create_service(ForceInput, contract.name("robot_force", robot=self.robot_id),
+                            self._on_force, callback_group=group)
         self._servers = GoalServers(self, contract, self.robot_id, group, self._lock, self._fsm,
-                                    self._pose, self._run, lambda: self._alive, self._nm)
+                                    self._pose, self._run, lambda: self._alive, self._nm,
+                                    locked=lambda: self._admin.lock)
         # ---- 제어, 상태, 마커 타이머 시작 ----
         steady = Clock(clock_type=ClockType.STEADY_TIME)
         self.create_timer(1.0 / float(get("control_rate_hz").value), self._tick,
@@ -179,7 +183,9 @@ class PodeFsmNode(Node):
                           callback_group=group, clock=steady)
         self.create_timer(MARKER_PERIOD_S, self._publish_markers, callback_group=group,
                           clock=steady)
-        mode = " (NO MOTION: goals succeed after a wait, nothing drives)" if no_motion else ""
+        # 입력 스레드는 맨 끝에 띄운다: 앞에서 초기화가 실패하면 스레드가 남지 않는다
+        self._inputs = FrequentInputs(self, self._tf, get("odom_topic").value, self._on_odom)
+        mode =" (NO MOTION: goals succeed after a wait, nothing drives)" if no_motion else ""
         self.get_logger().info(f"pode_fsm for {self.robot_id} ready{mode}")
 
     def _start_runners(self, group) -> None:
@@ -208,6 +214,8 @@ class PodeFsmNode(Node):
         self._follow = FollowStub(self._nm, time.monotonic)
         self._backup = BackUpStub(self._nm, time.monotonic)
         self._goals = NavGoalStub(self._nm, time.monotonic)
+        # 대역은 처음부터 준비됨: 첫 tick 전에 온 goal도 NAV_UNAVAILABLE로 끝나지 않게
+        self._note_nav_ready()
 
     # ---- 때가 된 대역 일을 Nav2 결과처럼 FSM에 알린다 ----
     def _step_no_motion(self, now: float) -> None:
@@ -239,6 +247,7 @@ class PodeFsmNode(Node):
 
     def destroy_node(self):
         self.stop()
+        self._inputs.destroy()
         self._servers.destroy()
         self._follow.destroy()
         self._backup.destroy()
@@ -328,13 +337,30 @@ class PodeFsmNode(Node):
                                                age_s=time.monotonic() - at)
         return response
 
-    # ---- 운영 모드 서비스 (IR-73) ----
+    # ---- 관리 명령 서비스: 락, 운영 모드, 충전 끝내기, 강제 입력 ----
+    def _on_set_lock(self, request, response):
+        with self._lock:
+            stopped = not self._fsm.has_goal()
+            reply = self._admin.set_lock(request.request_id, request.robot_id, request.locked,
+                                         stopped, time.monotonic())
+        return _answer(response, request.request_id, reply)
+
     def _on_set_mode(self, request, response):
         with self._lock:
             reply = self._admin.set_mode(request.request_id, request.mode, time.monotonic())
-        response.accepted, response.reason = reply.accepted, reply.reason
-        response.request_id, response.detail = request.request_id, reply.detail
-        return response
+        return _answer(response, request.request_id, reply)
+
+    def _on_charge_end(self, request, response):
+        with self._lock:
+            reply = self._admin.charge_end(request.request_id, request.robot_id,
+                                           float(self._battery), time.monotonic())
+        return _answer(response, request.request_id, reply)
+
+    def _on_force(self, request, response):
+        with self._lock:
+            reply = self._admin.force(request.request_id, request.robot_id, request.kind,
+                                      request.key, request.value, time.monotonic())
+        return _answer(response, request.request_id, reply)
 
     # ---- 경로 점에 장애물이 있는지 검사 ----
     def _obstacle(self, points) -> bool:
@@ -356,7 +382,7 @@ class PodeFsmNode(Node):
                 if not self._follow.send(cmd.seq, cmd.poses, cmd.final_goal, cmd.reverse,
                                          cmd.free_heading):
                     self.get_logger().warn("follow_path server is not available")
-                    self._late.append((cmd.seq, "rejected"))
+                    self._late.append((cmd.seq, "unavailable"))
             elif isinstance(cmd, CancelNav):
                 self._follow.cancel_all()
             elif isinstance(cmd, BackUp):
@@ -366,7 +392,7 @@ class PodeFsmNode(Node):
                 if not self._backup.send(cmd.seq, cmd.distance_m, cmd.speed_mps,
                                          cmd.time_allowance_s):
                     self.get_logger().warn("backup server is not available")
-                    self._late_backup.append((cmd.seq, "rejected"))
+                    self._late_backup.append((cmd.seq, "unavailable"))
             elif isinstance(cmd, CancelBackUp):
                 self._backup.cancel_all()
             elif isinstance(cmd, SendNavGoal):
@@ -436,6 +462,15 @@ class PodeFsmNode(Node):
         with self._lock:
             self._run(self._fsm.nav_cancel_accepted(seq, time.monotonic()))
 
+    # ---- Nav2 서버 준비: 둘 다 보이기 전에는 LOCALIZING으로 보고한다 ----
+    def _note_nav_ready(self) -> None:
+        if self._nav_ready:
+            return
+        if self._follow.ready() and self._goals.ready():
+            self._nav_ready = True
+            self.get_logger().info("follow_path and navigate_to_pose servers are ready")
+        self._fsm.set_nav_ready(self._nav_ready)
+
     # ---- 제어 주기: 미뤄 둔 결과 처리 후 tick ----
     def _tick(self) -> None:
         with self._lock:
@@ -452,7 +487,8 @@ class PodeFsmNode(Node):
                 self._run(self._fsm.backup_result(seq, outcome, now, here))
             late_goal, self._late_goal = self._late_goal, []
             for seq in late_goal:
-                self._run(self._fsm.nav_goal_result(seq, "rejected", now, here))
+                self._run(self._fsm.nav_goal_result(seq, "unavailable", now, here))
+            self._note_nav_ready()
             self._run(self._fsm.tick(now, here, self._speed, self._obstacle))
             if self._nm is not None:
                 # heartbeat 끊김을 먼저 본 뒤에 끝난 대역 일을 알린다
@@ -499,6 +535,48 @@ class PodeFsmNode(Node):
         else:
             msg.stamp = self.get_clock().now().to_msg()
         self._state_pub.publish(msg)
+
+
+# ---- 자주 오는 입력(TF, odom)을 받는 작은 노드와 그 실행기 스레드 ----
+class FrequentInputs:
+    """주 노드는 실체가 많아 깨어날 때마다 wait set을 다시 만드는 비용이 크다.
+    가장 자주 오는 /tf, odom을 따로 받아 주 실행기를 덜 깨운다."""
+
+    def __init__(self, owner: Node, buffer: Buffer, odom_topic: str, on_odom):
+        # 주 노드가 쓰던 이름(이름공간, 다시 잇기 포함) 그대로 받는다
+        tf_name = owner.resolve_topic_name("/tf")
+        static_name = owner.resolve_topic_name("/tf_static")
+        self.node = Node(
+            f"{owner.get_name()}_inputs", namespace=owner.get_namespace(),
+            context=owner.context, use_global_arguments=False,
+            cli_args=["--ros-args", "-r", f"/tf:={tf_name}", "-r", f"/tf_static:={static_name}"],
+            enable_rosout=False, start_parameter_services=False)
+        self._listener = TransformListener(buffer, self.node)
+        self.node.create_subscription(Odometry, owner.resolve_topic_name(odom_topic), on_odom,
+                                      qos_profile_sensor_data)
+        self._executor = SingleThreadedExecutor(context=owner.context)
+        self._executor.add_node(self.node)
+        self._thread = threading.Thread(target=self._spin, daemon=True)
+        self._thread.start()
+
+    def _spin(self) -> None:
+        try:
+            self._executor.spin()
+        except ExternalShutdownException:
+            pass
+
+    def destroy(self) -> None:
+        self._executor.shutdown()
+        self._thread.join(2.0)
+        self._listener.unregister()
+        self.node.destroy_node()
+
+
+# ---- 관리 명령 공통 응답 채우기 ----
+def _answer(response, request_id: str, reply):
+    response.accepted, response.reason = reply.accepted, reply.reason
+    response.request_id, response.detail = request_id, reply.detail
+    return response
 
 
 # ---- 노드 실행 진입점 ----

@@ -5,8 +5,6 @@ import os
 import subprocess
 import sys
 import threading
-import time
-from pathlib import Path
 
 import pytest
 
@@ -14,15 +12,19 @@ rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("fleet_interfaces")
 
 from fleet_core.common.contract import to_ros_qos  # noqa: E402
-from fleet_interfaces.msg import Order, OrderBoard, OrderItem, RobotState, SystemMode  # noqa: E402
-from fleet_interfaces.srv import SetMode  # noqa: E402
+from fleet_core.fleet_map import load_fleet_map  # noqa: E402
+from fleet_interfaces.msg import (  # noqa: E402
+    ArmState,
+    Order,
+    OrderBoard,
+    OrderItem,
+    RobotState,
+    SystemMode,
+)
 from fleet_manager.fleet_manager_node import FleetManagerNode, make_executor  # noqa: E402
 from rclpy.action import ActionClient  # noqa: E402
-from rclpy.callback_groups import ReentrantCallbackGroup  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
-from rclpy.node import Node  # noqa: E402
-
-REPLAY = Path(__file__).parents[3] / "tools" / "replay.py"
+from test_node_wiring import REPLAY, World, publish, wait_for  # noqa: E402
 
 pytestmark = pytest.mark.skipif(
     os.environ.get("ROS_DOMAIN_ID", "") in ("", "6")
@@ -47,35 +49,6 @@ class CoreSpy:
         return call
 
 
-class World(Node):
-    """상태를 내고 set_mode를 거절하는 Pode 하나와 주문판."""
-
-    def __init__(self, contract):
-        super().__init__("inbox_world")
-        group = ReentrantCallbackGroup()
-        self.state = self.create_publisher(
-            RobotState, contract.name("robot_state", pode="pode1"),
-            to_ros_qos(contract.qos("robot_state")))
-        self.system = self.create_publisher(
-            SystemMode, contract.name("system_mode"), to_ros_qos(contract.qos("system_mode")))
-        self.board = self.create_publisher(
-            OrderBoard, contract.name("order_board"), to_ros_qos(contract.qos("order_board")))
-        self.asked = []
-        self.create_timer(0.1, self._publish, callback_group=group)
-        self.create_service(SetMode, contract.name("robot_set_mode", robot="pode1"),
-                            self._on_set_mode, callback_group=group)
-
-    def _publish(self):
-        self.state.publish(RobotState(robot_id="pode1", state="IDLE", mode="UNKNOWN",
-                                      boot_id="b1"))
-
-    def _on_set_mode(self, request, response):
-        self.asked.append(request.request_id)
-        response.accepted, response.reason = False, "MODE_MISMATCH"
-        response.request_id = request.request_id
-        return response
-
-
 @pytest.fixture
 def node():
     rclpy.init(args=["--ros-args", "-p", "robots:=[pode1]", "-p", "tick_hz:=50.0"])
@@ -97,15 +70,6 @@ def callbacks_of(node, topic):
     return [s.callback for s in node.subscriptions if s.topic_name == topic]
 
 
-def wait_for(predicate, timeout_s):
-    end = time.monotonic() + timeout_s
-    while time.monotonic() < end:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return False
-
-
 def test_callbacks_sit_in_the_core_or_the_inbox_group(node):
     """틱 · heartbeat · /fleet/robots · fleet 서버는 코어 그룹, 구독과 응답을 받는 클라이언트는 받은 편지함 그룹."""
     core, inbox = node._core_group, node._inbox_group
@@ -113,7 +77,8 @@ def test_callbacks_sit_in_the_core_or_the_inbox_group(node):
     timers = list(node.timers)
     assert len(timers) == 3 and all(t.callback_group is core for t in timers)
     served = [s for s in node.services if s.srv_name.startswith("/fleet/")]
-    assert len(served) >= 2 and all(s.callback_group is core for s in served)
+    # 관리 명령 12개: 치우기 · 다시 투입 · 운반 건 6개 · 로봇 명령 4개
+    assert len(served) == 12 and all(s.callback_group is core for s in served)
     subs = list(node.subscriptions)
     assert subs and all(s.callback_group is inbox for s in subs)
     clients = list(node.clients)
@@ -133,12 +98,12 @@ def test_inbox_callbacks_only_queue_and_the_tick_hands_them_to_the_core(node):
     on_mode(SystemMode(mode="TEST"))
     on_state(RobotState(robot_id="pode1", state="IDLE", mode="TEST", boot_id="b1"))
     assert spy.calls == []
-    assert node._mode_sync.system_mode is None
+    assert node._pode_states == {} and node._mode_sync.system_mode is None
     assert node._inbox.qsize() == 3
     node._on_tick()
     assert node._inbox.qsize() == 0
     assert ("on_order_board", True) in spy.calls
-    assert node._mode_sync.system_mode == "TEST"
+    assert node._mode_sync.system_mode == "TEST" and "pode1" in node._pode_states
 
 
 def test_drained_events_are_recorded_in_order_and_replay_the_same(tmp_path):
@@ -173,18 +138,22 @@ def test_core_calls_happen_only_inside_core_callbacks_while_running():
     node = FleetManagerNode()
     spy = CoreSpy(node.core, node)
     node.core = spy
-    world = World(node.contract)
+    world = World(node.contract, load_fleet_map("d2"), "P-1")
     executors = [make_executor(), MultiThreadedExecutor(num_threads=4)]
     executors[0].add_node(node)
     executors[1].add_node(world)
     threads = [threading.Thread(target=e.spin, daemon=True) for e in executors]
     for thread in threads:
         thread.start()
+    system = world.create_publisher(SystemMode, node.contract.name("system_mode"),
+                                    to_ros_qos(node.contract.qos("system_mode")))
+    need = {"tick", "on_order_board", "on_robot_state", "set_mode_blocked"}
     try:
-        world.board.publish(board("RUN"))
-        world.system.publish(SystemMode(mode="TEST"))
-        assert wait_for(lambda: any(n == "set_mode_blocked" for n, _ in spy.calls), 20.0), \
-            (world.asked, sorted({n for n, _ in spy.calls}))
+        publish(world, "RUN", {"A": 1, "C": 2})
+        system.publish(SystemMode(mode="TEST"))
+        # 주문 층이 배정하지 않아도 보드 · 상태 · 모드 · 틱은 코어에 닿아야 한다
+        assert wait_for(lambda: need <= {name for name, _ in list(spy.calls)}, 20.0), \
+            sorted({name for name, _ in spy.calls})
     finally:
         for executor, thread in zip(executors, threads, strict=True):
             executor.shutdown()
@@ -193,7 +162,7 @@ def test_core_calls_happen_only_inside_core_callbacks_while_running():
         node.destroy_node()
         rclpy.shutdown()
     names = {name for name, _ in spy.calls}
-    assert {"tick", "on_order_board", "set_mode_blocked"} <= names, sorted(names)
+    assert need <= names, sorted(names)
     outside = [name for name, inside in spy.calls if not inside]
     assert outside == []
 
@@ -222,3 +191,28 @@ def test_a_slow_tick_is_warned_once_in_a_while(monkeypatch):
         rclpy.shutdown()
     slow = [text for level, text in logged if level == "warning" and "tick took" in text]
     assert len(slow) == 1, logged
+
+
+def test_an_arm_state_reaches_the_core_only_when_it_changes(node):
+    spy = CoreSpy(node.core, node)
+    node.core = spy
+    node._silent_until = 0.0
+    [on_arm] = callbacks_of(node, node.contract.name("arm_state", arm="arm_left"))
+    for state in ("IDLE", "IDLE", "ERROR", "ERROR", "IDLE"):
+        on_arm(ArmState(arm_id="arm_left", state=state, mode="UNKNOWN", boot_id="b1"))
+    node._drain()
+    assert [name for name, _ in spy.calls if name == "on_arm_state"] == ["on_arm_state"] * 3
+
+
+def test_an_arm_state_during_the_start_silence_is_fed_once_it_ends(node):
+    spy = CoreSpy(node.core, node)
+    node.core = spy
+    node._silent_until = float("inf")
+    [on_arm] = callbacks_of(node, node.contract.name("arm_state", arm="arm_right"))
+    on_arm(ArmState(arm_id="arm_right", state="ERROR", boot_id="b1"))
+    node._drain()
+    assert not [c for c in spy.calls if c[0] == "on_arm_state"]
+    node._silent_until = 0.0
+    on_arm(ArmState(arm_id="arm_right", state="ERROR", boot_id="b1"))
+    node._drain()
+    assert [c[0] for c in spy.calls].count("on_arm_state") == 1

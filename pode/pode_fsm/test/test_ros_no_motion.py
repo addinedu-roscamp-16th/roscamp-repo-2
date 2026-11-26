@@ -1,6 +1,9 @@
-"""동작 없음 pode_fsm과 FakePode가 같은 목표에 같은 순서의 피드백, 결과, 상태를 내는지 본다.
+"""동작 없음 모드의 pode_fsm과 FakePode가 같은 목표에 같은 순서의 피드백, 결과, 상태를 내는지 본다.
 
-피드백은 같은 값이 이어지면 하나로 묶어 순서만 비교한다. 일부러 다른 점은 KNOWN_DIFFERENCES에 둔다.
+구역 지도(기본 v7)에서 같은 목표를 차례로 보낸다: 고정 경로, Nav2 goal, 대체, 취소,
+PATH_NOT_CONNECTED, 경로 물러나기, 곧은 물러나기, order(base 끝 대기, update, 취소), 도킹,
+heartbeat 끊김. 피드백은 같은 값이 이어지면 하나로 묶어 순서만 비교한다(개수는 시간에 따라 다르다).
+일부러 다른 점은 KNOWN_DIFFERENCES에 두고 시험으로 못 박는다.
 """
 import math
 import time
@@ -49,7 +52,7 @@ KNOWN_DIFFERENCES = {
                           "O_OUT)를, FakePode는 base 끝 노드(O_OUT)를 current_goal로 알린다. "
                           "실주행 pode_fsm도 같다(동작 없음과 무관). 2026-11-24 결정: 실주행처럼 "
                           "조각 묶음의 끝을 유지한다.",
-    "state rate": "no_motion 기본 5 Hz(설계 4.5), FakePode 기본 10 Hz.",
+    "state rate": "pode_fsm 기본 5 Hz(IR-34), FakePode 기본 10 Hz.",
 }
 
 
@@ -431,7 +434,7 @@ def test_check_clear_always_answers_clear(rclpy_session):
 
 
 def test_an_unknown_dock_id_still_succeeds(rclpy_session):
-    """dock_id가 예상과 달라도 성공시키고 경고 로그만 남긴다."""
+    """2026-11-24 결정: dock_id가 예상과 달라도 성공시키고 경고 로그만 남긴다."""
     def check(fleet):
         handle, _, _ = fleet.send(Dock.Goal(dock_id="NOPE"), fleet.dock)
         ok = fleet.result(handle).success
@@ -460,7 +463,8 @@ def test_default_waits_are_two_two_and_three_seconds(rclpy_session):
 
 
 def test_a_job_due_in_the_tick_that_finds_the_heartbeat_lost_ends_heartbeat_lost(rclpy_session):
-    """같은 틱에 기다림이 끝나고 heartbeat도 끊겼으면 성공이 아니라 HEARTBEAT_LOST다(FakePode와 같게)."""
+    """같은 틱에 기다림이 끝나고 heartbeat도 끊겼으면 성공이 아니라 HEARTBEAT_LOST(FakePode와 같게).
+    실행기를 돌리지 않고 시계를 손으로 움직인다."""
     from pode_fsm import node as node_mod
     from pode_fsm.node import PodeFsmNode
     x, y = pose_of(START)

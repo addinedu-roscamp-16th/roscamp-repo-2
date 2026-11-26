@@ -1,15 +1,15 @@
-"""가짜 로봇, 작업셀, 팔, 중앙 대역, 시뮬 시계를 띄운다.
+"""가짜 로봇, 작업셀, 팔, 중앙 대역, 시뮬 시계, 시나리오 모니터를 띄운다.
 
-  ros2 launch fake_robots fakes.launch.py scenario:=real_three_orders
+  ros2 launch fake_robots fakes.launch.py scenario:=basic_orders result_dir:=/tmp/run1
   ros2 launch fake_robots fakes.launch.py fake_robots:="pode2 pode3"   # pode1은 실물
-  ros2 launch fake_robots fakes.launch.py fake_arms:="arm_ship"              # 작업셀은 실물
-  ros2 launch fake_robots fakes.launch.py fake_robots:=none use_sim_clock:=false \
+  ros2 launch fake_robots fakes.launch.py fake_arms:="arm_ship"          # 작업셀은 실물
+  ros2 launch fake_robots fakes.launch.py fake_robots:=none use_sim_clock:=false monitor:=false \
       scenario:=real_two_orders dock_wait_robots:="pode1 pode2"      # 실물 두 대, PC 도킹 대역
-  ros2 launch fake_robots fakes.launch.py fake_robots:=none use_sim_clock:=false \
+  ros2 launch fake_robots fakes.launch.py fake_robots:=none use_sim_clock:=false monitor:=false \
       scenario:=real_three_orders dock_wait_robots:="pode1 pode2 pode3"   # 실물 세 대, PC 도킹 대역
 
-fake_arms: arm_left와 arm_right는 함께 줘야 가짜 작업셀이 뜨고(서버 하나가 둘을 맡는다), arm_ship은 가짜 출고 팔이다.
-fake_arms:=none은 가짜 팔 없음이다(대소문자 무시).
+fake_arms: arm_left와 arm_right는 함께 줘야 가짜 작업셀이 뜨고(fill_basket 서버 하나가 둘을 맡는다),
+arm_ship은 가짜 출고 팔이다. none은 가짜 팔 없음이다(대소문자 무시).
 fake_robots:=none은 가짜 로봇 없음이다(ros2 launch는 빈 값을 받지 않는다).
 dock_wait_robots: 실물 로봇의 도킹을 PC가 대신 받는다. 로봇은 DOCK_STUB=1로 떠야 하고, 시뮬 시계나 가짜 로봇과는 같이 못 쓴다.
 """
@@ -21,7 +21,7 @@ from fake_robots.dock_wait import dock_wait_problems
 from fake_robots.scenario import scenario_map_file
 from fleet_core.traffic.site import load_site
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, OpaqueFunction
+from launch.actions import DeclareLaunchArgument, OpaqueFunction, Shutdown
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -52,8 +52,8 @@ def _scenario_path(value: str) -> str:
 
 def _setup(context):
     arg = {name: LaunchConfiguration(name).perform(context) for name in (
-        "scenario", "fake_robots", "fake_arms", "fake_central", "use_sim_clock", "map_file",
-        "contract_file", "params_file")}
+        "scenario", "fake_robots", "fake_arms", "fake_central", "use_sim_clock", "result_dir",
+        "monitor", "map_file", "contract_file", "params_file")}
     arg["dock_wait_robots"] = LaunchConfiguration("dock_wait_robots", default="").perform(context)
     scenario = _scenario_path(arg["scenario"])
     if not arg["map_file"]:
@@ -98,6 +98,13 @@ def _setup(context):
         actions.append(node("fake_central_node", "fake_central", params_file=arg["params_file"]))
     if dock_robots:
         actions.append(node("real_dock_wait_node", "real_dock_wait", robots=" ".join(dock_robots)))
+    if _truthy(arg["monitor"]):
+        monitor = Node(package="fake_robots", executable="scenario_monitor_node",
+                       name="scenario_monitor", output="screen",
+                       parameters=[{**common, "result_dir": arg["result_dir"],
+                                    "params_file": arg["params_file"]}],
+                       on_exit=Shutdown())
+        actions.append(monitor)
     return actions
 
 
@@ -106,11 +113,13 @@ def generate_launch_description():
         return DeclareLaunchArgument(name, default_value=default, description=doc)
 
     return LaunchDescription([
-        declare("scenario", "real_three_orders", "scenario name or path to a scenario YAML"),
+        declare("scenario", "basic_orders", "scenario name or path to a scenario YAML"),
         declare("fake_robots", ALL_ROBOTS, "space separated robots to fake (others are real)"),
         declare("fake_arms", ALL_ARMS, "arm_left and arm_right together (workcell), arm_ship"),
         declare("fake_central", "true", "run the central stand-in"),
         declare("use_sim_clock", "true", "run the sim clock and use sim time everywhere"),
+        declare("result_dir", "sim_result", "where the monitor writes summary.json and CSVs"),
+        declare("monitor", "true", "run the scenario monitor, which shuts the launch down"),
         declare("map_file", "", "fleet map YAML (default: the one in fleet_core)"),
         declare("contract_file", "", "contract YAML (default: the installed one)"),
         declare("params_file", "", "fleet parameters YAML, for basket capacity and release limits"),

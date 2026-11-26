@@ -1,0 +1,44 @@
+# 기록과 선반이 다르다. D는 둘 다 없어 주문이 OUT_OF_STOCK으로 끝난다.
+# E와 F는 기록에만 있고 선반에 없어 STOCK_MISMATCH로 끝난다.
+#   O-001 전부 있음                     SHIPPED
+#   O-002 A 있음, D 없음                PARTIAL  OUT_OF_STOCK
+#   O-003 D만                           CANCELED OUT_OF_STOCK
+#   O-004 C 있음, E 선반에 없음         PARTIAL  STOCK_MISMATCH
+#   O-005 F만                           CANCELED STOCK_MISMATCH
+#   O-006 전부 있음                     SHIPPED
+#   O-007 basket_capacity 초과          보고 없음 ORDER_OVER_CAPACITY, 팔을 부르지 않으니 부족분이 없다
+map: d2  # D2 배치용 시나리오(기본 배치는 v7)
+seed: 17
+speed_factor: 5.0
+timeout_s: 900
+stock: {arm_left: {A: 6, B: 6}, arm_right: {C: 6}}
+inventory: {A: 6, B: 6, C: 6, D: 0, E: 3, F: 2}
+orders:
+  - {at_s: 0, id: O-001, items: {A: 1, C: 1}}
+  - {at_s: 0, id: O-002, items: {A: 1, D: 1}}
+  - {at_s: 0, id: O-003, items: {D: 2}}
+  - {at_s: 10, id: O-004, items: {C: 1, E: 1}}
+  - {at_s: 20, id: O-005, items: {F: 1}}
+  - {at_s: 30, id: O-006, items: {B: 2}}
+  - {at_s: 40, id: O-007, items: {A: 5}}
+robots:
+  pode1: {start: P-1, speed_scale: 1.0, pose_noise_m: 0.03}
+  pode2: {start: P-2, speed_scale: 0.9, pose_noise_m: 0.03}
+  pode3: {start: P-3, speed_scale: 1.0, pose_noise_m: 0.03}
+arm: {seconds_per_item: 4.0, swap_seconds: 8.0, fail_rate: 0.0}
+dock: {duration_s: 3.0, error_cm: 1.0}
+faults: []
+expect:
+  all_orders_finished: true
+  orders_shipped: 2
+  orders_partial: 2
+  orders_held: 0
+  orders_canceled: 2
+  fifo_violations: 0
+  zone_holder_max: 1
+  released_without_position_check: 0
+  unheld_zone_pose: 0
+  events_include: [ORDER_PARTIAL, ORDER_CANCELED, ORDER_OVER_CAPACITY, OUT_OF_STOCK, STOCK_MISMATCH]
+  event_counts: {OUT_OF_STOCK: 2, STOCK_MISMATCH: 2, ORDER_OVER_CAPACITY: 1, ROBOT_NOT_REPORTING: 0}
+  order_results: {O-001: SHIPPED, O-002: PARTIAL, O-003: CANCELED, O-004: PARTIAL, O-005: CANCELED,
+                  O-006: SHIPPED, O-007: OVER_CAPACITY}

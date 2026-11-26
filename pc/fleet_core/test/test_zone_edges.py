@@ -192,6 +192,40 @@ def test_a_robot_blocked_while_backing_out_waits_and_then_fails():
 
 # ---- 세계 시험이 찾은 것(B1, B2, B3) ----
 
+def test_a_nav_goal_keeps_every_zone_it_may_cross_until_it_ends():
+    """Nav2는 잡아 준 통로 안에서 어느 길로든 돌아오므로 지나온 넓은 구역도 goal이 끝날 때까지 쥔다."""
+    world = Harness("d", starts={"pode1": "W", "pode2": "P-1", "pode3": "P-3"})
+    world.report()
+    world.call("WORK", "pode1")  # 도크에 서 있다. 곧바로 도킹하고 도크를 쥔다
+    call = world.call("WORK", "pode3")  # 도크가 찼다. 서쪽 마당의 대기 자리로 건너온다
+    world.step()
+    bot = world.bots["pode3"]
+    assert world.run_until(lambda: 0.9 < bot.x < 1.0, 60.0)
+    assert world.site.zone_at(bot.x, bot.y) in ("CORR_M", "CORR_S"), "it crosses by a corridor"
+    assert world.moves("pode3")[-1].mode == "nav_goal"
+    assert "HALL_E" in world.view("pode3")["held"], "the yard behind it is not given back"
+    world.traffic.on_release("pode1")
+    assert world.run_until(lambda: world.result_of(call) is not None, 200.0)
+    assert world.result_of(call).success and not world.problems
+    assert "HALL_E" not in world.view("pode3")["held"], "given back after the goal ended"
+
+
+def test_a_robot_that_nav2_took_into_another_yard_zone_takes_that_zone():
+    world = Harness("d")
+    world.report()
+    world.call("WORK", "pode1")
+    world.step()
+    assert world.moves("pode1")[-1].mode == "nav_goal"
+    assert "CORR_S" not in world.view("pode1")["held"]
+    world.traffic.take_output()
+    for _ in range(world.params.outside_zone_samples + 1):
+        world.traffic.on_robot_state("pode1", 0.75, 0.20, 0.0, "MOVING")
+    codes = [e.code for e in world.traffic.take_output()]
+    assert codes == ["OUTSIDE_ZONE", "OUTSIDE_ZONE"], "seen, then it takes the zone it is in"
+    assert "CORR_S" in world.view("pode1")["held"]
+    assert world.view("pode1")["goal_id"] is not None, "the goal goes on"
+
+
 def test_the_status_names_the_nodes_ahead_that_are_granted_and_those_that_are_not():
     world = Harness()
     world.step()
@@ -247,6 +281,24 @@ def test_a_silent_robot_gives_nothing_back():
     world.run(10.0)
     assert world.view("pode1")["comm"] == "COMM_LOST"
     assert world.view("pode1")["held"] == ["HALL", "J_W", "WORK_DOCK"]
+
+
+def test_a_full_yard_zone_is_taken_as_soon_as_there_is_room():
+    world = Harness("d")
+    world.report()
+    world.call("WORK", "pode1")
+    world.step()
+    grants = world.traffic.grants
+    assert grants.force("pode2", ["CORR_S"], [])  # 통로는 한 대만 든다
+    world.traffic.take_output()
+    for _ in range(world.params.outside_zone_samples + 3):
+        world.traffic.on_robot_state("pode1", 0.75, 0.20, 0.0, "MOVING")
+    assert "CORR_S" not in world.view("pode1")["held"], "no room yet"
+    grants.release_zone("pode2", "CORR_S")
+    world.traffic.on_robot_state("pode1", 0.75, 0.20, 0.0, "MOVING")
+    assert "CORR_S" in world.view("pode1")["held"]
+    codes = [e.code for e in world.traffic.take_output()]
+    assert codes == ["OUTSIDE_ZONE", "OUTSIDE_ZONE"], "noted once, then taken"
 
 
 def test_the_reports_that_let_go_of_a_zone_must_follow_each_other():

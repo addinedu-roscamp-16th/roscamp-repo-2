@@ -1,4 +1,4 @@
-# ---- 관리 명령 상태: 운영 모드, 요청 번호 기억 ----
+# ---- 관리 명령 상태: 락, 운영 모드, 강제 값, 요청 번호 기억 ----
 from __future__ import annotations
 
 from collections import OrderedDict
@@ -7,9 +7,20 @@ from dataclasses import dataclass
 # ---- 켜질 때 값, 모드, 거절 사유, 기억 한도 ----
 BOOT_MODE = "UNKNOWN"
 MODES = ("NORMAL", "TEST")
+TEST_MODE = "TEST"
+NOT_STOPPED = "NOT_STOPPED"
+NOT_TEST_MODE = "NOT_TEST_MODE"
 MODE_MISMATCH = "MODE_MISMATCH"
+BATTERY_LOW = "BATTERY_LOW"
+UNKNOWN_TARGET = "UNKNOWN_TARGET"
+NOT_FOUND = "NOT_FOUND"
+# ForceInput.srv의 kind 값
+FORCE_CONDITION = "CONDITION"
+FORCE_STATE = "STATE"
+FORCE_CLEAR = "CLEAR"
 REMEMBER_COUNT = 32
 REMEMBER_S = 60.0
+CHARGE_END_MIN_PCT = 35.0
 
 
 @dataclass(frozen=True)
@@ -19,21 +30,72 @@ class Reply:
     detail: str = ""
 
 
-# ---- 로봇 노드가 보고하는 관리 상태 (IR-72: 잠김 · UNKNOWN · 강제 없음으로 시작) ----
+# ---- 로봇 노드가 마지막으로 판단하는 관리 명령 ----
 class AdminState:
-    def __init__(self, boot_id: str):
+    def __init__(self, robot_id: str, boot_id: str):
+        self.robot_id = robot_id
         self.boot_id = boot_id
         self.lock = True
         self.mode = BOOT_MODE
-        self.forced: list[str] = []
+        self.forced_values: dict[str, str] = {}
         self.last_request_id = ""
         self._seen: OrderedDict[str, tuple[float, Reply]] = OrderedDict()
+
+    @property
+    def forced(self) -> list[str]:
+        """상태 forced 칸: 강제 중인 key 목록."""
+        return list(self.forced_values)
+
+    def set_lock(self, request_id: str, robot_id: str, locked: bool, stopped: bool,
+                 now: float) -> Reply:
+        def judge() -> Reply:
+            if robot_id != self.robot_id:
+                return Reply(False, UNKNOWN_TARGET, f"this is {self.robot_id}")
+            if bool(locked) == self.lock:
+                return Reply(True)
+            if not stopped:
+                return Reply(False, NOT_STOPPED, "the robot has a goal")
+            self.lock = bool(locked)
+            return Reply(True)
+        return self._once(request_id, now, judge)
 
     def set_mode(self, request_id: str, mode: str, now: float) -> Reply:
         def judge() -> Reply:
             if mode not in MODES:
                 return Reply(False, MODE_MISMATCH, f"unknown mode {mode!r}")
             self.mode = mode
+            return Reply(True)
+        return self._once(request_id, now, judge)
+
+    def charge_end(self, request_id: str, robot_id: str, battery_pct: float,
+                   now: float) -> Reply:
+        def judge() -> Reply:
+            if robot_id != self.robot_id:
+                return Reply(False, UNKNOWN_TARGET, f"this is {self.robot_id}")
+            if self.mode != TEST_MODE:
+                return Reply(False, NOT_TEST_MODE, f"mode is {self.mode}")
+            if battery_pct < CHARGE_END_MIN_PCT:
+                return Reply(False, BATTERY_LOW, f"battery {battery_pct:.0f}%")
+            return Reply(True)
+        return self._once(request_id, now, judge)
+
+    # ---- IR-63: 시험 모드에서만 key → value 강제, CLEAR는 그 key(빈 key면 모두) 지움 ----
+    def force(self, request_id: str, robot_id: str, kind: str, key: str, value: str,
+              now: float) -> Reply:
+        def judge() -> Reply:
+            if robot_id != self.robot_id:
+                return Reply(False, UNKNOWN_TARGET, f"this is {self.robot_id}")
+            if self.mode != TEST_MODE:
+                return Reply(False, NOT_TEST_MODE, f"mode is {self.mode}")
+            if kind == FORCE_CLEAR:
+                if key:
+                    self.forced_values.pop(key, None)
+                else:
+                    self.forced_values.clear()
+            elif kind in (FORCE_CONDITION, FORCE_STATE):
+                self.forced_values[key] = value
+            else:
+                return Reply(False, NOT_FOUND, f"unknown kind {kind!r}")
             return Reply(True)
         return self._once(request_id, now, judge)
 

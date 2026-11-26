@@ -1,4 +1,6 @@
 """keepout 마스크: 구역 지도에서, 주어진 지도의 크기와 원점에 맞춰 만든다."""
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -53,6 +55,19 @@ def test_the_yaml_is_what_map_server_reads():
     assert info == {"image": "mask.pgm", "mode": "trinary", "resolution": 0.01,
                     "origin": [-0.15, -0.15, 0.0], "negate": 0, "occupied_thresh": 0.65,
                     "free_thresh": 0.25}
+
+
+def test_the_tool_writes_a_mask_next_to_a_map(tmp_path):
+    (tmp_path / "room.pgm").write_bytes(b"P5\n# made by a mapper\n300 200\n255\n" + bytes(60000))
+    (tmp_path / "room.yaml").write_text(
+        "image: room.pgm\nresolution: 0.01\norigin: [-0.5, -0.4, 0.0]\n", encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, str(REPO / "tools" / "make_keepout.py"), "--layout", "d2",
+         "--map", str(tmp_path / "room.yaml")], capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
+    info = yaml.safe_load((tmp_path / "room_keepout.yaml").read_text(encoding="utf-8"))
+    assert info["image"] == "room_keepout.pgm" and info["origin"] == [-0.5, -0.4, 0.0]
+    assert pgm_size((tmp_path / "room_keepout.pgm").read_bytes()) == (300, 200)
 
 
 # ---- 구역이 아닌 keepout 사각형(keepout_extra) ----
@@ -125,7 +140,7 @@ def test_an_opening_clears_only_its_own_docks_keepout():
 
 
 def test_layouts_without_keepout_extra_keep_their_masks():
-    for layout in ("d2",):
+    for layout in ("d2", "d", "c", "d2_shelf"):
         assert load_fleet_map(layout).keepout_extra == ()
 
 
@@ -136,3 +151,50 @@ def test_a_keepout_extra_outside_the_floor_is_refused():
     assert "2.1, 1.0" in text
     with pytest.raises(FleetMapError, match="keepout_extra"):
         fleet_map_from_text(text)
+
+
+def test_the_tool_refuses_a_turned_map(tmp_path):
+    (tmp_path / "room.pgm").write_bytes(b"P5\n30 20\n255\n" + bytes(600))
+    (tmp_path / "room.yaml").write_text(
+        "image: room.pgm\nresolution: 0.01\norigin: [-0.5, -0.4, 0.3]\n", encoding="utf-8")
+    done = subprocess.run(
+        [sys.executable, str(REPO / "tools" / "make_keepout.py"), "--layout", "d2",
+         "--map", str(tmp_path / "room.yaml")], capture_output=True, text=True, check=False)
+    assert done.returncode == 2 and "yaw" in done.stderr
+    assert not (tmp_path / "room_keepout.yaml").exists(), "no mask for a grid it cannot match"
+
+
+# ---- 로봇이 읽는 지도(tools/real_pode/maps)와 관제 지도 ----
+REAL_MAPS = REPO / "tools" / "real_pode" / "maps"
+
+
+def _robot_map(name):
+    info = yaml.safe_load((REAL_MAPS / f"{name}.yaml").read_text(encoding="utf-8"))
+    return info, (REAL_MAPS / info["image"]).read_bytes()
+
+
+def test_the_robots_load_the_keepout_mask_of_the_fleet_map():
+    """관제 지도를 바꾸면 로봇 지도도 다시 만들어 같은 PR에 넣는다."""
+    info, shipped = _robot_map("arena_v7_keepout")
+    grid = mask(load_fleet_map("v7"), *pgm_size(shipped), info["resolution"],
+                tuple(info["origin"][:2]))
+    assert pgm(grid) == shipped
+
+
+@pytest.mark.parametrize("name", ("arena_v7_a", "arena_v7_fine"))
+def test_the_robot_maps_draw_the_shelves_of_the_fleet_map(name):
+    info, data = _robot_map(name)
+    width, height = pgm_size(data)
+    pixels = data[len(data) - width * height:]
+    res = info["resolution"]
+    ox, oy = info["origin"][:2]
+
+    def cell(x, y):
+        return pixels[(height - 1 - int((y - oy) / res)) * width + int((x - ox) / res)]
+    for x0, y0, x1, y1 in load_fleet_map("v7").shelves:
+        if x1 - x0 < 0.2:
+            continue  # 정거장 칸막이
+        mid = (x0 + x1) / 2
+        assert cell(mid, (y0 + y1) / 2) == 0, (name, x0, y0)
+        assert cell(mid, y1 + 1.5 * res) == 254, (name, x0, y1)
+        assert cell(mid, y0 - 1.5 * res) == 254, (name, x0, y0)

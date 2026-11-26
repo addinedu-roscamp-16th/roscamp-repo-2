@@ -4,6 +4,7 @@ from fleet_core.fleet_map import load_fleet_map
 from fleet_core.traffic.zone.grants import ZoneGrants
 
 D2 = load_fleet_map("d2")
+D = load_fleet_map("d")
 
 
 def make(site=D2, gap=4.0):
@@ -41,6 +42,16 @@ def test_waiting_ends_when_the_stretch_is_taken_or_given_up():
     grants.release_zone("pode1", "WORK_DOCK")
     assert grants.take("pode2", zones=["WORK_DOCK"])
     assert grants.waiting() == {}
+
+
+def test_a_shared_zone_takes_robots_up_to_its_capacity():
+    grants, _ = make(D)
+    assert grants.take("pode1", zones=["HALL_W"]) and grants.take("pode2", zones=["HALL_W"])
+    assert grants.take("pode3", zones=["HALL_W"])
+    assert grants.holders("HALL_W") == ("pode1", "pode2", "pode3")
+    assert grants.take("pode1", zones=["HALL_W", "CORR_M", "HALL_E"])
+    assert not grants.take("pode2", zones=["HALL_W", "CORR_M", "HALL_E"])
+    assert grants.blockers("pode2", zones=["CORR_M"]) == {"CORR_M": ("pode1",)}
 
 
 def test_zones_and_nodes_a_robot_already_holds_do_not_stand_in_its_own_way():

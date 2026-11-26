@@ -1,0 +1,123 @@
+"""열 가지 상황: 평소 흐름에서는 잘 안 생기는 일을 일부러 만든다.
+
+상황마다 세계를 만드는 값과 기대(expect)가 있고, 기대는 회피 흉내 perfect의 것이다.
+none과 mixed는 rough(늦더라도 주문이 다 끝남)로 본다. 안전 불변식과 관제 반응 시간은 모든 모드에서 본다.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field, replace
+
+from fleet_core.fleet_map import LANE, load_fleet_map
+
+from .avoid import PERFECT
+from .injections import CommLoss, NoisyPose, Obstacle, Reinstate, Removal, SlowStation, Stuck
+from .stations import six_orders
+from .store_situations import QUIET_AFTER_S, STORE_NAMES, build_store
+
+
+@dataclass(frozen=True)
+class Rough:
+    """none, mixed 모드의 합격 기준."""
+
+    finish_all: bool = True  # 일시 장애물, 마주침, 통신 끊김: 늦더라도 주문이 모두 끝남
+    allowed: tuple[str, ...] = ()  # 생겨도 되는 불변식 위반 코드(상황 탓, 모드 탓이 아님)
+
+
+@dataclass
+class Situation:
+    name: str
+    title: str  # 결과 표에 적는 상황 이름
+    robots: dict | None = None  # 이름 -> 출발 지점. None이면 주차 자리
+    orders: list = field(default_factory=six_orders)
+    injections: list = field(default_factory=list)
+    timeout_s: float = 900.0
+    finish_all: bool = True  # 모든 주문이 끝나야 한다
+    allowed: tuple[str, ...] = ()  # 생겨도 되는 불변식 위반 코드
+    allowed_until_s: float | None = None  # allowed를 이 시각까지만 봐준다. None이면 끝까지
+    max_retreats: int | None = None
+    need_events: dict = field(default_factory=dict)  # 사건 코드 -> 적어도 이만큼
+    no_events: tuple[str, ...] = ("DEADLOCK_SEEN",)
+    quiet_until_s: float | None = None  # no_events와 후진을 이 시각까지만 센다. None이면 끝까지
+    rough: Rough = field(default_factory=Rough)  # none, mixed의 기준
+    at_least_s: float = 0.0  # 주문이 끝나도 이 시각까지는 돌린다(막힘 표시가 풀리는 것을 본다)
+
+    def for_mode(self, mode: str) -> Situation:
+        """그 회피 모드에서 볼 기대. perfect는 그대로, 나머지는 rough."""
+        if mode == PERFECT:
+            return self
+        return replace(self, finish_all=self.rough.finish_all, allowed=self.rough.allowed,
+                       max_retreats=None, need_events={}, no_events=())
+
+
+def _hall_mid(site):
+    # 넓은 곳(가운데 통로) 양 끝의 가운데. v7은 가운데 통로 끝 지점이 없어 칸 입구 E-3과 줄 입구 Q2의 가운데
+    west, east = ("N_W", "N_E") if "N_W" in site.nodes else ("E-3", "Q2")
+    (ax, ay), (bx, by) = site.node_pose(west), site.node_pose(east)
+    return ((ax + bx) / 2, (ay + by) / 2)
+
+
+def _lane_mid(site):
+    lane = next(z for z in site.zones.values() if z.kind == LANE)
+    x0, y0, x1, y1 = lane.rects[0]
+    return ((x0 + x1) / 2, (y0 + y1) / 2)
+
+
+def _near_work(layout):
+    if layout == "c":
+        return {"pode1": "N_W", "pode2": "S_W", "pode3": "P-2"}
+    if layout == "v7":  # 줄 입구, 줄 앞자리, 칸
+        return {"pode1": "Q2", "pode2": "Q1", "pode3": "P-2"}
+    return {"pode1": "N_W", "pode2": "W_Q", "pode3": "P-2"}
+
+
+def build(name: str, layout: str = "d2") -> Situation:
+    site = load_fleet_map(layout)
+    hall, lane = _hall_mid(site), _lane_mid(site)
+    if name == "express_both_ends":
+        return Situation(name, "급행 양 끝에서 동시에",
+                         robots={"pode1": "W", "pode2": "O", "pode3": "P-2"})
+    if name == "express_obstacle":
+        return Situation(name, "급행 안 장애물(오래)",
+                         injections=[Obstacle(*lane, 0.04, 20.0, 140.0)])
+    if name == "hall_obstacle":
+        return Situation(name, "마당 장애물", injections=[Obstacle(*hall, 0.05, 10.0, 130.0)])
+    if name == "person_passing":
+        # 우회는 사람 때문의 것만 막는다. 사람이 떠나고 30 s 뒤의 우회는 로봇끼리 막은 것이다
+        return Situation(name, "사람이 잠깐 지나감", injections=[Obstacle(*hall, 0.05, 15.0, 23.0)],
+                         max_retreats=0, no_events=("DEADLOCK_SEEN", "REROUTE"),
+                         quiet_until_s=23.0 + QUIET_AFTER_S)
+    if name == "outbound_slow":
+        return Situation(name, "출고 도크 오래 씀", injections=[SlowStation("OUTBOUND", 6.0)],
+                         timeout_s=1500.0)
+    if name == "front_robot_stuck":
+        # 멈춘 로봇은 서 있지 않은 구역을 돌려주고(ZONES_RETURNED) 그 주문은 다른 로봇에 간다.
+        # c는 작업 도크로 가는 갈림목이 하나라 거기서 멈추면 아무것도 못 끝낸다.
+        return Situation(name, "앞 로봇 고장", injections=[Stuck("pode1", 20.0)],
+                         finish_all=layout != "c", need_events={"ROBOT_ISOLATED": 1},
+                         rough=Rough(finish_all=layout != "c"))
+    if name == "order_burst":
+        return Situation(name, "주문 몰림", orders=six_orders(gap_s=2.0, count=10),
+                         timeout_s=1500.0)
+    if name == "comm_loss_reinstate":
+        return Situation(name, "통신 끊김, 재투입",
+                         injections=[CommLoss("pode2", 30.0, 60.0), Removal("pode2", 70.0),
+                                     Reinstate("pode2", 90.0, site.parking[1])],
+                         need_events={"COMM_LOST": 1, "ROBOT_REINSTATED": 1})
+    if name == "three_at_junction":
+        return Situation(name, "세 대가 갈림목에 동시에", robots=_near_work(layout),
+                         orders=six_orders(count=3))
+    if name == "pose_jumps":
+        # 20초 동안 보고가 0.30 m 옆으로 밀린다. OUTSIDE_ZONE은 보고가 쥔 구역들 밖으로 outside_zone_samples번
+        # 이어져야 나오므로 세기만 한다. 재시도 끝에 격리되면 남은 주문은 못 끝날 수 있다(c)
+        return Situation(name, "위치가 크게 튐",
+                         injections=[NoisyPose("pode1", 20.0, 40.0, sigma_m=0.03, jump_m=0.30)],
+                         finish_all=layout != "c", allowed=("I5_STANDING",),
+                         rough=Rough(finish_all=layout != "c", allowed=("I5_STANDING",)))
+    if name in STORE_NAMES:
+        return build_store(name, layout, site, lane, Situation)
+    raise KeyError(f"no situation {name!r}")
+
+
+NAMES = ("express_both_ends", "express_obstacle", "hall_obstacle", "person_passing",
+         "outbound_slow", "front_robot_stuck", "order_burst", "comm_loss_reinstate",
+         "three_at_junction", "pose_jumps")

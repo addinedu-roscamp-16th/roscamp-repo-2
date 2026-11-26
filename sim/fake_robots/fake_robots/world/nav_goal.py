@@ -16,7 +16,7 @@ from .runs import LOOK_M, Run, Turning, blocked_ahead, end_offset, jittered, mov
 REPLAN_S = 1.0  # 막혔을 때 다시 계획하는 주기(NavigateToPose 기본 BT 1 Hz)
 PLAN_GAP_M = 0.03  # 계획할 때 다른 로봇과 물체를 이만큼 더 키운다(격자 반 칸 + 충돌 검사 틈)
 PROGRESS_M = 0.02  # 이만큼 움직이면 나아간 것으로 본다
-# 이만큼 못 나아가면 BLOCKED. Pode의 blocked_after_s와 같아야 한다
+# 이만큼 못 나아가면 BLOCKED. Pode의 blocked_after_s와 같아야 한다(test_timing_agreement.py가 본다)
 BLOCKED_AFTER_S = 10.0
 # BLOCKED를 켠 자리에서 이만큼 벗어나야 보고를 끈다. Pode의 unblock_m과 같아야 한다
 UNBLOCK_M = 0.15

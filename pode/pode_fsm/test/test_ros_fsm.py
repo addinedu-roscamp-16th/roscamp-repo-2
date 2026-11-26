@@ -12,10 +12,8 @@ from conftest import CONTRACT, wait_until  # noqa: E402
 from fake_nav import FakeNav  # noqa: E402
 from fleet_interfaces.action import Dock, MoveTo  # noqa: E402
 from fleet_interfaces.msg import RobotState  # noqa: E402
-from pode_fsm.contract import load_contract  # noqa: E402
 from probe import WAYPOINTS, Probe, lane_goal  # noqa: E402
-
-CONTRACT_NAMES = load_contract(CONTRACT)
+from pode_fsm.contract import load_contract
 
 
 def start(harness, heartbeat_timeout_s=0.0, nav=True, beat_hz=0.0, **fsm_params):
@@ -41,12 +39,12 @@ def test_reports_localizing_without_a_pose(harness):
     assert s.state == RobotState.STATE_LOCALIZING and s.robot_id == "pode1"
 
 
-def test_state_is_published_at_ten_hertz_with_the_map_pose(harness):
+def test_state_is_published_at_five_hertz_with_the_map_pose(harness):
     _, probe = start(harness)
     t0 = time.monotonic()
     time.sleep(2.0)
     n = len([1 for t, _ in probe.states if t >= t0])
-    assert 17 <= n <= 23
+    assert 9 <= n <= 11
     s = probe.last_state()
     assert (s.pose.x, s.pose.y) == (pytest.approx(0.35, abs=1e-3), pytest.approx(1.55, abs=1e-3))
     assert s.current_goal == ""
@@ -60,26 +58,128 @@ def test_a_fresh_node_reports_locked_unknown_mode_and_a_boot_id(harness):
     assert len(last.boot_id) == 36 and first.boot_id == last.boot_id
 
 
-def test_set_mode_answers_with_the_request_id_and_the_state_shows_the_mode(harness):
+def test_the_admin_services_answer_with_the_request_id_and_the_state_shows_them(harness):
     import rclpy.node
-    from fleet_interfaces.srv import SetMode
-    _, probe = start(harness, nav=False)
-    caller = harness.add(rclpy.node.Node("mode_caller"))
-    client = caller.create_client(SetMode, CONTRACT_NAMES.name("robot_set_mode", robot="pode1"))
-    assert client.wait_for_service(timeout_sec=5.0)
+    from fleet_interfaces.srv import RobotCommand, SetLock, SetMode
+    _, probe = start(harness)
+    caller = harness.add(rclpy.node.Node("admin_caller"))
 
-    def call(request_id, mode):
-        future = client.call_async(SetMode.Request(request_id=request_id, mode=mode))
-        assert wait_until(future.done, 5.0)
+    def call(srv, name, request):
+        client = caller.create_client(srv, name)
+        assert client.wait_for_service(timeout_sec=5.0), name
+        future = client.call_async(request)
+        assert wait_until(future.done, 5.0), name
         return future.result()
 
-    ok = call("m-1", "TEST")
-    assert (ok.accepted, ok.reason, ok.request_id) == (True, "", "m-1")
-    bad = call("m-2", "UNKNOWN")
-    assert (bad.accepted, bad.reason, bad.request_id) == (False, "MODE_MISMATCH", "m-2")
+    mode = call(SetMode, "/pode1/set_mode", SetMode.Request(request_id="m-1", mode="TEST"))
+    assert (mode.accepted, mode.request_id) == (True, "m-1")
+    unlock = call(SetLock, "/pode1/set_lock",
+                  SetLock.Request(request_id="l-1", robot_id="pode1", locked=False))
+    assert (unlock.accepted, unlock.reason, unlock.request_id) == (True, "", "l-1")
+    charge = call(RobotCommand, "/pode1/charge_end",
+                  RobotCommand.Request(request_id="c-1", robot_id="pode1"))
+    assert (charge.accepted, charge.reason) == (False, "BATTERY_LOW"), "battery unknown"
     assert wait_until(lambda: (s := probe.last_state()) is not None
-                      and s.last_request_id == "m-1", 3.0)
-    assert probe.last_state().mode == "TEST"
+                      and s.last_request_id == "l-1", 3.0)
+    s = probe.last_state()
+    assert (s.lock, s.mode) == (False, "TEST")
+
+
+def _caller(harness):
+    import rclpy.node
+    caller = harness.add(rclpy.node.Node("admin_caller"))
+
+    def call(srv, name, request):
+        client = caller.create_client(srv, name)
+        assert client.wait_for_service(timeout_sec=5.0), name
+        future = client.call_async(request)
+        assert wait_until(future.done, 5.0), name
+        return future.result()
+    return call
+
+
+def test_an_unlocked_pode_refuses_new_motion_goals(harness):
+    from fleet_interfaces.srv import SetLock
+    _, probe = start(harness)
+    call = _caller(harness)
+    unlock = call(SetLock, "/pode1/set_lock",
+                  SetLock.Request(request_id="l-1", robot_id="pode1", locked=False))
+    assert unlock.accepted
+    for client, goal in ((probe.move, lane_goal(["P-3", "P-4"])),
+                         (probe.dock, Dock.Goal(dock_id="D-1"))):
+        fut = client.send_goal_async(goal)
+        assert wait_until(fut.done, 5.0)
+        assert not fut.result().accepted
+    assert probe.last_state().state == RobotState.STATE_IDLE
+    # 다시 잠그면 받는다
+    lock = call(SetLock, "/pode1/set_lock",
+                SetLock.Request(request_id="l-2", robot_id="pode1", locked=True))
+    assert lock.accepted
+    assert probe.send(lane_goal(["P-3", "P-4"])).accepted
+
+
+def test_the_force_service_needs_test_mode_and_the_state_lists_the_keys(harness):
+    from fleet_interfaces.srv import ForceInput, SetMode
+    _, probe = start(harness, nav=False)
+    call = _caller(harness)
+    req = ForceInput.Request(request_id="f-1", robot_id="pode1", kind="CONDITION",
+                             key="battery", value="20")
+    refused = call(ForceInput, "/pode1/force", req)
+    assert (refused.accepted, refused.reason, refused.request_id) == (
+        False, "NOT_TEST_MODE", "f-1")
+    assert call(SetMode, "/pode1/set_mode",
+                SetMode.Request(request_id="m-1", mode="TEST")).accepted
+    req.request_id = "f-2"
+    ok = call(ForceInput, "/pode1/force", req)
+    assert (ok.accepted, ok.reason, ok.request_id) == (True, "", "f-2")
+    assert wait_until(lambda: (s := probe.last_state()) is not None
+                      and list(s.forced) == ["battery"], 3.0)
+
+
+def test_tf_and_odom_are_taken_by_the_input_node_not_the_main_node(harness):
+    # 자주 오는 TF·odom이 주 실행기를 깨우지 않게 입력 노드가 받는다
+    fake, probe = start(harness)
+    fsm = harness.nodes[1]
+    frequent = {"/tf", "/tf_static", "/odom"}
+    assert not {s.topic_name for s in fsm.subscriptions} & frequent
+    assert {s.topic_name for s in fsm._inputs.node.subscriptions} >= frequent
+    # 그래도 자세(TF)와 속도(odom)는 그대로 들어온다
+    s = probe.last_state()
+    assert (s.pose.x, s.pose.y) == (pytest.approx(0.35, abs=1e-3), pytest.approx(1.55, abs=1e-3))
+    probe.send(lane_goal(["P-3", "P-4"]))
+    assert wait_until(lambda: fsm._speed[0] > 0.05, 3.0)
+
+
+def test_the_input_node_follows_the_namespace_and_tf_remaps_like_the_real_launch(rclpy_session):
+    # 실물 launch처럼 이름공간과 /tf:=tf를 주면 입력 노드도 /<ns>/tf를 받는다
+    from pode_fsm.node import PodeFsmNode
+    from rclpy.parameter import Parameter
+    node = PodeFsmNode(namespace="pode9", cli_args=[
+        "--ros-args", "-r", "/tf:=tf", "-r", "/tf_static:=tf_static"],
+        parameter_overrides=[Parameter("contract_file", value=str(CONTRACT))])
+    try:
+        assert node._inputs.node.get_namespace() == "/pode9"
+        assert {s.topic_name for s in node._inputs.node.subscriptions} == {
+            "/pode9/tf", "/pode9/tf_static", "/pode9/odom"}
+    finally:
+        node.stop()
+        node.destroy_node()
+
+
+def test_a_failed_start_leaves_no_input_thread_running(rclpy_session):
+    # 초기화가 실패하면 입력 노드 스레드도 남지 않는다
+    import threading
+
+    from pode_fsm.node import PodeFsmNode
+    from rclpy.parameter import Parameter
+
+    def spinning():
+        return [t for t in threading.enumerate() if "(_spin)" in t.name]
+    before = len(spinning())
+    with pytest.raises(ZeroDivisionError):
+        PodeFsmNode(parameter_overrides=[Parameter("contract_file", value=str(CONTRACT)),
+                                         Parameter("control_rate_hz", value=0.0)])
+    assert len(spinning()) == before
 
 
 def test_path_goal_arrives_within_the_tolerance(harness):
@@ -247,6 +347,24 @@ def test_something_behind_ends_a_retreat_with_obstacle_behind(harness):
     h = probe.send(Retreat.Goal(distance_m=0.1, speed_mps=0.1), client=_retreat_client(probe))
     res = probe.result(h, timeout=10.0).result
     assert (res.success, res.reason) == (False, Retreat.Result.REASON_OBSTACLE_BEHIND)
+
+
+def test_the_lock_does_not_change_while_a_retreat_runs(harness):
+    """W-34: 락은 멈춘 로봇에서만 바뀐다. Retreat도 진행 중인 목표다."""
+    import rclpy.node
+    from fleet_interfaces.action import Retreat
+    from fleet_interfaces.srv import SetLock
+    fake, probe = start(harness)
+    caller = harness.add(rclpy.node.Node("lock_caller"))
+    client = caller.create_client(SetLock, "/pode1/set_lock")
+    assert client.wait_for_service(timeout_sec=5.0)
+    h = probe.send(Retreat.Goal(distance_m=0.2, speed_mps=0.05), client=_retreat_client(probe))
+    assert wait_until(lambda: len(fake.backups) >= 1, 5.0)
+    future = client.call_async(SetLock.Request(request_id="l-1", robot_id="pode1", locked=False))
+    assert wait_until(future.done, 5.0)
+    assert (future.result().accepted, future.result().reason) == (False, "NOT_STOPPED")
+    assert not h.get_result_async().done()
+    assert probe.last_state().lock is True
 
 
 def _back_path(*ids):
@@ -463,3 +581,28 @@ def test_a_final_goal_replacing_a_partial_one_switches_back_to_the_normal_contro
     assert fake.controller_ids[0] == "FollowPathThrough"
     assert fake.controller_ids[-1] == "FollowPath"
     assert not fake.cancels, "the switch replaces the goal without stopping (guide 2.1)"
+
+
+CONTRACT_NAMES = load_contract(CONTRACT)
+
+
+def test_set_mode_answers_with_the_request_id_and_the_state_shows_the_mode(harness):
+    import rclpy.node
+    from fleet_interfaces.srv import SetMode
+    _, probe = start(harness, nav=False)
+    caller = harness.add(rclpy.node.Node("mode_caller"))
+    client = caller.create_client(SetMode, CONTRACT_NAMES.name("robot_set_mode", robot="pode1"))
+    assert client.wait_for_service(timeout_sec=5.0)
+
+    def call(request_id, mode):
+        future = client.call_async(SetMode.Request(request_id=request_id, mode=mode))
+        assert wait_until(future.done, 5.0)
+        return future.result()
+
+    ok = call("m-1", "TEST")
+    assert (ok.accepted, ok.reason, ok.request_id) == (True, "", "m-1")
+    bad = call("m-2", "UNKNOWN")
+    assert (bad.accepted, bad.reason, bad.request_id) == (False, "MODE_MISMATCH", "m-2")
+    assert wait_until(lambda: (s := probe.last_state()) is not None
+                      and s.last_request_id == "m-1", 3.0)
+    assert probe.last_state().mode == "TEST"

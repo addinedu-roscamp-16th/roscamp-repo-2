@@ -1,0 +1,496 @@
+"""fleet_core 레코드와 ROS 메시지 사이의 변환 시험."""
+import math
+from dataclasses import replace
+
+import pytest
+
+pytest.importorskip("rclpy")
+pytest.importorskip("fleet_interfaces")
+
+from action_msgs.msg import GoalStatus  # noqa: E402
+from fleet_core.arm.jobs import CANCELED  # noqa: E402
+from fleet_core.common.commands import (  # noqa: E402
+    AssignmentView,
+    DockCmd,
+    EventOut,
+    FillCmd,
+    MoveCmd,
+    MoveOrderCmd,
+    OrderRecord,
+    ReportOrderCmd,
+    RetreatCmd,
+    RobotStatusView,
+    SegmentOut,
+    SwapCmd,
+    ZoneView,
+)
+from fleet_core.traffic.mission import (  # noqa: E402
+    BLOCKED,
+    HEARTBEAT_LOST,
+    LOCALIZING,
+    SELF_RECOVERING,
+)
+from fleet_interfaces.action import Dock, FillBasket, MoveTo, Retreat, SwapBasket  # noqa: E402
+from fleet_interfaces.msg import (  # noqa: E402
+    ArmState,
+    Assignment,
+    FleetEvent,
+    Order,
+    OrderBoard,
+    OrderItem,
+    RobotState,
+    RobotStatus,
+)
+from fleet_interfaces.srv import (
+    ConfirmClear,  # noqa: E402
+    Reinstate,  # noqa: E402
+    ReportOrder,  # noqa: E402
+    TripCommand,  # noqa: E402
+)
+from fleet_manager import adapters  # noqa: E402
+
+
+def test_time_splits_seconds_and_nanoseconds():
+    stamp = adapters.to_time(12.25)
+    assert (stamp.sec, stamp.nanosec) == (12, 250_000_000)
+
+
+def test_time_rounding_up_carries_into_the_seconds():
+    stamp = adapters.to_time(1.9999999999)
+    assert (stamp.sec, stamp.nanosec) == (2, 0)
+
+
+def test_zone_view_without_holder_becomes_empty_strings():
+    msg = adapters.zones_to_msg([ZoneView("Z-OUT", "", (), None)], 3.0)
+    assert msg.zones[0].zone_id == "Z-OUT"
+    assert msg.zones[0].holder == ""
+    assert list(msg.zones[0].queue) == []
+    assert msg.stamp.sec == 3
+
+
+def test_zone_view_with_queue_is_kept_in_order():
+    msg = adapters.zones_to_msg([ZoneView("Z-OUT", "pode1", ("pode3", "pode2"), 5.5)], 6.0)
+    assert list(msg.zones[0].queue) == ["pode3", "pode2"]
+    assert msg.zones[0].acquired_at.sec == 5
+
+
+def test_assignment_uses_the_message_constants():
+    msg = adapters.assignments_to_msg(
+        [AssignmentView("pode1", "O-001", "WORK", Assignment.TYPE_FILL),
+         AssignmentView("pode2", "", "", Assignment.TYPE_WAIT)], 1.0)
+    first, second = msg.assignments
+    assert (first.robot_id, first.order_id, first.station_id, first.task_type) == (
+        "pode1", "O-001", "WORK", "FILL")
+    assert (second.order_id, second.station_id, second.task_type) == ("", "", "WAIT")
+
+
+def test_event_keeps_level_code_and_names_the_robot():
+    msg = adapters.event_to_msg(EventOut(FleetEvent.LEVEL_WARN, "COMM_LOST", "gone", "pode2"), 2.0)
+    assert (msg.level, msg.code, msg.source) == ("WARN", "COMM_LOST", "pode2")
+
+
+def test_event_without_robot_uses_the_manager_as_source():
+    msg = adapters.event_to_msg(EventOut("INFO", "RUN", "started"), 2.0)
+    assert msg.source == "fleet_manager"
+
+
+def test_order_board_becomes_plain_records_in_board_order():
+    board = OrderBoard(run_mode=OrderBoard.MODE_RUN, orders=[
+        Order(order_id="O-002", items=[OrderItem(kind="A", count=1), OrderItem(kind="C", count=2)]),
+        Order(order_id="O-003", items=[OrderItem(kind="B", count=1)]),
+    ])
+    assert adapters.order_board_orders(board) == [
+        OrderRecord("O-002", {"A": 1, "C": 2}), OrderRecord("O-003", {"B": 1})]
+
+
+def test_goals_copy_every_field():
+    move = adapters.move_goal(MoveCmd("pode1", 7, "c9_2", 1.0, 2.0, 0.5))
+    assert (move.target_id, move.target_pose.x, move.target_pose.y, move.target_pose.theta) == (
+        "c9_2", 1.0, 2.0, 0.5)
+    assert adapters.dock_goal(DockCmd("pode1", 8, "WORK")).dock_id == "WORK"
+    assert list(move.path) == [], "point mode sends no path"
+
+
+def test_a_move_goal_says_how_to_drive():
+    plain = adapters.move_goal(MoveCmd("pode1", 7, "N_W", 0.4, 0.65, 0.0))
+    assert plain.mode == MoveTo.Goal.MODE_FOLLOW_PATH
+    nav = adapters.move_goal(MoveCmd("pode1", 8, "N_E", 1.58, 0.65, 0.0, mode="nav_goal"))
+    assert nav.mode == MoveTo.Goal.MODE_NAV_GOAL and list(nav.path) == []
+
+
+def test_a_move_goal_carries_the_lane_path_as_poses():
+    path = ((0.5, 1.0, 0.0), (1.0, 1.0, math.pi / 2), (1.0, 2.0, math.pi / 2))
+    move = adapters.move_goal(MoveCmd("pode1", 7, "N", 1.0, 2.0, math.pi / 2, path))
+    assert [(p.position.x, p.position.y) for p in move.path] == [(0.5, 1.0), (1.0, 1.0),
+                                                                    (1.0, 2.0)]
+    q = move.path[1].orientation
+    assert (q.z, q.w) == pytest.approx((math.sin(math.pi / 4), math.cos(math.pi / 4)))
+    assert move.path[0].orientation.w == pytest.approx(1.0)
+
+
+def test_a_move_goal_says_whether_its_end_is_the_last_point():
+    """버전 2 horizon 최소판."""
+    assert adapters.move_goal(MoveCmd("pode1", 7, "N", 1.0, 2.0, 0.0)).final_goal is True
+    move = adapters.move_goal(MoveCmd("pode1", 7, "N", 1.0, 2.0, 0.0, (), False))
+    assert move.final_goal is False
+
+
+def test_move_goals_carry_the_yield_priority_and_an_empty_one_is_minus_one():
+    """로봇단 교착 처리."""
+    assert adapters.move_goal(MoveCmd("pode1", 7, "N", 1.0, 2.0, 0.0, priority=3)).priority == 3
+    assert adapters.move_goal(MoveCmd("pode1", 7, "N", 1.0, 2.0, 0.0)).priority == -1
+    assert MoveTo.Goal().priority == -1
+    assert adapters.move_order_goal(replace(_order_cmd(), priority=2)).priority == 2
+
+
+def test_the_robot_state_step_is_read_and_the_status_shows_the_priority():
+    msg = RobotState(state="RECOVERING", local_yield=RobotState.LOCAL_YIELD_BACKUP)
+    assert adapters.robot_local_yield(msg) == "backup"
+    assert adapters.robot_local_yield(RobotState()) == ""
+    view = RobotStatusView("pode1", "MOVING", "", "", "NONE", "", "", (), 90.0, 0.0, 0.0, 0.0,
+                           priority=4)
+    assert adapters.robots_to_msg([view], 0.0).robots[0].priority == 4
+
+
+def test_a_straight_retreat_goal_copies_distance_and_speed_and_sends_no_path():
+    """관제가 시키는 물러나기."""
+    goal = adapters.retreat_goal(RetreatCmd("pode1", 7, 0.15, 0.08))
+    assert isinstance(goal, Retreat.Goal)
+    assert (goal.distance_m, goal.speed_mps) == (pytest.approx(0.15), pytest.approx(0.08))
+    assert list(goal.path) == []
+
+
+def test_a_retreat_goal_carries_its_path_as_poses_like_a_move_goal():
+    path = ((1.0, 2.0, -math.pi / 2), (1.0, 1.6, -math.pi / 2), (0.6, 1.6, math.pi))
+    goal = adapters.retreat_goal(RetreatCmd("pode1", 7, 0.8, 0.05, path))
+    move = adapters.move_goal(MoveCmd("pode1", 7, "N", 0.6, 1.6, math.pi, path))
+    assert list(goal.path) == list(move.path)
+    assert [(p.position.x, p.position.y) for p in goal.path] == [(1.0, 2.0), (1.0, 1.6),
+                                                                    (0.6, 1.6)]
+
+
+def test_fill_goal_copies_every_field():
+    goal = adapters.fill_goal(FillCmd(9, "pode1", "WORK", "O-001", {"A": 2, "C": 1}))
+    assert (goal.order_id, goal.robot_id, goal.station_id) == ("O-001", "pode1", "WORK")
+    assert {i.kind: i.count for i in goal.items} == {"A": 2, "C": 1}
+
+
+@pytest.mark.parametrize("take_full", [True, False])
+def test_swap_goal_copies_every_field(take_full):
+    goal = adapters.swap_goal(SwapCmd("arm_ship", 9, "pode1", "OUTBOUND", "O-001", take_full, True))
+    assert (goal.order_id, goal.robot_id, goal.station_id) == ("O-001", "pode1", "OUTBOUND")
+    assert (goal.take_full, goal.put_empty) == (take_full, True)
+
+
+def test_report_request_copies_every_field():
+    request = adapters.report_request(ReportOrderCmd(
+        "O-001", "pode1", ReportOrder.Request.STATUS_PARTIAL, {"A": 1}, {"C": 1}, "short"))
+    assert (request.order_id, request.robot_id, request.status, request.detail) == (
+        "O-001", "pode1", "PARTIAL", "short")
+    assert {i.kind: i.count for i in request.placed} == {"A": 1}
+    assert {i.kind: i.count for i in request.missing} == {"C": 1}
+    assert request.hold_reason == ""
+
+
+@pytest.mark.parametrize("reason", [ReportOrder.Request.HOLD_ARM_FAULT,
+                                    ReportOrder.Request.HOLD_ROBOT_FAULT])
+def test_report_request_carries_the_hold_reason(reason):
+    request = adapters.report_request(ReportOrderCmd(
+        "O-002", "pode1", ReportOrder.Request.STATUS_HELD, {"A": 1}, {"B": 2}, "stuck",
+        hold_reason=reason))
+    assert (request.status, request.hold_reason) == ("HELD", reason)
+
+
+def test_order_status_and_hold_words_match_the_contract():
+    from fleet_core.common import commands
+    req = ReportOrder.Request
+    assert (commands.SHIPPED, commands.PARTIAL, commands.HELD, commands.CANCELED) == (
+        req.STATUS_SHIPPED, req.STATUS_PARTIAL, req.STATUS_HELD, req.STATUS_CANCELED)
+    assert (commands.HOLD_ROBOT_FAULT, commands.HOLD_ARM_FAULT) == (
+        req.HOLD_ROBOT_FAULT, req.HOLD_ARM_FAULT)
+
+
+def test_force_ship_request_and_response_are_handled_here():
+    request = TripCommand.Request(request_id="r-1", trip_id="O-003")
+    assert adapters.force_ship_args(request) == "O-003"
+    yes = adapters.force_ship_response(TripCommand.Response(), True, "ignored", "r-1")
+    assert (yes.accepted, yes.reason, yes.request_id) == (True, "", "r-1")
+    no = adapters.force_ship_response(TripCommand.Response(), False, "ORDER_STATE", "r-2")
+    assert (no.accepted, no.reason, no.request_id) == (False, "ORDER_STATE", "r-2")
+
+
+def test_operator_replies_carry_the_request_id_back():
+    clear = adapters.confirm_clear_response(ConfirmClear.Response(), ["Z"], "", "r-3")
+    back = adapters.reinstate_response(Reinstate.Response(), False, "basket", "r-4")
+    assert (clear.request_id, back.request_id) == ("r-3", "r-4")
+
+
+def test_item_lists_add_up_a_kind_named_twice():
+    items = [OrderItem(kind="A", count=1), OrderItem(kind="A", count=2)]
+    assert adapters.from_order_items(items) == {"A": 3}
+
+
+def test_robot_report_reads_every_field_the_core_needs():
+    msg = RobotState(state=RobotState.STATE_MOVING, battery=87.5)
+    msg.pose.x, msg.pose.y, msg.pose.theta = 1.0, 2.0, 0.5
+    assert adapters.robot_report(msg) == (1.0, 2.0, 0.5, RobotState.STATE_MOVING, 87.5)
+
+
+def test_a_self_recovering_robot_reaches_the_core_and_the_status_as_it_is():
+    """로봇 상태 RECOVERING은 그대로 지나가고 fault는 NONE이다."""
+    msg = RobotState(state=RobotState.STATE_RECOVERING)
+    assert adapters.robot_report(msg)[3] == SELF_RECOVERING
+    view = RobotStatusView("pode1", SELF_RECOVERING, "TO_WORK", "O-001", "NONE", "", "",
+                           (), 50.0, 0.0, 0.0, 0.0)
+    status = adapters.robots_to_msg([view], 0.0).robots[0]
+    assert (status.fsm_state, status.fault) == ("RECOVERING", "NONE")
+
+
+def test_a_pode_row_carries_kind_lock_mode_forced_and_boot_id_from_its_last_state():
+    view = RobotStatusView("pode1", "IDLE", "", "", "NONE", "", "", (), 50.0, 0.0, 0.0, 0.0)
+    state = RobotState(boot_id="b-1", lock=True, mode="UNKNOWN", forced=["battery"])
+    out = adapters.robots_to_msg([view], 0.0, {"pode1": state}).robots[0]
+    assert (out.kind, out.lock, out.mode, list(out.forced), out.boot_id) == (
+        RobotStatus.KIND_POD, True, "UNKNOWN", ["battery"], "b-1")
+    unseen = adapters.robots_to_msg([view], 0.0).robots[0]
+    assert (unseen.kind, unseen.lock, unseen.mode, unseen.boot_id) == ("POD", True, "", "")
+
+
+def test_a_robot_not_heard_from_yet_is_reported_locked():
+    view = RobotStatusView("pode1", "IDLE", "", "", "NONE", "", "", (), 50.0, 0.0, 0.0, 0.0)
+    rows = adapters.robots_to_msg([view], 0.0, {}, [("arm_ship", None, False)]).robots
+    assert [(r.robot_id, r.lock) for r in rows] == [("pode1", True), ("arm_ship", True)]
+
+
+def test_the_three_arms_follow_the_podes_with_their_own_state():
+    view = RobotStatusView("pode1", "IDLE", "", "", "NONE", "", "", (), 50.0, 1.0, 1.0, 0.0)
+    left = ArmState(arm_id="arm_left", boot_id="a-1", state=ArmState.STATE_PLACING,
+                    lock=True, mode="NORMAL", order_id="O-1")
+    right = ArmState(arm_id="arm_right", state=ArmState.STATE_ERROR, detail="PICK_FAILED")
+    arms = [("arm_left", left, True), ("arm_right", right, True), ("arm_ship", None, False)]
+    rows = adapters.robots_to_msg([view], 0.0, {}, arms).robots
+    assert [(r.robot_id, r.kind) for r in rows] == [
+        ("pode1", "POD"), ("arm_left", "ARM"), ("arm_right", "ARM"), ("arm_ship", "ARM")]
+    _, left_row, right_row, ship_row = rows
+    assert (left_row.fsm_state, left_row.order_id, left_row.fault, left_row.lock,
+            left_row.mode, left_row.boot_id) == ("PLACING", "O-1", "NONE", True, "NORMAL", "a-1")
+    assert (right_row.fault, right_row.fault_reason) == ("ERROR", "PICK_FAILED")
+    assert (ship_row.fault, ship_row.fsm_state, ship_row.battery) == ("COMM_LOST", "", -1.0)
+
+
+def test_an_arm_that_went_quiet_is_comm_lost_with_its_last_state():
+    state = ArmState(arm_id="arm_ship", state=ArmState.STATE_SWAPPING, lock=True)
+    row = adapters.arm_status("arm_ship", state, fresh=False)
+    assert (row.fault, row.fsm_state, row.lock) == ("COMM_LOST", "SWAPPING", True)
+
+
+def test_every_field_of_the_robot_status_reaches_the_message():
+    view = RobotStatusView("pode2", "MOVING", "TO_OUTBOUND", "O-003", "ERROR", "DOCK_FAILED",
+                           "AVENUE", ("pode1", "pode3"), 87.5, 1.5, 2.5, 0.25)
+    msg = adapters.robots_to_msg([view], 12.5)
+    assert msg.stamp.sec == 12 and msg.stamp.nanosec == 500_000_000
+    out = msg.robots[0]
+    assert (out.robot_id, out.fsm_state, out.task_type, out.order_id) == (
+        "pode2", "MOVING", "TO_OUTBOUND", "O-003")
+    assert (out.fault, out.fault_reason) == (RobotStatus.FAULT_ERROR, "DOCK_FAILED")
+    assert (out.wait_zone, list(out.wait_robots)) == ("AVENUE", ["pode1", "pode3"])
+    assert (out.battery, out.x, out.y, out.yaw) == (87.5, 1.5, 2.5, 0.25)
+    assert (list(out.base), list(out.horizon)) == ([], []), "no way ahead unless the view has one"
+
+
+def test_the_granted_and_the_ungranted_way_ahead_reach_the_message():
+    view = RobotStatusView("pode2", "MOVING", "TO_OUTBOUND", "O-003", "NONE", "", "", (),
+                           87.5, 1.5, 2.5, 0.25, base=("X_W", "N_W", "O_Q"), horizon=("N_E", "O"))
+    out = adapters.robots_to_msg([view], 0.0).robots[0]
+    assert (list(out.base), list(out.horizon)) == (["X_W", "N_W", "O_Q"], ["N_E", "O"])
+
+
+
+def test_action_results_are_read_here_and_not_in_the_node():
+    move = MoveTo.Result(success=False, reason=MoveTo.Result.REASON_TIMEOUT)
+    assert adapters.move_result(move) == (False, MoveTo.Result.REASON_TIMEOUT, 0)
+    retreat = Retreat.Result(success=False, reason=Retreat.Result.REASON_OBSTACLE_BEHIND)
+    assert adapters.retreat_result(retreat) == (False, Retreat.Result.REASON_OBSTACLE_BEHIND)
+    dock = Dock.Result(success=True, error_x_cm=1.0, error_y_cm=2.0, error_yaw_deg=3.0)
+    assert adapters.dock_result(dock) == (True, 1.0, 2.0, 3.0)
+    fill = FillBasket.Result(success=False, placed=[OrderItem(kind="A", count=1)],
+                             missing=[OrderItem(kind="C", count=2)], reason="GRIPPER")
+    assert adapters.fill_result(fill) == (False, {"A": 1}, {"C": 2}, "GRIPPER", {}, {})
+    fill.placed_confirmed = [OrderItem(kind="A", count=1)]
+    fill.uncertain = [OrderItem(kind="B", count=1)]
+    assert adapters.fill_result(fill)[4:] == ({"A": 1}, {"B": 1})
+    swap = SwapBasket.Result(success=False, took_full=True, put_empty_done=False, reason="x")
+    assert adapters.swap_result(swap) == (False, True, False, "x")
+
+
+def test_order_board_mode_is_read_here_too():
+    msg = OrderBoard(run_mode=OrderBoard.MODE_PAUSE)
+    assert adapters.order_board_mode(msg) == OrderBoard.MODE_PAUSE
+
+
+def test_confirm_clear_request_and_response_are_handled_here():
+    request = ConfirmClear.Request(robot_id="pode1", zone_ids=["Z-OUT"], note="moved by hand")
+    assert adapters.confirm_clear_args(request) == ("pode1", ["Z-OUT"], "moved by hand")
+    response = adapters.confirm_clear_response(ConfirmClear.Response(), ["Z-OUT"])
+    assert response.accepted is True and list(response.released_zones) == ["Z-OUT"]
+
+
+def test_confirm_clear_with_no_zones_is_still_accepted():
+    """한 번도 보고하지 않은 로봇을 운행 제외해도 정상이다."""
+    assert adapters.confirm_clear_response(ConfirmClear.Response(), []).accepted is True
+
+
+def test_confirm_clear_for_an_unknown_robot_is_refused():
+    response = adapters.confirm_clear_response(ConfirmClear.Response(), None)
+    assert response.accepted is False and list(response.released_zones) == []
+
+
+@pytest.mark.parametrize("accepted", [True, False])
+def test_the_reply_to_a_report_is_read_here_too(accepted):
+    assert adapters.report_accepted(ReportOrder.Response(accepted=accepted)) is accepted
+
+
+def _finished(action, status, **fields):
+    return action.Impl.GetResultService.Response(status=status, result=action.Result(**fields))
+
+
+@pytest.mark.parametrize("action", [MoveTo, FillBasket, SwapBasket])
+def test_a_canceled_goal_with_no_reason_reads_as_canceled(action):
+    result = adapters.goal_result(_finished(action, GoalStatus.STATUS_CANCELED, success=False))
+    assert result.reason == "CANCELED"
+
+
+def test_an_aborted_goal_with_no_reason_reads_as_aborted():
+    result = adapters.goal_result(_finished(FillBasket, GoalStatus.STATUS_ABORTED))
+    assert result.reason == "ABORTED"
+
+
+@pytest.mark.parametrize("status", [GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED])
+def test_the_reason_of_the_server_stays(status):
+    result = adapters.goal_result(_finished(SwapBasket, status, reason="GRIPPER"))
+    assert result.reason == "GRIPPER"
+
+
+def test_a_succeeded_goal_gets_no_reason():
+    result = adapters.goal_result(_finished(MoveTo, GoalStatus.STATUS_SUCCEEDED, success=True))
+    assert result.reason == ""
+
+
+def test_the_rest_of_the_result_comes_through_with_the_status():
+    response = _finished(FillBasket, GoalStatus.STATUS_CANCELED,
+                         placed=adapters.to_order_items({"A": 1}))
+    assert adapters.fill_result(adapters.goal_result(response)) == (
+        False, {"A": 1}, {}, "CANCELED", {}, {})
+
+
+@pytest.mark.parametrize("status", [GoalStatus.STATUS_CANCELED, GoalStatus.STATUS_ABORTED,
+                                    GoalStatus.STATUS_SUCCEEDED])
+def test_a_result_with_no_reason_field_keeps_working(status):
+    result = adapters.goal_result(_finished(Dock, status, success=True, error_x_cm=1.5))
+    assert adapters.dock_result(result) == (True, 1.5, 0.0, 0.0)
+
+
+def test_the_arm_actions_name_the_same_cancel_reason_the_core_looks_for():
+    assert FillBasket.Result.REASON_CANCELED == CANCELED
+    assert SwapBasket.Result.REASON_CANCELED == CANCELED
+    assert MoveTo.Result.REASON_CANCELED == CANCELED
+
+
+def test_the_robot_values_the_core_reads_are_the_message_constants():
+    """이름이 어긋나면 관제가 BLOCKED, LOCALIZING, HEARTBEAT_LOST를 못 알아본다."""
+    assert RobotState.STATE_BLOCKED == BLOCKED
+    assert RobotState.STATE_LOCALIZING == LOCALIZING
+    assert RobotState.STATE_RECOVERING == SELF_RECOVERING
+    assert MoveTo.Result.REASON_HEARTBEAT_LOST == HEARTBEAT_LOST
+
+
+# ---- 잘못된 입력 ----
+
+
+def test_robot_report_id_is_read_separately():
+    assert adapters.robot_report_id(RobotState(robot_id="pode2")) == "pode2"
+
+
+def test_a_count_of_zero_or_less_is_not_hidden_by_adding_up():
+    """합산하면 A: 2와 A: -1이 1이 되어 검사를 빠져나간다."""
+    board = OrderBoard(run_mode=OrderBoard.MODE_RUN, orders=[
+        Order(order_id="O-1", items=[OrderItem(kind="A", count=2), OrderItem(kind="A", count=-1)]),
+        Order(order_id="O-2", items=[OrderItem(kind="B", count=0)]),
+    ])
+    assert adapters.order_board_orders(board) == [
+        OrderRecord("O-1", {"A": -1}), OrderRecord("O-2", {"B": 0})]
+
+
+def test_a_refused_clear_carries_its_reason():
+    response = adapters.confirm_clear_response(ConfirmClear.Response(), None, "no such zone")
+    assert response.accepted is False and response.reason == "no such zone"
+    accepted = adapters.confirm_clear_response(ConfirmClear.Response(), ["P-6"], "")
+    assert accepted.accepted is True and accepted.reason == ""
+
+
+def _order_cmd(update_id=0, base=None, horizon=()):
+    if base is None:
+        base = (
+            SegmentOut(1, "follow_path", "N_W", ("LANE",), ((0.1, 0.2, 0.0), (0.4, 0.2, 0.0)),
+                       controller_id="FollowPath"),
+            SegmentOut(2, "nav_goal", "C3", ("WIDE",), x=1.0, y=0.5, yaw=math.pi),
+        )
+    return MoveOrderCmd("pode1", 9, "M-1", update_id, "N_W" if update_id else "", base, horizon)
+
+
+def test_an_order_goal_carries_ids_base_and_horizon_as_segments():
+    horizon = (SegmentOut(3, "retreat", "H", (), ((1.0, 0.5, 0.0), (0.8, 0.5, 0.0)),
+                          controller_id="FollowPathReverse"),)
+    goal = adapters.move_order_goal(_order_cmd(2, horizon=horizon))
+    assert (goal.order_id, goal.order_update_id, goal.stitch_node_id) == ("M-1", 2, "N_W")
+    follow, nav = goal.base
+    assert (follow.seq_id, follow.mode, follow.controller_id) == (1, "follow_path", "FollowPath")
+    assert (follow.end_node_id, list(follow.zone_ids)) == ("N_W", ["LANE"])
+    assert follow.path.header.frame_id == "map"
+    assert [(p.pose.position.x, p.pose.position.y) for p in follow.path.poses] == [
+        (0.1, 0.2), (0.4, 0.2)]
+    assert follow.path.poses[0].header.frame_id == "map"
+    assert (nav.seq_id, nav.mode, nav.controller_id, nav.end_node_id) == (2, "nav_goal", "", "C3")
+    assert nav.target_pose.header.frame_id == "map"
+    assert (nav.target_pose.pose.position.x, nav.target_pose.pose.position.y) == (1.0, 0.5)
+    assert nav.target_pose.pose.orientation.z == pytest.approx(1.0)
+    (back,) = goal.horizon
+    assert (back.seq_id, back.mode, back.controller_id) == (3, "retreat", "FollowPathReverse")
+    assert len(back.path.poses) == 2
+
+
+def test_an_order_goal_fills_the_legacy_fields_from_the_last_base_segment():
+    goal = adapters.move_order_goal(_order_cmd())
+    assert goal.target_id == "C3"
+    assert (goal.target_pose.x, goal.target_pose.y) == (1.0, 0.5)
+    assert goal.target_pose.theta == pytest.approx(math.pi)
+    assert goal.mode == "" and goal.order_update_id == 0 and goal.stitch_node_id == ""
+
+
+def test_a_horizon_only_update_has_an_empty_base_and_target():
+    goal = adapters.move_order_goal(_order_cmd(1, base=(), horizon=(
+        SegmentOut(4, "nav_goal", "D", x=0.2, y=0.3),)))
+    assert len(goal.base) == 0 and len(goal.horizon) == 1
+    assert goal.target_id == ""
+
+
+def test_a_move_result_carries_the_last_done_segment():
+    result = MoveTo.Result(success=False, reason="SUPERSEDED", last_done_seq_id=4)
+    assert adapters.move_result(result) == (False, "SUPERSEDED", 4)
+
+
+def test_move_feedback_values_are_the_order_fields_and_the_distance_left():
+    feedback = MoveTo.Feedback(last_done_seq_id=3, waiting_at_base_end=True,
+                               horizon_warning="HORIZON_INVALID: x", distance_remaining=0.75)
+    assert adapters.move_feedback(feedback) == (3, True, "HORIZON_INVALID: x", 0.75)
+    assert isinstance(adapters.move_feedback(feedback)[3], float)
+
+
+@pytest.mark.parametrize("status, hold, out", [
+    ("CANCELED", "", ("CANCELLED", "NOTHING_TO_FILL")),
+    ("HELD", "ARM_FAULT", ("HELD", "ARM_FAULT")),
+    ("SHIPPED", "", ("SHIPPED", "")),
+    ("PARTIAL", "", ("PARTIAL", "")),
+])
+def test_a_trip_report_spells_cancelled_with_two_l_outside(status, hold, out):
+    assert adapters.trip_status(status, hold) == out

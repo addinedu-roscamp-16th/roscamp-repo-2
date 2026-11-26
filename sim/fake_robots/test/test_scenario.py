@@ -14,7 +14,10 @@ from fake_robots.scenario import (
 from fleet_core.fleet_map import load_fleet_map
 
 SCENARIOS = Path(__file__).parents[1] / "scenarios"
-SHIPPED = {"real_two_orders", "real_three_orders"}
+SIX = {"basic_orders", "order_burst", "shared_lane_failure", "stock_shortage", "stuck_robot",
+       "operator_recovery", "blocked_lane", "auto_isolation", "reinstate",
+       # real_*: 실물 두/세 대 시험, 가짜 로봇 없이
+       "real_two_orders", "real_three_orders", "arm_fault"}
 
 
 @pytest.fixture(scope="module")
@@ -217,6 +220,18 @@ def test_a_robot_removed_again_after_its_reinstate_is_gone(site):
     assert parse_scenario(data, site).gone_robots == {"pode1"}
 
 
+def test_the_reinstate_scenario_clears_puts_back_and_expects_work_from_the_robot(site):
+    sc = load_scenario(SCENARIOS / "reinstate.yaml", site)
+    remove = next(f for f in sc.faults if f.type == "operator_remove")
+    back = next(f for f in sc.faults if f.type == "operator_reinstate")
+    assert back.robot == remove.robot and back.at_s > remove.at_s
+    assert sc.expect.orders_shipped == len(sc.orders)
+    assert sc.expect.bound_after_reinstate_min >= 1
+    assert sc.expect.shipped_after_reinstate_min >= 1
+    assert sc.expect.event_counts.get("ROBOT_REINSTATED") == 1
+    assert sc.expect.event_counts.get("ROBOT_NOT_REPORTING") == 0
+
+
 def shipped():
     return {f.stem: f for f in sorted(SCENARIOS.glob("*.yaml"))}
 
@@ -227,8 +242,8 @@ def site_of(path, default):
     return load_fleet_map(chosen) if chosen else default
 
 
-def test_exactly_these_scenarios_are_shipped(site):
-    assert set(shipped()) == SHIPPED
+def test_exactly_the_six_scenarios_are_shipped(site):
+    assert set(shipped()) == SIX
     for f in shipped().values():
         load_scenario(f, site_of(f, site))
 
@@ -263,19 +278,36 @@ def test_an_unknown_map_name_is_refused(tmp_path):
         scenario_map_file(path)
 
 
-@pytest.mark.parametrize("name", sorted(SHIPPED))
+@pytest.mark.parametrize("name", sorted(SIX))
 def test_every_robot_starts_in_a_waiting_cell(site, name):
     chosen = site_of(SCENARIOS / f"{name}.yaml", site)
     sc = load_scenario(SCENARIOS / f"{name}.yaml", chosen)
     assert {r.start for r in sc.robots.values()} <= set(chosen.parking)
 
 
-@pytest.mark.parametrize("name", sorted(SHIPPED))
+@pytest.mark.parametrize("name", sorted(SIX))
 def test_every_scenario_checks_order_of_work(site, name):
     path = SCENARIOS / f"{name}.yaml"
     raw = load_scenario(path, site_of(path, site)).expect
     assert raw.fifo_violations == 0
     assert max(raw.orders_shipped or 0, raw.orders_shipped_min) >= 1
+
+
+def test_basic_orders_is_six_orders_without_faults(site):
+    sc = load_scenario(SCENARIOS / "basic_orders.yaml", site)
+    assert len(sc.orders) == 6 and not sc.faults and sc.expect.orders_shipped == 6
+
+
+def test_order_burst_is_eight_at_once_and_more_later(site):
+    sc = load_scenario(SCENARIOS / "order_burst.yaml", site)
+    at_start = [o for o in sc.orders if o.at_s == 0]
+    assert len(at_start) == 8 and len(sc.orders) > 8
+    assert sc.expect.direct_returns_min >= 1 and sc.expect.parked_while_backlog == 0
+
+
+def test_shared_lane_failure_has_both_faults(site):
+    sc = load_scenario(SCENARIOS / "shared_lane_failure.yaml", site)
+    assert {f.type for f in sc.faults} == {"comm_loss", "nav_abort"}
 
 
 def test_nav_abort_target_must_be_a_node_and_only_for_nav_abort(site):
@@ -293,12 +325,86 @@ def test_nav_abort_target_must_be_a_node_and_only_for_nav_abort(site):
                                    "target": "W"}), site)
 
 
+def fillable(sc, order):
+    """다른 주문은 무시하고 선반이 이 주문에 줄 수 있는 것."""
+    return {k: min(c, sum(s.get(k, 0) for s in sc.stock.values())) for k, c in order.items.items()}
+
+
+def test_stock_shortage_derivation_matches_the_expected_counts(site):
+    sc = load_scenario(SCENARIOS / "stock_shortage.yaml", site)
+    capacity = load_fleet_params()["basket_capacity"]
+    outcome = {"SHIPPED": 0, "PARTIAL": 0, "CANCELED": 0, "OVER_CAPACITY": 0}
+    for order in sc.orders:
+        got = fillable(sc, order)
+        if sum(order.items.values()) > capacity:
+            outcome["OVER_CAPACITY"] += 1  # 보고 없이 ORDER_OVER_CAPACITY
+        elif not any(got.values()):
+            outcome["CANCELED"] += 1
+        elif got == order.items:
+            outcome["SHIPPED"] += 1
+        else:
+            outcome["PARTIAL"] += 1
+    ex = sc.expect
+    assert outcome == {"SHIPPED": ex.orders_shipped, "PARTIAL": ex.orders_partial,
+                       "CANCELED": ex.orders_canceled,
+                       "OVER_CAPACITY": list(ex.order_results.values()).count("OVER_CAPACITY")}
+    assert ex.orders_held == 0
+    on_shelf = {k for s in sc.stock.values() for k in s}
+    wanted = {k for o in sc.orders for k in o.items}
+    gone = wanted - on_shelf
+    assert {k for k in gone if sc.inventory.get(k, 0) == 0}, "no OUT_OF_STOCK case"
+    assert {k for k in gone if sc.inventory.get(k, 0) > 0}, "no STOCK_MISMATCH case"
+    assert {"OUT_OF_STOCK", "STOCK_MISMATCH"} <= set(ex.events_include)
+    assert (ex.event_counts["OUT_OF_STOCK"], ex.event_counts["STOCK_MISMATCH"]) == (2, 2)
+
+
+def test_stuck_scenario_expects_warnings_and_unfinished_orders(site):
+    sc = load_scenario(SCENARIOS / "stuck_robot.yaml", site)
+    assert sc.expect.all_orders_finished is False and sc.expect.orders_shipped == 2
+    assert {"COMM_LOST", "DOCK_QUEUED"} <= set(sc.expect.events_include)  # D2: 출고 도크 앞 줄
+
+
+def test_operator_recovery_fails_three_times_then_clears(site):
+    sc = load_scenario(SCENARIOS / "operator_recovery.yaml", site)
+    fail = next(f for f in sc.faults if f.type == "arm_fail")
+    remove = next(f for f in sc.faults if f.type == "operator_remove")
+    assert fail.count == 3 and remove.at_s > fail.at_s
+    assert sc.expect.orders_shipped == len(sc.orders)
+    assert sc.expect.all_orders_finished is True
+    assert "ORDER_REQUEUED" in sc.expect.events_include
+    # 팔 고장은 격리하지 않고 HELD ARM_FAULT. 치울 때 빈 바구니라 되돌린다
+    counts = sc.expect.event_counts
+    assert (counts["ROBOT_ISOLATED"], counts["ORDER_HELD"], counts["ORDER_REQUEUED"]) == (0, 1, 2)
+    assert sc.force_ship_after_s is None
+    assert sc.expect.robots_isolated == 0 and sc.expect.hold_reasons == {"O-001": "ARM_FAULT"}
+
+
+def test_auto_isolation_ships_before_the_operator_and_requeues_once(site):
+    """팔 고장은 격리하지 않는다. O-002는 HELD ARM_FAULT로 묶였다가 운영자가 치울 때 한 번 되돌려져 출고된다."""
+    sc = load_scenario(SCENARIOS / "auto_isolation.yaml", site)
+    fail = next(f for f in sc.faults if f.type == "arm_fail")
+    remove = next(f for f in sc.faults if f.type == "operator_remove")
+    assert fail.count == 3 and remove.at_s > fail.at_s
+    assert sc.force_ship_after_s is None, "the operator clears it, nobody force-ships"
+    first = sc.orders[0]
+    assert all(sc.stock[fail.arm].get(kind, 0) == 0 for kind in first.items), \
+        "the first order needs no item of the failing arm"
+    counts = sc.expect.event_counts
+    assert (counts["ROBOT_ISOLATED"], counts["ORDER_HELD"]) == (0, 1)
+    assert sc.expect.robots_isolated == 0
+    assert sc.expect.hold_reasons == {"O-002": "ARM_FAULT"}
+    assert counts["ORDER_REQUEUED"] == 1 and counts["ZONES_CLEARED"] == 1
+    assert sc.expect.orders_shipped == len(sc.orders) and sc.expect.orders_held == 0
+    assert sc.expect.shipped_before_operator_min >= 1  # O-001은 묶인 pode1을 치우기 전에 나간다
+
+
 def test_params_file_gives_the_basket_capacity():
     assert load_fleet_params()["basket_capacity"] >= 1
 
 
 def test_fake_arms_together_or_not_at_all(site):
-    assert split_fake_arms("arm_left arm_right arm_ship", site) == (True, ["arm_left", "arm_right"], ["arm_ship"])
+    assert split_fake_arms("arm_left arm_right arm_ship", site) == (
+        True, ["arm_left", "arm_right"], ["arm_ship"])
     assert split_fake_arms("arm_ship", site) == (False, [], ["arm_ship"])
     assert split_fake_arms("arm_left arm_right", site) == (True, ["arm_left", "arm_right"], [])
     assert split_fake_arms("", site) == (False, [], [])
@@ -309,16 +415,32 @@ def test_fake_arms_none_means_no_fake_arms(site, none):
     assert split_fake_arms(none, site) == (False, [], [])
 
 
-@pytest.mark.parametrize("bad", ["arm_left", "arm_right arm_ship", "arm9", "arm_left arm_right workcell"])
+@pytest.mark.parametrize("bad", ["arm_left", "arm_right arm_ship", "arm9",
+                                 "arm_left arm_right workcell"])
 def test_fake_arms_rejects_half_a_workcell_and_unknown_names(site, bad):
     with pytest.raises(ValueError):
         split_fake_arms(bad, site)
 
 
-def test_no_shipped_scenario_expects_to_run_out_of_time(site):
+def test_stock_shortage_results_are_tied_to_each_order(site):
+    sc = load_scenario(SCENARIOS / "stock_shortage.yaml", site)
+    capacity = load_fleet_params()["basket_capacity"]
+    derived = {}
+    for order in sc.orders:
+        got = fillable(sc, order)
+        if sum(order.items.values()) > capacity:
+            derived[order.id] = "OVER_CAPACITY"
+        elif not any(got.values()):
+            derived[order.id] = "CANCELED"
+        else:
+            derived[order.id] = "SHIPPED" if got == order.items else "PARTIAL"
+    assert sc.expect.order_results == derived
+
+
+def test_only_the_stuck_scenario_may_run_out_of_time(site):
     declared = {path.stem for path in SCENARIOS.glob("*.yaml")
                 if load_scenario(path, site_of(path, site)).expect.timed_out}
-    assert declared == set()
+    assert declared == {"stuck_robot"}
 
 
 def test_order_results_must_name_a_scenario_order_and_a_known_result(site):
@@ -327,6 +449,12 @@ def test_order_results_must_name_a_scenario_order_and_a_known_result(site):
     for bad in ({"O-9": "SHIPPED"}, {"O-1": "LOST"}):
         with pytest.raises(ScenarioError):
             parse_scenario({**data, "expect": {"order_results": bad}}, site)
+
+
+def test_a_slow_cancel_is_an_arm_option(site):
+    sc = load_scenario(SCENARIOS / "operator_recovery.yaml", site)
+    assert sc.arm.cancel_seconds > 0
+    assert parse_scenario({"robots": {"pode1": {"start": "P-1"}}}, site).arm.cancel_seconds == 0.0
 
 
 def test_blocked_and_localizing_are_read(site):
@@ -348,6 +476,18 @@ def test_an_obstacle_behind_is_read(site):
     (behind,) = sc.faults
     assert (behind.type, behind.duration_s, behind.distance_m) == ("obstacle_behind", 15.0, 0.2)
     assert not sc.gone_robots
+
+
+def test_blocked_lane_blocks_one_robot_long_enough_to_mark_the_way(site):
+    sc = load_scenario(SCENARIOS / "blocked_lane.yaml", site)
+    (block,) = sc.faults
+    params = load_fleet_params()
+    assert block.type == "blocked"
+    # 물체가 나타난 뒤 로봇이 자가 복구를 끝내고 BLOCKED를 보고하기까지 6.4 s까지 걸렸다(WSL)
+    assert block.duration_s > params["blocked_mark_s"] + 8.0
+    assert block.duration_s < params["blocked_timeout_s"]
+    assert any(r.localizing_s > 0 for r in sc.robots.values())
+    assert "ZONE_MARKED_BLOCKED" in sc.expect.events_include
 
 
 def test_drift_fields_are_read(site):
@@ -566,3 +706,61 @@ def test_the_shipped_scenarios_parse_as_before_with_no_object(site):
         for fault in load_scenario(f, site_of(f, site)).faults:
             assert fault.type != "object", name
             assert (fault.x, fault.y, fault.radius_m) == (0.0, 0.0, OBJECT_RADIUS_M), name
+
+
+def test_arm_fault_holds_for_the_arm_then_force_ships_into_partial(site):
+    path = SCENARIOS / "arm_fault.yaml"
+    sc = load_scenario(path, site_of(path, site))
+    capacity = load_fleet_params()["basket_capacity"]
+    held = sc.orders[0]
+    fail = next(f for f in sc.faults if f.type == "arm_fail")
+    # 재시도 한도를 넘도록 계속 실패하고, 매번 일부는 놓은 뒤에 실패한다
+    retries = load_fleet_params()["move_retry_limit"]
+    assert fail.count == retries + 1 and fail.after_items >= 1
+    units = held.items.get("A", 0) + held.items.get("B", 0)
+    assert capacity >= units > (retries + 1) * fail.after_items, \
+        "every attempt must reach the fault"
+    assert sc.force_ship_after_s is not None and sc.force_ship_after_s > 0
+    ex = sc.expect
+    assert ex.order_results[held.id] == "PARTIAL"
+    assert ex.hold_reasons == {held.id: "ARM_FAULT"}
+    assert ex.robots_isolated == 0 and ex.orders_held == 0
+    assert {"ORDER_HELD", "FORCE_SHIP", "ORDER_PARTIAL"} <= set(ex.events_include)
+    assert ex.event_counts["ROBOT_ISOLATED"] == 0
+
+
+def test_force_ship_after_s_must_not_be_negative(site):
+    assert parse_scenario(minimal(), site).force_ship_after_s is None
+    assert parse_scenario(minimal(force_ship_after_s=5), site).force_ship_after_s == 5.0
+    with pytest.raises(ScenarioError, match="force_ship_after_s"):
+        parse_scenario(minimal(force_ship_after_s=-1), site)
+
+
+def test_hold_reasons_need_a_scenario_order_and_a_known_reason(site):
+    for bad in ({"O-9": "ARM_FAULT"}, {"O-1": "LOST"}):
+        with pytest.raises(ScenarioError):
+            parse_scenario(minimal(expect={"hold_reasons": bad}), site)
+    ok = parse_scenario(minimal(expect={"hold_reasons": {"O-1": "ARM_FAULT"}}), site)
+    assert ok.expect.hold_reasons == {"O-1": "ARM_FAULT"}
+
+
+def test_order_results_accept_canceled_held_and_over_capacity(site):
+    data = {"robots": {"pode1": {"start": "P-1"}},
+            "orders": [{"id": "O-1", "items": {"A": 1}}]}
+    for result in ("CANCELED", "HELD", "OVER_CAPACITY"):
+        parse_scenario({**data, "expect": {"order_results": {"O-1": result}}}, site)
+
+
+SHIPPED = SIX
+
+
+def test_exactly_these_scenarios_are_shipped(site):
+    assert set(shipped()) == SHIPPED
+    for f in shipped().values():
+        load_scenario(f, site_of(f, site))
+
+
+def test_only_the_stuck_robot_scenario_expects_to_run_out_of_time(site):
+    declared = {path.stem for path in SCENARIOS.glob("*.yaml")
+                if load_scenario(path, site_of(path, site)).expect.timed_out}
+    assert declared == {"stuck_robot"}

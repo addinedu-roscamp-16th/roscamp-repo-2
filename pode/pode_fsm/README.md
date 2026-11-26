@@ -3,9 +3,10 @@
 Pode 한 대의 이동·도킹 명령을 받아 Nav2로 넘기고 상태를 보고한다. Pode Pi에서 namespace `/{pode}`로 돈다.
 
 - 액션 서버: `move_to` (`MoveTo`), `dock` (`Dock`), `retreat` (`Retreat`, 제안. Pode 계약 3절 10번). 이름과 QoS는 `interfaces/fleet_interfaces/contract.yaml`에서 읽는다.
-- 발행: `state` (`RobotState`, 10 Hz, 변할 때만이 아니라 계속)
+- 발행: `state` (`RobotState`, 5 Hz, 변할 때만이 아니라 계속)
 - 구독: `/fleet/heartbeat`(계약의 HEARTBEAT QoS), `odom`(속도), `local_costmap/costmap`(BLOCKED 판단), `/fleet/robots`(로봇단 교착 처리에서 다른 로봇의 위치와 `priority`, 계약 0.13-draft)
 - Nav2: `move_to`의 `mode`가 `follow_path`(비면 같다)면 controller의 `follow_path`(`FollowPath`)를, `nav_goal`이면 bt_navigator의 `navigate_to_pose`(`NavigateToPose`)를 부른다(계약 0.11-draft 제안).
+- 계약 판 번호: 0.8~0.13-draft는 예전 개인 저장소의 번호이고, 지금은 팀 contract.yaml의 판(0.7)을 따른다.
 - 위치: TF `map` → `base_footprint`(AMCL). `pose_timeout_s`(1 s)보다 오래된 TF는 위치를 모르는 것으로 친다.
 
 레인 그래프는 모른다. `pc/*`를 import하지 않는다(계약은 `pode_fsm/contract.py`가 직접 읽는다). 지킬 약속은 `docs/구현_약속.md`, `docs/Pode_계약.md`, Drive `Pode_FSM_Nav2_구현_안내_2026-11-07.md`.
@@ -43,10 +44,12 @@ Pode 한 대의 이동·도킹 명령을 받아 Nav2로 넘기고 상태를 보�
 | Nav2 성공 | 목표에서 0.15 m 안일 때만 성공. 멀면 남은 경로를 다시 보낸다(3번까지) | R4, 전달사항 6.1 goal_done |
 | 경로 끝 0.15 m 안 | 0.5 s마다 남은 경로를 다시 보낸다 | R13 |
 | Nav2 실패, 앞에 물체 없음 | `NAV_ABORTED` | R8 |
-| FollowPath 거절(서버 없음 포함) | 남은 FollowPath를 모두 취소해 세우고 `NAV_ABORTED`. 교체 때 앞 것을 취소하지 않으므로 앞 것이 아직 달릴 수 있다 | 안내 2.1 |
+| FollowPath 거절 | 남은 FollowPath를 모두 취소해 세우고 `NAV_ABORTED`. 교체 때 앞 것을 취소하지 않으므로 앞 것이 아직 달릴 수 있다 | 안내 2.1 |
 | 이동 중 1 s 서 있고 경로 앞 0.5 m 안에 물체 | `BLOCKED`. Nav2가 물체 때문에 멈춰도 바로 끝내지 않고, 물체가 1 s 안 보이면 끄고 남은 경로를 다시 보낸다. 막힌 채 `block_timeout_s`(90 s, 제안)가 지나면 `TIMEOUT`(Nav2가 goal을 쥐고 있으면 세운다). 관제가 막힘 10 s(`blocked_mark_s`)에 goal을 먼저 취소하므로 관제가 취소하지 못했을 때의 마지막 안전장치다. 취소된 뒤에도 물체가 있으면 `BLOCKED` | 계약 4절, R9 |
 | 목표 실행 중 heartbeat·목표 수락이 1.5 s 없음 | 끊긴 지 1.5 s에 FollowPath를 취소해 정지 명령을 내고(제동 거리는 별도) `HEARTBEAT_LOST`로 끝낸다. 벽시계로 잰다 | R10, 계약 3절 5번 |
 | 위치를 모름 | `LOCALIZING`. 이때 온 목표는 `NAV_ABORTED`. 실행 중에 위치를 잃으면 FollowPath를 취소해 세우고 `NAV_ABORTED` | 계약 3절 6번 |
+| 시작 뒤 Nav2 `follow_path`·`navigate_to_pose` 서버가 아직 안 보임 | `LOCALIZING`. 이때 온 목표는 `NAV_UNAVAILABLE`. 둘 다 한 번 보이면 다시 보지 않는다 | 계약 3절 6번 |
+| 보낼 때 서버가 없음(FollowPath, NavigateToPose, 물러나기의 BackUp) | 세우고 `NAV_UNAVAILABLE`. 관제는 시도로 세지 않고 다시 보낸다 | 계약 3절 6번 |
 | `retreat`(제안) | 이동을 먼저 끝내고(`CANCELED`) FollowPath 결과가 오고 로봇이 선 뒤 물러난다. path가 비면 Nav2 BackUp으로 곧게, 있으면 그 경로를 후진 controller `reverse_controller_id`(기본 `FollowPathReverse`)로 따른다. 결과 reason은 `backup.reason_of` | Pode 계약 3절 10번 |
 | `move_to`, mode `nav_goal`(제안) | `target_pose`로 NavigateToPose를 보낸다. `path`, `final_goal`은 쓰지 않는다. feedback은 Nav2의 `distance_remaining`(첫 경로 전에는 곧은 거리). 성공은 0.15 m 안일 때만이고, 실패는 `NAV_ABORTED`. 모르는 mode는 `NAV_ABORTED` | 계약 2절(0.11-draft) |
 | nav_goal 중 진전 없음 | `blocked_after_s`(10 s, 0.12까지 5 s) 동안 `nav_progress_m`(0.05 m) 이상 움직이지 않으면 `BLOCKED`. 제자리 회전은 진전이 아니다. 로봇단 교착 처리의 섬(1 s)만 움직인 뒤 `nav_turn_window_s`(4 s) 안의 회전이 끝난 때부터 센다(2026-11-14). goal은 그대로 두고, 그만큼 움직이면 `MOVING`. 로봇단 교착 처리를 켜면 그 전에 아래 줄이 앞선다. BT의 복구는 지도 지우기와 Wait뿐이다 | 계약 4절(0.11-draft, 0.13-draft) |
