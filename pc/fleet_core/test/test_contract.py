@@ -93,9 +93,9 @@ def test_report_order_matches_the_contract_0_6_text():
     assert srv.read_text(encoding="utf-8") == REPORT_ORDER_0_6
 
 
-def test_the_contract_is_version_0_8():
+def test_the_contract_is_version_0_9():
     import yaml
-    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.8
+    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.9
 
 
 # ---- 계약 0.8: 로봇 운영 모드 (SetMode, IR-73) ----
