@@ -1,0 +1,13 @@
+# 팀 contract(fleet_interfaces/contract.yaml) 0.8에 아직 없는 이름 (작업지시서 R10).
+# 11-26 회의: 팀이 contract에 넣어 주기로 함(FIX-1).
+# contract에 들어오면 이 항목을 지우고 contract.yaml에서 읽는다.
+arm_state:
+  name: "/{arm}/state"          # 인터페이스 명세 v0.2 3.5 · 4.5
+  type: fleet_interfaces/msg/ArmState
+  qos: STATE                    # contract.yaml qos_profiles.STATE
+  arms: [arm_left, arm_right]
+
+# 상품 코드(OrderItem.kind) -> Phody YOLO 클래스.
+# TODO(DECIDE-2): 팀 상품 코드 목록이 아직 없다(11-26 회의: 나중에 알려줌). 기본 chocobar로 진행, 팀 파일이 오면 고친다.
+kinds:
+  chocobar: chocolate_bar

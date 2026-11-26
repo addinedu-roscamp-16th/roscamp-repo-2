@@ -22,8 +22,18 @@ def _app(context):
     if not os.path.isfile(script):
         raise RuntimeError(f'Not found: {script}')
     cmd = [python, script] + shlex.split(get('args'))
-    if get('script') == 'multi_pick/sam_multi_real':
+    if get('script').startswith('multi_pick/sam_multi_real'):
         cmd += ['--first-arm', get('first_arm')]
+    if get('concurrent_pick_place').lower() == 'true':
+        if get('script') != 'multi_pick/sam_multi_real':
+            raise ValueError('concurrent_pick_place requires multi_pick/sam_multi_real')
+        cmd.append('--concurrent-pick-place')
+    if get('script') == 'multi_pick/sam_multi_real':
+        cmd += ['--fine-moveit-planning', get('fine_moveit_planning')]
+    if get('fleet').lower() == 'true':
+        if get('script') != 'multi_pick/sam_multi_real':
+            raise ValueError('fleet requires multi_pick/sam_multi_real')
+        cmd.append('--fleet')
     # realpath: with --symlink-install the script resolves to the source tree,
     # so captures land in scripts/sam_yaw_output (git-ignored).
     root = os.path.dirname(os.path.realpath(os.path.join(share, 'scripts', 'left_detail.py')))
@@ -36,6 +46,12 @@ def generate_launch_description():
         DeclareLaunchArgument('python', default_value='~/camera_code/.venv/bin/python'),
         DeclareLaunchArgument('script', default_value='multi_pick/sam_multi_real'),
         DeclareLaunchArgument('first_arm', default_value='left', description='left or right'),
+        DeclareLaunchArgument('concurrent_pick_place', default_value='false',
+                              choices=['true', 'false'], description='pair pick and place stages'),
+        DeclareLaunchArgument('fine_moveit_planning', default_value='true',
+                              choices=['true', 'false'], description='plan camera fine corrections in MoveIt'),
+        DeclareLaunchArgument('fleet', default_value='false', choices=['true', 'false'],
+                              description='team fleet link (auto execute)'),
         DeclareLaunchArgument('args', default_value='--stereo-fixed-see-center',
                               description='extra arguments, one string'),
         OpaqueFunction(function=_app),
