@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IFP 주문</title>
+<link rel="stylesheet" href="../common/base.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo"></span><span class="brand-name">IFP 주문</span></div>
+  <div class="top-right">
+    <span id="account" class="account"></span>
+    <span id="conn" class="conn"><i class="dot"></i><span id="conn-text">연결 중</span></span>
+  </div>
+</header>
+<div id="notice" class="notice" hidden></div>
+<main id="main" class="layout">
+  <section class="left">
+    <label class="search-label" for="search">상품 검색</label>
+    <input id="search" class="search" type="text" placeholder="상품 이름" autocomplete="off">
+    <div id="products" class="products"></div>
+    <div class="order-bar">
+      <span id="summary" class="summary"></span>
+      <button id="order-btn" class="order-btn" type="button">주문하기</button>
+    </div>
+    <p id="reject" class="reject" hidden></p>
+  </section>
+  <aside class="right">
+    <h2 class="side-title">내 주문</h2>
+    <div id="orders" class="orders"></div>
+  </aside>
+</main>
+<p id="fatal" class="fatal" hidden></p>
+<script type="module" src="app.js"></script>
+</body>
+</html>

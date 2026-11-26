@@ -1,0 +1,73 @@
+/* ---- 관리자 화면 (다크 톤) ---- */
+[hidden] { display: none !important; }
+:root {
+  --bg: #111418; --top: #171b21; --card: #1a1e24; --alert: #1f242b; --line: #2a3038;
+  --green: #4ade80; --red: #f87171; --blue: #6e8bff; --yellow: #fbbf24; --purple: #a78bfa; --stop: #dc2626;
+  --text: #e8ebf0; --sub: #8b93a1;
+  --c-action: #2a1a1c; --c-pause: #2a2414; --c-received: #1a2240; --c-progress: #221c33;
+}
+body { background: var(--bg); color: var(--text); min-height: 100vh; }
+
+/* ---- 머리 ---- */
+.top { height: 72px; padding: 0 24px; display: flex; align-items: center; gap: 20px; background: var(--top); border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: center; gap: 10px; }
+.logo { width: 12px; height: 26px; border-radius: 6px; background: var(--green); }
+.brand-name { font-size: 18px; font-weight: 700; }
+.menu { display: flex; gap: 4px; padding: 4px; background: var(--bg); border-radius: 10px; }
+.menu span { padding: 9px 14px; border-radius: 8px; font-size: 14px; }
+.m-on { background: var(--green); color: #07210f; font-weight: 700; }
+.m-off { color: var(--sub); opacity: .55; cursor: default; }
+.top-right { margin-left: auto; display: flex; align-items: center; gap: 14px; }
+.conn, .mode { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--sub); }
+.mode { font-weight: 700; font-size: 14px; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--yellow); }
+.conn.ok .dot, .mode.ok .dot { background: var(--green); }
+.mode.ok { color: var(--green); }
+.mode.warn { color: var(--yellow); }
+.btn-pause { height: 40px; padding: 0 18px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--text); }
+.btn-stop { height: 46px; padding: 0 28px; border-radius: 8px; border: 2px solid #ef4444; background: var(--stop); color: #fff; font-weight: 700; font-size: 16px; }
+.top button:disabled { opacity: .45; cursor: not-allowed; }
+
+/* ---- 배치 ---- */
+.layout { display: grid; grid-template-columns: 300px 1fr; gap: 20px; padding: 22px 24px; }
+.sec { margin: 0 0 12px; font-size: 13px; font-weight: 400; color: var(--sub); }
+.none { margin: 0; padding: 18px 14px; background: var(--alert); border-radius: 10px; color: var(--sub); font-size: 14px; }
+.stock { margin-top: 28px; color: var(--sub); font-size: 13px; line-height: 1.6; }
+.main { min-width: 0; }
+
+/* ---- 로봇 카드 ---- */
+.robots { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 170px)); gap: 10px; margin-bottom: 28px; min-height: 40px; }
+.robot { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 0 14px 14px; }
+.r-bar { height: 5px; border-radius: 3px; margin: 12px 0 14px; background: var(--blue); }
+.robot.ok .r-bar { background: var(--green); }
+.robot.bad .r-bar { background: var(--red); }
+.r-name { font-weight: 700; font-size: 14px; }
+.r-state { font-weight: 700; font-size: 14px; margin: 6px 0 8px; color: #a5b4fc; }
+.robot.ok .r-state { color: var(--green); }
+.robot.bad .r-state { color: var(--red); }
+.r-sub { font-size: 12px; color: var(--sub); }
+
+/* ---- 주문 진행 칸 ---- */
+.cols { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.col { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 14px 12px; min-height: 178px; }
+.c-head { font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+.c-action .c-head { color: var(--red); }
+.c-progress .c-head { color: var(--purple); }
+.c-received .c-head { color: #a5b4fc; }
+.c-done .c-head { color: var(--green); }
+.tcard { border-radius: 6px; padding: 10px; margin-bottom: 8px; background: var(--c-progress); }
+.c-received .tcard { background: var(--c-received); }
+.c-action .tcard { background: var(--c-action); }
+.c-action .tcard[data-status="담기 일시 중지"] { background: var(--c-pause); }
+.c-done .tcard { background: #20252c; }
+.t-title { font-size: 14px; }
+.t-title { font-weight: 700; }
+.t-no { margin-top: 2px; font-size: 12px; color: #b4bbc7; word-break: break-all; }
+.t-sub { margin-top: 3px; font-size: 12px; color: var(--sub); }
+
+@media (max-width: 1100px) {
+  .layout { grid-template-columns: 220px 1fr; }
+  .cols { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .menu span { padding: 9px 9px; }
+  .top { gap: 12px; padding: 0 14px; }
+}

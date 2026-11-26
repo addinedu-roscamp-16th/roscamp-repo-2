@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>IFP 관제</title>
+<link rel="stylesheet" href="../common/base.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="top">
+  <div class="brand"><span class="logo"></span><span class="brand-name">IFP 관제</span></div>
+  <nav class="menu">
+    <span class="m-on">현황</span><span class="m-off">주문 관리</span><span class="m-off">로봇</span><span class="m-off">재고</span><span class="m-off">이력</span>
+  </nav>
+  <div class="top-right">
+    <span id="conn" class="conn wait"><i class="dot"></i><span id="conn-text">연결 중</span></span>
+    <span id="mode" class="mode"><i class="dot"></i><span id="mode-text"></span></span>
+    <button class="btn-pause" type="button" disabled>서비스 일시 정지</button>
+    <button class="btn-stop" type="button" disabled>비상정지</button>
+  </div>
+</header>
+<main class="layout">
+  <aside class="alerts">
+    <h2 class="sec">알림</h2>
+    <p class="none">이번 주 없음</p>
+    <div id="stock" class="stock"></div>
+  </aside>
+  <section class="main">
+    <h2 class="sec">로봇 상태</h2>
+    <div id="robots" class="robots"></div>
+    <h2 class="sec">주문 진행</h2>
+    <div id="cols" class="cols"></div>
+  </section>
+</main>
+<script type="module" src="app.js"></script>
+</body>
+</html>

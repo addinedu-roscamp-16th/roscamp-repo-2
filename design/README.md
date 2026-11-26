@@ -20,6 +20,8 @@ IFP(Intelligent Flying Pod) 2팀의 아키텍처 · 다이어그램 원본을 �
 
 변경 내용은 [CHANGELOG.md](CHANGELOG.md)에 적습니다.
 
+화면 코드(고객 · 관리자 주문 화면)는 `pc/service_bridge/service_bridge/web/static/`에 있고, 화면 설계는 [docs/superpowers/specs/2026-11-26-order-screens-design.md](../docs/superpowers/specs/2026-11-26-order-screens-design.md)에 있습니다.
+
 ## 디렉터리
 
 ```
