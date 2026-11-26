@@ -174,6 +174,15 @@ CREATE TABLE "bridge_session" (
   "hello_at" timestamptz NOT NULL DEFAULT (now())
 );
 
+CREATE TABLE "trip_dispatch" (
+  "trip_id" text PRIMARY KEY,
+  "attempts" integer NOT NULL DEFAULT 0,
+  "next_attempt_at" timestamptz,
+  "unknown_since" timestamptz,
+  "last_result" text,
+  "central_acked_at" timestamptz
+);
+
 CREATE UNIQUE INDEX ON "trip" ("order_id", "seq");
 
 CREATE UNIQUE INDEX ON "stock_count" ("close_id", "product_id");
@@ -354,7 +363,7 @@ COMMENT ON TABLE "ws_event" IS '화면 WS 사건 (OMS-05, 통신 규칙 #32 · #
 
 COMMENT ON COLUMN "ws_event"."seq" IS '화면 WS 사건 순번. 다시 연결하면 since_seq 뒤만 보냄';
 
-COMMENT ON COLUMN "ws_event"."type" IS '사건 종류 (orders · trip · alert 상태 변화, 관리 명령 결과 등)';
+COMMENT ON COLUMN "ws_event"."type" IS '사건 종류 (order_changed · trip_changed · alert 상태 변화, 관리 명령 결과 등)';
 
 COMMENT ON COLUMN "ws_event"."data" IS '사건 내용';
 
@@ -367,6 +376,20 @@ COMMENT ON COLUMN "bridge_session"."epoch" IS 'Hello 때마다 DB가 1씩 늘려
 COMMENT ON COLUMN "bridge_session"."boot_id" IS '노드가 켜질 때 만든 UUID (기록용)';
 
 COMMENT ON COLUMN "bridge_session"."hello_at" IS '마지막 Hello 시각';
+
+COMMENT ON TABLE "trip_dispatch" IS '운반 건 central 넘기기 상태 (주문 DB 설계 4.16, 접수 API 설계 8.1). 접수 순서대로 넘기고 확정 답을 받으면 central_acked_at을 채움. 넘기는 중인 줄 부분 인덱스는 order_db_extra.sql';
+
+COMMENT ON COLUMN "trip_dispatch"."trip_id" IS '넘길 운반 건 (접수 트랜잭션에서 함께 INSERT)';
+
+COMMENT ON COLUMN "trip_dispatch"."attempts" IS 'CHECK >= 0. 지금까지 넘기려 한 횟수';
+
+COMMENT ON COLUMN "trip_dispatch"."next_attempt_at" IS '다음에 다시 넘길 시각. NULL이면 바로';
+
+COMMENT ON COLUMN "trip_dispatch"."unknown_since" IS '결과를 모르게 된 시각 (시간 초과 등). 확정 답을 받으면 NULL';
+
+COMMENT ON COLUMN "trip_dispatch"."last_result" IS '마지막 시도 결과 (기록용)';
+
+COMMENT ON COLUMN "trip_dispatch"."central_acked_at" IS 'central이 확정 답(수락 · 거절)을 준 시각. NULL이면 아직 넘기는 중';
 
 ALTER TABLE "stock_ledger" ADD FOREIGN KEY ("product_id") REFERENCES "product" ("product_id") DEFERRABLE INITIALLY IMMEDIATE;
 
@@ -425,3 +448,5 @@ ALTER TABLE "stock_count" ADD FOREIGN KEY ("product_id") REFERENCES "product" ("
 ALTER TABLE "stock_count" ADD FOREIGN KEY ("account_id") REFERENCES "account" ("account_id") DEFERRABLE INITIALLY IMMEDIATE;
 
 ALTER TABLE "app_setting" ADD FOREIGN KEY ("updated_by") REFERENCES "account" ("account_id") DEFERRABLE INITIALLY IMMEDIATE;
+
+ALTER TABLE "trip_dispatch" ADD FOREIGN KEY ("trip_id") REFERENCES "trip" ("trip_id") DEFERRABLE INITIALLY IMMEDIATE;
