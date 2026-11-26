@@ -304,3 +304,14 @@ def test_the_settle_time_of_a_timeout_is_no_shorter_than_a_plain_cancel_wait():
 def test_the_lost_dock_heading_tolerance_is_a_positive_angle(tmp_path, bad):
     with pytest.raises(ValueError, match="lost_dock_yaw_deg"):
         load_params(write(tmp_path, {**SHIPPED, "lost_dock_yaw_deg": bad}))
+
+
+def test_report_retry_defaults_follow_ir40():
+    params = load_params(None)
+    assert params.report_retry_s == 1.0
+    assert params.report_retry_max_s == 10.0
+
+
+def test_report_retry_max_is_not_below_the_first(tmp_path):
+    with pytest.raises(ValueError, match="report_retry_max_s"):
+        load_params(write(tmp_path, {**SHIPPED, "report_retry_s": 4.0, "report_retry_max_s": 2.0}))

@@ -116,6 +116,7 @@ class FleetParams:
     clear_confirm: int = 2
     blocked_retry_max_s: float = 300.0
     report_max_in_flight: int = 4
+    report_retry_max_s: float = 10.0
 
     # ---- 파라미터 값 검사 ----
     def __post_init__(self):
@@ -180,6 +181,9 @@ def check_types(data: dict, source="params") -> None:
     if data.get("report_max_in_flight", 1) < 1:
         raise ValueError(f"{source}: report_max_in_flight must be >= 1, "
                          f"got {data['report_max_in_flight']!r}")
+    if data.get("report_retry_max_s", 10.0) < data["report_retry_s"]:
+        raise ValueError(f"{source}: report_retry_max_s must be >= report_retry_s, "
+                         f"got {data['report_retry_max_s']!r} < {data['report_retry_s']!r}")
 
 
 # ---- 시간·거리 값 검사: 유한, 음수 아님, 끔이 아니면 0보다 큼 ----
