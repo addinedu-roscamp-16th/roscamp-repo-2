@@ -107,9 +107,9 @@ def test_order_report_keeps_the_team_0_6_text():
 
 
 # ---- 계약 0.9: 인터페이스 명세 v0.2 ----
-def test_the_contract_is_version_0_9():
+def test_the_contract_is_version_1_0():
     import yaml
-    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.9
+    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 1.0
 
 
 def test_contract_0_9_names_the_arms_like_the_spec(contract):
@@ -172,8 +172,9 @@ def test_reason_code_table_has_the_spec_codes(contract):
     codes = {c for group in contract.reason_codes.values() for c in group}
     assert {"NOT_FOUND", "LOCK_RELEASED", "HOLDING_ITEM", "MODE_MISMATCH", "NOT_READY",
             "ROBOT_TIMEOUT", "PICK_FAILED", "FLEET_RESTART", "NOTHING_TO_FILL",
-            "FORCED_PARTIAL", "LATE_REPORT", "NOT_IMPLEMENTED", "NAV_UNAVAILABLE"} <= codes
-    assert len(codes) == 33
+            "FORCED_PARTIAL", "LATE_REPORT", "NOT_IMPLEMENTED", "NAV_UNAVAILABLE",
+            "HEARTBEAT_LOST"} <= codes
+    assert len(codes) == 34
 
 
 def test_entries_no_fake_node_opens_are_left_out_of_the_fake_check(contract):
