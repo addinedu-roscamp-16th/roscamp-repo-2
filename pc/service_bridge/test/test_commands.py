@@ -12,7 +12,7 @@ def D() -> float:
 
 
 def cmd(result, request_id="R-1", reason="", **kw):
-    base = dict(request_id=request_id, command="LOCK_RELEASE", target="pode1",
+    base = dict(request_id=request_id, command="set_lock", target="pode1",
                 result=result, reason=reason, detail="")
     base.update(kw)
     return CommandIn(**base)
@@ -51,7 +51,7 @@ def test_first_result_is_written_with_its_event(pool, conn, row):
     assert apply_command(pool, cmd("ACCEPTED", detail="ok"), D()) == CommandOut(True, "APPLIED")
     assert final_of(conn) == ("ACCEPTED", None)
     data = conn.execute("select data from ws_event where type='command_result'").fetchall()
-    assert [d[0] for d in data] == [{"request_id": "R-1", "command": "LOCK_RELEASE",
+    assert [d[0] for d in data] == [{"request_id": "R-1", "command": "set_lock",
                                      "target": "pode1", "result": "ACCEPTED", "reason": "",
                                      "detail": "ok"}]
 
@@ -76,6 +76,16 @@ def test_same_result_again_is_duplicate(pool, conn, row):
     assert alerts(conn) == []
 
 
+def test_unconfirmed_twice_is_duplicate(pool, conn, row):
+    """UNCONFIRMED 재전송(표 3번 줄)은 사건을 하나 더 만들지 않고 UNCONFIRMED로 남는다."""
+    row()
+    apply_command(pool, cmd("UNCONFIRMED", reason="ROBOT_TIMEOUT"), D())
+    assert apply_command(pool, cmd("UNCONFIRMED", reason="ROBOT_TIMEOUT"), D()) == \
+        CommandOut(True, "DUPLICATE")
+    assert n_events(conn) == 1
+    assert final_of(conn)[0] == "UNCONFIRMED"
+
+
 def test_unconfirmed_after_final_is_duplicate(pool, conn, row):
     """끝 상태 뒤에 늦게 온 UNCONFIRMED가 끝 상태를 되돌리지 못한다."""
     row()
@@ -93,6 +103,7 @@ def test_other_final_after_final_alerts_once(pool, conn, row):
             CommandOut(True, "LATE", "FINAL_ALREADY")
     assert final_of(conn)[0] == "ACCEPTED"
     assert alerts(conn) == [("LATECMD:R-1:REJECTED", "pode1", "FINAL_ALREADY")]
+    assert n_events(conn) == 1
 
 
 def test_unknown_request_id_alerts_once(pool, conn, row):
@@ -102,6 +113,7 @@ def test_unknown_request_id_alerts_once(pool, conn, row):
         assert apply_command(pool, cmd("ACCEPTED", request_id="R-NONE", target="arm_left"),
                              D()) == CommandOut(True, "LATE", "NOT_FOUND")
     assert alerts(conn) == [("LATECMD:R-NONE:ACCEPTED", "arm_left", "NOT_FOUND")]
+    assert n_events(conn) == 0
 
 
 def test_empty_request_id_is_not_found(pool, conn, row):
@@ -111,6 +123,7 @@ def test_empty_request_id_is_not_found(pool, conn, row):
     assert apply_command(pool, cmd("ACCEPTED", request_id=""), D()) == \
         CommandOut(True, "LATE", "NOT_FOUND")
     assert conn.execute("select final_result from admin_action").fetchone()[0] is None
+    assert n_events(conn) == 0
 
 
 def test_result_outside_the_four_alerts(pool, conn, row):
@@ -119,6 +132,7 @@ def test_result_outside_the_four_alerts(pool, conn, row):
     assert apply_command(pool, cmd("DONE"), D()) == CommandOut(True, "LATE", "INVALID_RESULT")
     assert final_of(conn)[0] is None
     assert alerts(conn)[0][2] == "INVALID_RESULT"
+    assert n_events(conn) == 0
 
 
 def test_empty_reason_keeps_result_detail(pool, conn, row):

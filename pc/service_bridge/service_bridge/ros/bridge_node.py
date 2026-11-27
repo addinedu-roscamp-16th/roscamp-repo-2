@@ -168,7 +168,7 @@ class BridgeNode(Node):
             out = apply_command(self._pool, convert.command_in(request), deadline)
             response.accepted = out.accepted
             # 응답에 result 칸이 없어 판정(APPLIED · DUPLICATE · LATE)은 로그에만 남긴다 (설계 4.4).
-            # 로봇 쪽은 accepted만 보면 되고, 늦은 결과의 경보는 core.commands가 DB에 쓴다
+            # fleet은 accepted만 보고 다시 보낼지 정하며, 늦은 결과의 경보는 core.commands가 DB에 쓴다
             self.get_logger().info(
                 f"ReportCommand {out.result or out.reason}: request_id={request.request_id} "
                 f"result={request.result}")
