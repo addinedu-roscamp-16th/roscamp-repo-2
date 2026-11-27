@@ -26,6 +26,9 @@ from fleet_manager.goal_tracker import _factor
 
 HELLO, TRIP, ORDER = "hello", "trip", "order"
 _CANCELLED = "CANCELLED"  # 브리지 ReportTrip 철자 (주문판은 CANCELED)
+# 하나도 못 담아 취소된 건의 사유. adapters.trip_status와 같은 규칙(설계 5장).
+# adapters를 import하면 ROS 의존이 들어와 이 모듈은 ROS 없이 import되지 않으므로 값만 둠.
+NOTHING_TO_FILL = "NOTHING_TO_FILL"
 
 
 @dataclass(frozen=True)
@@ -174,9 +177,13 @@ class ReportQueue:
             return cmd
         self._n += 1
         if isinstance(cmd, ReportOrderCmd):
-            # ReportTrip 철자로: CANCELED → CANCELLED, hold_reason → reason
-            status = _CANCELLED if cmd.status == CANCELED else cmd.status
-            return TripReport(cmd.order_id, cmd.robot, status, cmd.hold_reason,
+            # ReportTrip 철자로: CANCELED → CANCELLED + 사유 NOTHING_TO_FILL (취소는 hold_reason이 비어 옴).
+            # 그 밖의 상태는 hold_reason을 그대로 사유로 씀
+            if cmd.status == CANCELED:
+                status, reason = _CANCELLED, NOTHING_TO_FILL
+            else:
+                status, reason = cmd.status, cmd.hold_reason
+            return TripReport(cmd.order_id, cmd.robot, status, reason,
                               dict(cmd.placed), dict(cmd.missing), self._epoch, self._n, now)
         return TripReport(cmd.trip_id, cmd.robot, cmd.status, cmd.reason,
                           dict(cmd.placed), dict(cmd.missing), self._epoch, self._n, now)

@@ -131,7 +131,7 @@ def test_final_report_goes_to_central_only_after_the_bridge_accepts():
 
 
 @pytest.mark.parametrize("status, hold, trip_status, reason", [
-    (CANCELED, "", "CANCELLED", ""), (HELD, HOLD_ROBOT_FAULT, HELD, HOLD_ROBOT_FAULT)])
+    (CANCELED, "", "CANCELLED", "NOTHING_TO_FILL"), (HELD, HOLD_ROBOT_FAULT, HELD, HOLD_ROBOT_FAULT)])
 def test_order_status_is_spelled_for_the_bridge(status, hold, trip_status, reason):
     q = ready_queue()
     cmd = ReportOrderCmd("T-1", "pode1", status, {}, {"A": 1}, "detail", hold)
