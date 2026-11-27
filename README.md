@@ -1,6 +1,8 @@
 # jetcobot_dual — 양팔 JetCobot 협동 픽앤플레이스
 
-myCobot 280(JetCobot) 두 대가 스테레오 카메라로 상품을 인식해 번갈아 집고, 틴케이스(바구니)에 담는다. 환경은 ROS 2 Jazzy와 MoveIt 2다.
+myCobot 280(JetCobot) 두 대가 스테레오 카메라로 상품을 인식해 집고, 틴케이스(바구니)에 담는다. 한 팔이 담는 동안 다른 팔이 집는 동시 진행을 쓴다. 환경은 ROS 2 Jazzy와 MoveIt 2다.
+
+팀 프로젝트에서 이 양팔은 **Phody**(작업대 `WORK`, `arm_left` · `arm_right`)이고, 팀 관제(fleet)의 담기 명령을 받아 움직인다. 관제는 팀 저장소 `addinedu-roscamp-16th/roscamp-repo-2`의 `dev` 브랜치(`pc/fleet_manager` 등)에 있고, Phody 쪽 연결 코드는 `jetcobot_dual_app/scripts/multi_pick/fleet_link.py`, 시험용 가짜 관제는 같은 폴더의 `fake_fleet.py`다. 자세히는 [jetcobot_dual_app/README.md](jetcobot_dual_app/README.md)의 "팀 관제 연결"과 [INTERFACES.md](INTERFACES.md) 6절.
 
 ## 구성
 
@@ -8,9 +10,10 @@ myCobot 280(JetCobot) 두 대가 스테레오 카메라로 상품을 인식해 �
 | --- | --- | --- |
 | `jetcobot_dual_bridge` | **Pi 2대**(팔마다 1대) | pymycobot SDK 브리지. 관절 상태 발행, 경로·끝점·그리퍼 액션, 미세조정 서비스 |
 | `jetcobot_dual_control` | PC | 12관절 모델, `state_aggregator`, MoveIt `move_group`, 안전 게이트 `execution_gate`, 장면(케이스·물체), RViz |
-| `jetcobot_dual_app` | PC | 픽 UI(스테레오 SAM2·LightGlue 인식), 팔별 상태 머신, 접근·미세조정·잡기·담기 worker |
+| `jetcobot_dual_app` | PC | 픽 UI(스테레오 YOLO-seg 인식, 예전 SAM2 · LightGlue는 `--seg sam`), 팔별 상태 머신, 접근 · 미세조정 · 잡기 · 담기 worker, 팀 관제 연결(`fleet_link.py`) · 가짜 관제(`fake_fleet.py`) |
 
-- `docs/worklog/`: 날짜별 작업 기록(11-06 ~ 11-20)과 [양팔 협동 상태 설계](docs/worklog/2026-11-20_양팔_협동_상태_설계.md)
+- `docs/worklog/`: 날짜별 작업 기록(11-06 ~ 11-27)과 [양팔 협동 상태 설계](docs/worklog/2026-11-20_양팔_협동_상태_설계.md). 가장 최근 `*_할일.md`부터 읽는다
+- `docs/구간_정의.md`: 동작 구간 A(see_center → 픽 → see_center) · B(see_center ↔ pre_place) · C(pre_place → 놓기 → pre_place)
 - `docs/bridge_study.md`: 브리지 구조 해설
 - `docs/history/`: 이전 PC 패키지 README와 검증 기록
 - [INTERFACES.md](INTERFACES.md): 토픽, 액션, 서비스, 파일 인터페이스
@@ -20,16 +23,18 @@ myCobot 280(JetCobot) 두 대가 스테레오 카메라로 상품을 인식해 �
 - PC
   - ROS 2 Jazzy, MoveIt 2
   - 같은 워크스페이스의 `jetcobot_gazebo`(로봇 모델). `jetcobot_dual_control`이 이 패키지의 URDF로 12관절 모델을 만든다.
-  - 인식용 가상환경 `~/camera_code/.venv`: torch, SAM2, LightGlue, OpenCV, GStreamer(`gi`)
-  - SAM2 가중치 `~/sam2_src/checkpoints/sam2.1_hiera_small.pt`
+  - 인식용 가상환경 `~/camera_code/.venv`: torch, ultralytics(YOLO), OpenCV, GStreamer(`gi`). 예전 인식(`--seg sam`)을 쓸 때만 SAM2 · LightGlue
+  - YOLO-seg 가중치: 이 저장소 `models/bar_mentos_yolo26s_seg_v2/best.pt`
+  - SAM2 가중치(`--seg sam`일 때만) `~/sam2_src/checkpoints/sam2.1_hiera_small.pt`
+  - 팀 관제 연결(`fleet:=true`)을 쓸 때: 팀 `fleet_interfaces`(Phody 복사본 `~/phody_fleet_ws`)를 따로 빌드
 - Pi
   - ROS 2 Jazzy
   - `~/venv/mycobot`: pymycobot과 rclpy를 둘 다 쓸 수 있는 파이썬
   - `sdk_patch/`의 timed-angles 패치 적용
   - 카메라 송신: GStreamer(`gst-launch-1.0`, x264enc), 카메라 장치 `/dev/jetcocam0`
 - 네트워크
-  - 세 대 모두 같은 `ROS_DOMAIN_ID`(83)
-  - WiFi 절전 끄기, `ROS_STATIC_PEERS` 권장([2026-11-20 기록](docs/worklog/2026-11-20_작업정리.md) 5절)
+  - 세 대(PC, Pi 2대) 모두 같은 통신 설정: `source ~/iponic_net/phody_net.sh dev`(개발: 도메인 83, 서버 없음) 또는 `real`(팀 실물 망: 도메인 6 + 디스커버리 서버, 팀 `tools/net/net_ds.sh` 그대로). `~/iponic_net/`은 PC와 두 Pi에 같은 내용으로 둔다
+  - Pi WiFi 절전 끄기(`sudo iw dev wlan0 set power_save off`, 켜져 있으면 관절 상태가 1.5초 넘게 끊김, 11-27 확인)
 
 ## 빌드
 
@@ -53,7 +58,7 @@ echo 'source ~/jetcobot_ws/install/setup.bash' >> ~/.bashrc
 
 ## How to use (실행 순서)
 
-모든 터미널에서 `export ROS_DOMAIN_ID=83`(또는 `.bashrc`에 넣기)를 먼저 한다.
+모든 터미널(PC, 두 Pi)에서 먼저 `source ~/iponic_net/phody_net.sh dev`를 한다(팀 실물 망이면 `real`). 예전처럼 `export ROS_DOMAIN_ID=83`만 해도 개발 모드와 같다.
 
 0. **Pi 카메라 송신**(각 Pi, 터미널 하나씩 따로)
    ```bash
@@ -73,19 +78,25 @@ echo 'source ~/jetcobot_ws/install/setup.bash' >> ~/.bashrc
    ros2 launch jetcobot_dual_bridge bridge.launch.py side:=right   # 오른팔 Pi
    ```
    - 파라미터는 `config/bridge.yaml`에 있다(11-19 최종 명령과 같은 값).
+   - 지금 실물에서는 Pi의 `~/jetcobot_dual_bridge/`에서 직접 띄운다:
+     ```bash
+     source ~/iponic_net/phody_net.sh dev && ~/venv/mycobot/bin/python ~/jetcobot_dual_bridge/sdk_drag_hybrid_bridge.py left    # 왼팔 Pi
+     source ~/iponic_net/phody_net.sh dev && ~/venv/mycobot/bin/python ~/jetcobot_dual_bridge/sdk_drag_hybrid_bridge.py right   # 오른팔 Pi
+     ```
    - 다른 파일을 쓰려면 `params_file:=/경로.yaml`, 다른 파이썬을 쓰려면 `python:=/경로/python`.
 2. **PC 제어**(MoveIt, 게이트, RViz)
    ```bash
-   ros2 launch jetcobot_dual_control system.launch.py
+   ros2 launch jetcobot_dual_control system.launch.py tin_case_enabled:=false
    ```
    - 11-19 표준 인자가 기본값으로 들어 있다. 개별 인자는 `rviz:=false`처럼 바꿀 수 있다.
    - 정상 기동 문구: `both SDK connections enabled; coordinated controller enabled`
    - **Ctrl+C로 끈다. Ctrl+Z 금지**(멈춘 프로세스가 남아 다음 실행이 막힌다).
 3. **픽 UI**
    ```bash
-   ros2 launch jetcobot_dual_app pick.launch.py first_arm:=left
+   ros2 launch jetcobot_dual_app pick.launch.py first_arm:=left concurrent_pick_place:=true fine_moveit_planning:=false
    ```
-   - 양쪽 영상에서 상품마다 ROI를 지정 → `M` 매칭 → 첫 접근 계획 확인 → `E` 실행.
+   - 팀 관제와 연결하려면 끝에 `fleet:=true`를 붙이고, 그 전에 `source ~/phody_fleet_ws/install/setup.bash`를 한다. 관제 없이 시험할 때는 가짜 관제 `fake_fleet.py`를 띄운다([jetcobot_dual_app/README.md](jetcobot_dual_app/README.md)).
+   - 수동: 캡처 → `M` YOLO 인식 · 매칭 → 첫 접근 계획 확인 → `E` 실행. 멈춤 `P`, 이어서 하기 `U`, 멈춘 뒤 see_center 복귀 `C`, 처음 화면 `R`.
    - 추가 인자는 `args:='--stereo-fixed-see-center --no-self-correct'`처럼 문자열 하나로 넘긴다.
    - 다른 도구 실행 예:
      ```bash
@@ -117,4 +128,5 @@ ros2 service call /jetcobot_dual/reset_execution_fault std_srvs/srv/SetBool '{da
 
 ## 현재 상태와 남은 일
 
-[2026-11-20 작업 기록](docs/worklog/2026-11-20_작업정리.md)의 1절(설계 대비 구현)과 8절(다음 할 일)을 본다.
+- 최근 정리: [2026-11-27 작업 정리](docs/worklog/2026-11-27_작업정리.md)(팀 관제 연결 2차), 다음 할 일: [2026-11-28 할 일](docs/worklog/2026-11-28_할일.md)
+- 그 전: [2026-11-20 작업 기록](docs/worklog/2026-11-20_작업정리.md)의 1절(설계 대비 구현)과 8절(다음 할 일)
