@@ -101,8 +101,8 @@ PRICED = {
             {"nodes": ["S", "N_W"], "extra_m": 1.0},
             {"nodes": ["S", "W_Q"]}],
     "stations": {
-        "WORK": {"dock": "W", "queue": ["W_Q"], "server": "workcell", "arms": ["arm_left", "arm_right"],
-                 "action": "fill"},
+        "WORK": {"dock": "W", "queue": ["W_Q"], "server": "workcell",
+                 "arms": ["arm_left", "arm_right"], "action": "fill"},
         "OUTBOUND": {"dock": "O", "queue": ["O_Q"], "server": "arm_ship", "arms": ["arm_ship"],
                      "action": "swap"},
     },

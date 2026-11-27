@@ -38,11 +38,11 @@ def test_a_robot_waiting_at_its_base_end_in_the_way_is_sent_to_parking():
 
 def test_a_robot_on_its_way_to_the_dock_keeps_the_turn_when_its_order_is_extended():
     """차례를 받아 도크로 떠난 로봇은 base를 늘릴 때도 차례를 지킨다."""
-    world = Harness(layout="d2", starts={"pode2": "P-1", "pode3": "P-3"}, params=ON)
+    world = Harness(layout="d", starts={"pode2": "P-1", "pode3": "P-3"}, params=ON)
     world.report()
     traffic = world.traffic
     for edge in (("P-3", "N_E"), ("P-3", "O_Q")):
-        traffic._blocked[edge] = 1e9  # pode3은 돌아가는 길로 간다
+        traffic._blocked[edge] = 1e9  # pode3은 남쪽 통로로 돌아간다
     going = world.call("OUTBOUND", "pode3")
     assert world.run_until(lambda: traffic._robots["pode3"].route is not None, 5.0)
     route = traffic._robots["pode3"].route

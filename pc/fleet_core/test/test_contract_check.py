@@ -102,7 +102,10 @@ def test_real_only_entries_are_skipped_unless_asked(contract):
     obs = healthy(contract)
     assert compare(contract, obs) == []
     names = {p.name for p in compare(contract, obs, include_real_only=True)}
-    robots = ("pode1", "pode2", "pode3", "arm_left", "arm_right", "arm_ship")
-    assert names == ({f"/pode{i}/{action}" for i in (1, 2, 3)
-                      for action in ("navigate_to_pose", "follow_path", "check_clear")}
-                     | {f"/{robot}/set_mode" for robot in robots})
+    real_only = {f"/pode{i}/{action}" for i in (1, 2, 3)
+                 for action in ("navigate_to_pose", "follow_path", "check_clear")}
+    assert real_only <= names
+    assert {"/bridge/hello", "/system/mode", "/pode1/set_mode", "/fleet/set_lock"} <= names
+    not_in_fake = {e.name for e in contract.expanded()
+                   if contract.entries[e.key].not_in_fake}
+    assert names == real_only | not_in_fake

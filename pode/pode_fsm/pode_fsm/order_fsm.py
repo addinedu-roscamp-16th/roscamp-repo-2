@@ -18,6 +18,7 @@ from pode_fsm.results import (  # noqa: F401 - 결과 이름은 여기서도 내
     IDLE,
     MOVING,
     NAV_ABORTED,
+    NAV_UNAVAILABLE,
     ORDER_UPDATE_REJECTED,
     SUPERSEDED,
     Finish,
@@ -31,7 +32,7 @@ HorizonCheck = Callable[[Seg], str]
 @dataclass(frozen=True)
 class OrderParams:
     join_m: float = 0.02
-    pass_m: float = 0.15
+    pass_m: float = 0.12
 
 
 @dataclass(frozen=True)
@@ -64,6 +65,9 @@ class OrderFsm(PodeFsm):
     def current_goal(self) -> str:
         return self._q.last_node if self._waiting else super().current_goal()
 
+    def has_goal(self) -> bool:
+        return self._q is not None or super().has_goal()
+
     def is_running(self, goal_id: Hashable) -> bool:
         if self._q is not None:
             return goal_id == self._owner
@@ -92,6 +96,8 @@ class OrderFsm(PodeFsm):
                              priority), now, pose)
         self._alive = max(self._alive, now)
         self._priority = int(priority)
+        if self._nav_ready is False:
+            return self._close(CANCELED) + [Finish(goal_id, False, NAV_UNAVAILABLE)]
         if order.update_id > 0:
             return self._update(goal_id, now, order, pose)
         cmds = self._close(CANCELED)

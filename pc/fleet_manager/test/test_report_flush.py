@@ -44,7 +44,7 @@ def report_node(limit=4):
     node = SimpleNamespace(
         _reports=ReportQueue("boot-1", 1.0, 10.0, 3.0, limit, rand=lambda: 0.5),
         _report_clients={HELLO: _ReportClient(), TRIP: _ReportClient(), ORDER: _ReportClient()},
-        _pending={}, _boot_id="boot-1",
+        _pending={}, _fleet_boot_id="boot-1",
         get_logger=lambda: logs,
         _now=lambda: node.now, now=0.0,
         _dispatch=lambda command, now: events.append(command.code), events=events,

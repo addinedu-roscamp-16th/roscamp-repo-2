@@ -30,7 +30,6 @@ REPORT_REPLY_LIMIT_S = 3.0
 @dataclass(frozen=True)
 class FleetParams:
     basket_capacity: int
-    ship_partial: bool
     robot_radius_m: float
     release_margin_extra_m: float
     release_distance_m: float
@@ -115,6 +114,7 @@ class FleetParams:
     check_interval_s: float = 5.0
     clear_confirm: int = 2
     blocked_retry_max_s: float = 300.0
+    plan_split: bool = False  # 해결안 B: 지도 splits대로 Nav2 goal을 둘로 나눈다. 기록 호환: 끔
     report_max_in_flight: int = 4
     report_retry_max_s: float = 10.0
 

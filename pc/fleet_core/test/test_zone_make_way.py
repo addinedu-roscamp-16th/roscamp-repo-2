@@ -74,6 +74,20 @@ def test_a_waiting_robot_away_from_the_blocked_way_stays():
     assert "HALL_YIELD" not in world.codes() and not world.moves("pode2")
 
 
+def test_a_parking_try_that_cannot_take_its_way_leaves_the_waiting_record_alone():
+    world = Harness(layout="d", starts={"pode1": "P-1", "pode2": "O_Q", "pode3": "P-3"})
+    world.report()
+    traffic = world.traffic
+    # 하나 남은 주차 자리 P-2는 서쪽에 있다. 건너갈 통로도, 급행으로 나가는 지점도 남이 쥐었다
+    assert traffic.grants.force("pode1", ["CORR_M", "CORR_S"], [])
+    assert traffic.grants.force("pode3", [], ["N_E"])
+    assert not traffic._to_parking(traffic._robots["pode2"], "INFO", "HALL_YIELD", "goes to")
+    assert traffic.grants.waiting() == {}, "it only tried: it does not wait for the corridor"
+    traffic.grants.note_waiting("pode2", ("OUT_DOCK",))  # 이미 다른 것을 기다리던 로봇이면
+    assert not traffic._to_parking(traffic._robots["pode2"], "INFO", "HALL_YIELD", "goes to")
+    assert traffic.grants.waiting() == {"pode2": ("OUT_DOCK",)}, "what it waited for stays"
+
+
 # ---- 선 로봇이 쥔 지점을 거치는 길은 고르지 않는다(회피 흉내 none에서 끝나지 않던 두 경우) ----
 
 def run_past(world, done, timeout_s, body, radius):
@@ -148,13 +162,28 @@ def run_among(world, done, timeout_s, radius):
 
 
 def stuck_behind_the_queue():
-    """동쪽 마당: 먼저 불린 pode3의 곧은 길과 돌아가는 길이 모두 막히고 남은 길은 O_Q를 거친다."""
-    world = Harness(layout="d2", starts={"pode1": "P-2", "pode2": "O_Q", "pode3": "P-3"})
+    """배치 D 동쪽 마당: 먼저 불린 pode3의 곧은 길과 남쪽 통로 길이 모두 막히고 남은 길은 O_Q를 거친다."""
+    world = Harness(layout="d", starts={"pode1": "P-2", "pode2": "O_Q", "pode3": "P-3"})
     world.report()
     first = world.call("OUTBOUND", "pode3")
     world.now += DT / 2  # pode3이 먼저 불렸다
     second = world.call("OUTBOUND", "pode2")
     return world, first, second
+
+
+def test_a_queued_robot_that_cannot_be_passed_takes_the_dock_turn_first():
+    """pode3은 O_Q가 비기를, pode2는 pode3의 차례를 기다려 둘 다 서면 앞을 막은 pode2가 먼저 도크에 간다."""
+    world, first, second = stuck_behind_the_queue()
+    assert run_among(world, lambda: world.result_of(second) is not None, 200.0, 0.2)
+    assert world.result_of(second).success, "the robot in the way goes first"
+    assert world.result_of(first) is None
+    told = [e.detail for e in world.events if e.code == "DOCK_TURN_TAKEN"]
+    assert told == ["goes before pode3, which waits for O_Q"]
+    world.traffic.on_release("pode2")
+    assert run_among(world, lambda: world.result_of(first) is not None, 300.0, 0.2)
+    assert world.result_of(first).success, "the robot that was called first still gets there"
+    assert "GOAL_FAILED" not in world.codes()
+    assert world.problems == []
 
 
 def test_the_dock_turn_stays_while_the_first_robot_can_still_move():
@@ -169,11 +198,11 @@ def test_the_dock_turn_stays_while_the_first_robot_can_still_move():
 
 def test_a_robot_on_its_way_to_the_dock_keeps_the_turn():
     """차례를 앞지른 로봇의 도크 길이 설 수 있는 지점을 거치면 가는 중인 로봇이 차례를 지킨다."""
-    world = Harness(layout="d2", starts={"pode2": "P-1", "pode3": "P-3"})
+    world = Harness(layout="d", starts={"pode2": "P-1", "pode3": "P-3"})
     world.report()
     traffic = world.traffic
     for edge in (("P-3", "N_E"), ("P-3", "O_Q")):
-        traffic._blocked[edge] = 1e9  # pode3은 돌아가는 길로 간다
+        traffic._blocked[edge] = 1e9  # pode3은 남쪽 통로로 돌아간다
     going = world.call("OUTBOUND", "pode3")
     assert world.run_until(lambda: world.moves("pode3"), 5.0)
     route = traffic._robots["pode3"].route
@@ -193,11 +222,8 @@ def test_a_robot_on_its_way_to_the_dock_keeps_the_turn():
 
 
 def test_only_a_route_that_took_the_dock_turn_counts_as_on_its_way():
-    """order 모델: 도크까지 이어진 대기 길도 차례(turn)를 받은 길이 아니면 줄에 선 것이다.
-
-    먼저 불린 로봇의 차례를 가져가지 않는다.
-    """
-    world = Harness(layout="d2", starts={"pode2": "O_Q", "pode3": "P-3"})
+    """order 모델: 도크까지 이어진 대기 길도 차례(turn)를 받은 길이 아니면 줄에 선 것이라 먼저 불린 로봇의 차례를 가져가지 않는다."""
+    world = Harness(layout="d", starts={"pode2": "O_Q", "pode3": "P-3"})
     world.report()
     traffic = world.traffic
     world.call("OUTBOUND", "pode3")

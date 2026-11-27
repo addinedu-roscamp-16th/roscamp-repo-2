@@ -1,10 +1,6 @@
 """FleetManager는 두 코어를 잇는다: 내부 호출은 안에 머물고 옛 출력은 그대로 나온다. 로봇 흉내 drive()는 받은 이동, 물러나기, 도킹을 곧바로 성공시킨다."""
 from core_helpers import cmds
 from fleet_core.common.commands import (
-    FILL,
-    ArmFailedCmd,
-    ArmFault,
-    ArmFillCmd,
     CancelDispatchCmd,
     DispatchCmd,
     DispatchFeedback,
@@ -12,6 +8,7 @@ from fleet_core.common.commands import (
     DockCmd,
     MoveCmd,
     MoveOrderCmd,
+    OrderRecord,
     ReleaseCmd,
     RetreatCmd,
     RobotFaultCmd,
@@ -20,18 +17,24 @@ from fleet_core.common.commands import (
 from fleet_core.common.params import load_params
 from fleet_core.fleet_map import load_fleet_map
 from fleet_core.manager import FleetManager
+from fleet_core.common.commands import FILL
+from fleet_core.common.commands import ArmFailedCmd
+from fleet_core.common.commands import ArmFault
+from fleet_core.common.commands import ArmFillCmd
 
 INTERNAL = (DispatchCmd, CancelDispatchCmd, ReleaseCmd, RobotFaultCmd, DispatchFeedback,
             DispatchResult, RobotIsolated)
+O1 = OrderRecord("O-001", {"A": 1})
+O2 = OrderRecord("O-002", {"B": 1})
 SITE = load_fleet_map("d2")
 
 
-def make(nodes):
+def make(nodes, orders=()):
     now = [0.0]
     core = FleetManager(SITE, load_params(), list(nodes), lambda: now[0])
     for robot, node in nodes.items():
         report(core, robot, node)
-    core.on_order_board("RUN", [])
+    core.on_order_board("RUN", list(orders))
     return core, now
 
 
@@ -91,22 +94,6 @@ def drive(core, robots, until, first=(), limit=300):
     raise AssertionError(f"not reached: {[core.robot_view(r) for r in robots]}")
 
 
-def call(core, goal_id, station="", robot=""):
-    """주문 쪽이 낼 배차를 FleetManager의 전달 길로 넣는다. 이름 없으면 WORK 열린 호출."""
-    core._route(DispatchCmd(goal_id, station or core._work, robot))
-
-
-def send_out(core, robot, goal_id):
-    """WORK에 선 로봇을 놓아 주고 이름을 붙여 OUTBOUND로 부른다."""
-    core._route(ReleaseCmd(robot))
-    call(core, goal_id, core._outbound, robot)
-
-
-def ask_fill(core, robot="r1"):
-    core._route(ArmFillCmd(robot, core._work, "O-001", {"A": 1}))
-    return core.tick()
-
-
 def test_inside_calls_never_reach_the_ros_side():
     core, _ = make({"r1": "P-1"})
     call(core, 1000)
@@ -114,8 +101,6 @@ def test_inside_calls_never_reach_the_ros_side():
     out += drive(core, "r1", lambda: core.robot_view("r1")["phase"] == "FILLING", first=out)
     assert out, "the walk produced commands"
     assert not [c for c in out if isinstance(c, INTERNAL)]
-
-
 
 
 def test_the_view_shows_the_old_station_phases_not_the_traffic_one():
@@ -137,66 +122,41 @@ def test_goal_ids_of_moves_and_arm_jobs_share_one_sequence():
     assert ids == sorted(ids) and len(ids) == len(set(ids))
 
 
+def test_a_refused_confirm_clear_keeps_the_order_on_its_robot():
+    core, _ = make({"r1": "P-1"}, [O1])
+    drive(core, "r1", lambda: core.robot_view("r1")["order"] == "O-001")
+    assert core.confirm_clear("r1", ["NOPE"], "typo") is None
+    assert core.confirm_clear("r1", [], "forgot the list") is None
+    assert core.robot_view("r1")["order"] == "O-001"
+    assert core.robot_view("r1")["state"] != "OUT_OF_SERVICE"
 
 
-
-
-
-
-def test_an_arm_past_its_retries_is_an_arm_fault_and_the_robot_stays_available():
-    core, now = make({"r1": "P-1"})
-    reports = []
-    core.orchestrator.on_arm_report = reports.append
-    call(core, 1000)
-    drive(core, "r1", lambda: core.robot_view("r1")["phase"] == "FILLING")
-    goal = cmds(ask_fill(core), "FillCmd")[0].goal_id
+def _arm_held():
+    """팔이 재시도 한도를 넘어 주문이 ARM_FAULT로 보류된 코어."""
+    core, now = make({"r1": "P-1"}, [O1])
+    out = drive(core, "r1", lambda: core.robot_view("r1")["order"] == "O-001")
+    goal = cmds(out, "FillCmd")[0].goal_id
+    seen = []
     for _ in range(core.params.move_retry_limit + 1):
         core.on_fill_result(goal, False, {}, {}, "GRIPPER")
-        core._route(ArmFailedCmd("r1"))
         now[0] += core.params.arm_retry_wait_s
         report(core, "r1", "W", "DOCKED")
-        fills = cmds(ask_fill(core), "FillCmd")
+        out = core.tick()
+        seen += out
+        fills = cmds(out, "FillCmd")
         if fills:
             goal = fills[0].goal_id
-    faults = [r for r in reports if isinstance(r, ArmFault)]
-    assert [(f.robot, f.kind, f.reason) for f in faults] == [("r1", FILL, "workcell: GRIPPER")]
-    assert core.robot_view("r1")["state"] != "ERROR"
-    assert core.traffic.available("r1")
+    return core, now, seen
 
 
-def test_force_ship_goes_to_the_orders_side_and_returns_its_answer():
-    core, _ = make({"r1": "P-1"})
-    assert core.force_ship("O-001") == (False, "NOT_IMPLEMENTED")
-    refused = [e for e in cmds(core.tick(), "EventOut") if e.code == "INPUT_REJECTED"]
-    assert len(refused) == 1 and "O-001" in refused[0].detail
-    asked = []
-    core.orchestrator.on_force_ship = lambda order_id: asked.append(order_id) or (True, "")
-    assert core.force_ship("O-002") == (True, "") and asked == ["O-002"]
-    assert not [e for e in cmds(core.tick(), "EventOut") if e.code == "INPUT_REJECTED"]
-
-
-
-
-
-
-def test_recovery_on_the_way_out_still_heads_to_outbound():
-    core, now = make({"r1": "P-1"})
-    call(core, 1000)
-    drive(core, "r1", lambda: core.robot_view("r1")["phase"] == "FILLING")
-    send_out(core, "r1", 1001)
-    report(core, "r1", "W", "DOCKED")
-    core.tick()
-    now[0] += core.params.comm_timeout_s + 0.1
-    core.tick()
-    assert core.robot_view("r1")["state"] == "COMM_LOST"
-    now[0] += 1.0
-    report(core, "r1", "W")
-    core.tick()
-    now[0] += core.params.recover_check_s
-    report(core, "r1", "W")
-    core.tick()
-    assert core.robot_view("r1")["state"] == "TO_OUTBOUND"
-    assert core.robot_view("r1")["destination"] == "OUTBOUND"
+def _filled_and_leaving(robot="r1"):
+    """실제 결과로 채워지고 나가는 중인 바구니. 화이트박스 없음."""
+    core, now = make({robot: "P-1"}, [O1])
+    out = drive(core, robot, lambda: core.robot_view(robot)["order"] == "O-001")
+    core.on_fill_result(cmds(out, "FillCmd")[0].goal_id, True, {"A": 1}, {}, "")
+    report(core, robot, "W", "DOCKED")
+    leaving = core.tick()
+    return core, now, leaving
 
 
 def test_a_robot_at_a_station_waits_for_nobody():
@@ -264,7 +224,7 @@ def test_a_waiting_robot_shows_the_zone_and_who_is_in_the_way():
     """a가 작업 도크 앞목(X_W)에서 고장 나 섰고 불린 b는 J_W를 a 때문에 기다린다(도크에 선 로봇 뒤의 차례는 DOCK_QUEUED다)."""
     core, _ = make({"a": "X_W", "b": "P-2"})
     core.traffic.on_robot_fault("a", "NAV_ABORTED")
-    call(core, 1000)
+    core.on_order_board("RUN", [O1])
     core.tick()
     core.tick()
     view = status(core, "b")
@@ -297,3 +257,88 @@ def test_sr17_every_robot_state_can_be_told_apart():
     assert status(core, "r2").fsm_state == "DOCKING"
     core.traffic.on_robot_fault("r2", "DOCK_FAILED")
     assert (status(core, "r2").fault, status(core, "r2").fault_reason) == ("ERROR", "DOCK_FAILED")
+
+
+# ---- 팔 상태와 담기 결과 칸이 매니저를 지난다 ----
+
+
+def _filling():
+    core, now = make({"r1": "P-1"}, [O1])
+    out = drive(core, "r1", lambda: core.robot_view("r1")["order"] == "O-001")
+    return core, now, cmds(out, "FillCmd")[0].goal_id
+
+
+def test_an_arm_state_input_is_recorded():
+    lines = []
+    core = FleetManager(SITE, load_params(), ["r1"], lambda: 0.0)
+    core.record_to(lines.append)
+    core.on_arm_state("arm_left", "ERROR", "X", True)
+    assert '"in": "on_arm_state"' in lines[-1]
+
+
+def call(core, goal_id, station="", robot=""):
+    """주문 쪽이 낼 배차를 FleetManager의 전달 길로 넣는다. 이름 없으면 WORK 열린 호출."""
+    core._route(DispatchCmd(goal_id, station or core._work, robot))
+
+
+def send_out(core, robot, goal_id):
+    """WORK에 선 로봇을 놓아 주고 이름을 붙여 OUTBOUND로 부른다."""
+    core._route(ReleaseCmd(robot))
+    call(core, goal_id, core._outbound, robot)
+
+
+def ask_fill(core, robot="r1"):
+    core._route(ArmFillCmd(robot, core._work, "O-001", {"A": 1}))
+    return core.tick()
+
+
+def test_an_arm_past_its_retries_is_an_arm_fault_and_the_robot_stays_available():
+    core, now = make({"r1": "P-1"})
+    reports = []
+    core.orchestrator.on_arm_report = reports.append
+    call(core, 1000)
+    drive(core, "r1", lambda: core.robot_view("r1")["phase"] == "FILLING")
+    goal = cmds(ask_fill(core), "FillCmd")[0].goal_id
+    for _ in range(core.params.move_retry_limit + 1):
+        core.on_fill_result(goal, False, {}, {}, "GRIPPER")
+        core._route(ArmFailedCmd("r1"))
+        now[0] += core.params.arm_retry_wait_s
+        report(core, "r1", "W", "DOCKED")
+        fills = cmds(ask_fill(core), "FillCmd")
+        if fills:
+            goal = fills[0].goal_id
+    faults = [r for r in reports if isinstance(r, ArmFault)]
+    assert [(f.robot, f.kind, f.reason) for f in faults] == [("r1", FILL, "workcell: GRIPPER")]
+    assert core.robot_view("r1")["state"] != "ERROR"
+    assert core.traffic.available("r1")
+
+
+def test_force_ship_goes_to_the_orders_side_and_returns_its_answer():
+    core, _ = make({"r1": "P-1"})
+    assert core.force_ship("O-001") == (False, "NOT_IMPLEMENTED")
+    refused = [e for e in cmds(core.tick(), "EventOut") if e.code == "INPUT_REJECTED"]
+    assert len(refused) == 1 and "O-001" in refused[0].detail
+    asked = []
+    core.orchestrator.on_force_ship = lambda order_id: asked.append(order_id) or (True, "")
+    assert core.force_ship("O-002") == (True, "") and asked == ["O-002"]
+    assert not [e for e in cmds(core.tick(), "EventOut") if e.code == "INPUT_REJECTED"]
+
+
+def test_recovery_on_the_way_out_still_heads_to_outbound():
+    core, now = make({"r1": "P-1"})
+    call(core, 1000)
+    drive(core, "r1", lambda: core.robot_view("r1")["phase"] == "FILLING")
+    send_out(core, "r1", 1001)
+    report(core, "r1", "W", "DOCKED")
+    core.tick()
+    now[0] += core.params.comm_timeout_s + 0.1
+    core.tick()
+    assert core.robot_view("r1")["state"] == "COMM_LOST"
+    now[0] += 1.0
+    report(core, "r1", "W")
+    core.tick()
+    now[0] += core.params.recover_check_s
+    report(core, "r1", "W")
+    core.tick()
+    assert core.robot_view("r1")["state"] == "TO_OUTBOUND"
+    assert core.robot_view("r1")["destination"] == "OUTBOUND"

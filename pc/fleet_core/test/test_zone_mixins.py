@@ -1,7 +1,4 @@
-"""구역 교통의 믹스인들은 같은 이름의 메서드를 두 번 정의하지 않는다.
-
-앞 믹스인의 것이 조용히 이기기 때문이다. 주문 코어와 FleetManager도 같은 검사를 한다.
-"""
+"""구역 교통의 믹스인들은 같은 이름의 메서드를 두 번 정의하지 않는다(앞 믹스인의 것이 조용히 이기므로). 주문 코어와 FleetManager도 같은 검사를 한다."""
 from collections import defaultdict
 
 from fleet_core.manager import FleetManager

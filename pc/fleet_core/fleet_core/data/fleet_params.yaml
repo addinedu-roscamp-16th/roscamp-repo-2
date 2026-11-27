@@ -1,6 +1,5 @@
 # 관제 정책 값. 모두 제안값이고 실측 전이다.
-basket_capacity: 4            # 주문 처리에서 쓰는 값. 바구니 하나에 담는 최대 수량(추정)
-ship_partial: true            # 주문 처리에서 쓰는 값. 일부만 담겨도 내보내고, 빈 바구니는 남긴다
+basket_capacity: 4            # 바구니 하나에 담는 최대 수량(추정)
 robot_radius_m: 0.08          # Pode 몸체 반경(추정)
 release_margin_extra_m: 0.05  # 시나리오 판정 전용: 반경 + 이 값 = 코스 이탈
 release_distance_m: 0.2       # 구역 교통은 읽지 않는다(footprint_radius_m + release_margin_m로 놓음). Pode FSM은 같은 이름의 자기 파라미터를 쓴다
@@ -22,18 +21,18 @@ comm_timeout_s: 3.0           # 통신 끊김 판정
 heartbeat_period_s: 0.5       # /fleet/heartbeat 주기(실제 시계 기준)
 heartbeat_timeout_s: 1.5      # 이만큼 못 받으면 로봇이 멈춘다
 recover_check_s: 1.0
-arm_cancel_wait_s: 5.0        # 정지 취소(시간 초과 아님) 뒤 결과를 기다리는 시간
+arm_cancel_wait_s: 5.0
 robot_timeout_settle_s: 30.0  # 시간 초과·결과 잃음(결과 모름)을 정하는 시간. 넘기면 고장(IR-62)
 arm_retry_wait_s: 2.0
 fill_timeout_s: 90.0          # 팔 두 대가 바구니 하나를 채우는 제한 시간
-swap_timeout_s: 60.0          # arm_ship이 찬 바구니를 빼고 빈 바구니를 놓는 제한 시간
+swap_timeout_s: 60.0          # arm_ship이 바구니를 바꾸는 제한 시간
 cancel_retry_s: 1.0           # 취소한 goal 결과가 없으면 이 주기로 다시 요청
-cancel_warn_after: 38         # 결과 없이 이만큼 주기가 지나면 CANCEL_UNCONFIRMED.
-                              # 지터 하한(x0.8)을 곱해도 arm_cancel_wait_s·robot_timeout_settle_s 이상이어야 한다
+cancel_warn_after: 38         # 결과 없이 이만큼 주기가 지나면 CANCEL_UNCONFIRMED
+                              # 지터 하한(×0.8)을 곱해도 arm_cancel_wait_s·robot_timeout_settle_s 이상
 report_retry_s: 1.0           # 주문 보고를 처음 다시 보내는 간격. 답이 없으면 이만큼 뒤부터 두 배씩(±20%),
                               # report_retry_max_s에서 멈춤 (IR-40)
 report_retry_max_s: 10.0      # 다시 보내는 간격의 상한(IR-40)
-report_max_in_flight: 4       # IR-41: 답을 기다리는 주문 보고 요청 수 상한(로봇 세 대 + 하나)
+report_max_in_flight: 4       # 답을 기다리는 주문 보고 요청 수 상한(IR-41)
 zone_wait_warn_s: 60.0        # 한 구역을 이만큼 기다리면 경고
 deadlock_grace_s: 5.0         # 교착 두 번째 단계 전 대기
 score_same_call: -4.0         # 이미 불린 로봇은 다른 로봇이 확실히 가깝지 않으면 호출을 유지
@@ -44,8 +43,8 @@ input_pose_margin_m: 1.0      # 웨이포인트 범위 밖으로 이보다 먼 �
 idle_watch_s: 10.0            # 주행 단계인데 goal도 구역 대기표도 없이 이만큼 서면 ROBOT_IDLE을 남긴다
 battery_low_pct: 0.0          # 이 값 이하면 새 일을 받지 않고 충전 자리로 간다. 0이면 끈다
 battery_charged_pct: 80.0     # 이 값 이상이 되면 다시 일을 받는다
-dispatch_retry_wait_s: 2.0    # 주문 처리에서 쓰는 값. 출고 호출이 실패하면 이만큼 뒤 다시 보낸다
-dispatch_retry_limit: 3       # 주문 처리에서 쓰는 값. 출고 호출 실패가 이 수를 넘으면 ERROR(DISPATCH_FAILED)
+dispatch_retry_wait_s: 2.0    # 출고 호출이 실패하면 이만큼 뒤 다시 보낸다
+dispatch_retry_limit: 3       # 출고 호출 실패가 이 수를 넘으면 ERROR(DISPATCH_FAILED)
 self_recovery_limit_s: 45.0   # RECOVERING이 이만큼 넘게 이어지면 BLOCKED로 본다
 traffic_mode: zones           # 교통 층: zones(구역 허락)만 있다
 # ---- 구역 교통 층(traffic/zone) ----
@@ -53,7 +52,7 @@ nav_speed_mps: 0.12           # 넓은 구역(Nav2 goal)의 ETA와 길 비용 �
 nav_eta_speed_ratio: 1.0      # 넓은 구역 ETA 순항 속도 = nav_speed_mps x 이 비율(0 초과 1 이하, 길 비용에는 안 씀)
 follow_speed_mps: 0.12        # 고정 경로(FollowPath) 속도
 retreat_speed_mps: 0.05       # 후진(Retreat) 속도
-nav_pass_m: 0.15              # 넓은 구역 ETA: 끝 노드 이만큼 앞에서 다음 조각으로 넘어간다. 0이면 끔
+nav_pass_m: 0.12              # 넓은 구역 ETA: 끝 노드 이만큼 앞에서 다음 조각으로 넘어간다(pode_fsm pass_m와 같게). 0이면 끔
 nav_turn_rps: 1.0             # 넓은 구역 ETA: 끝에서 끝 방향으로 도는 각속도. 0이면 끔
 nav_goal_tolerance_m: 0.05    # 넓은 구역 ETA: 끝 노드에서 이만큼 안이면 이미 닿은 것으로 본다
 footprint_radius_m: 0.085     # Nav2 발자국의 반 대각선
@@ -72,7 +71,7 @@ pose_jump_window_s: 2.0       # 위치 추정 감시: 이 시간 안의 두 보�
 pose_jump_m: 0.15             # 갈 수 있는 거리보다 이만큼 넘게 옮겨지면 LOCALIZATION_SUSPECT(기록만)
 pose_jump_quiet_s: 5.0        # 한 번 낸 뒤 이만큼은 다시 내지 않는다
 redock_wait_s: 10.0           # 도킹 실패 로봇이 물러날 길이 비기를 기다리는 시간. 넘으면 그 자리에서 다시 도킹
-# TODO(pode_dock): 진짜 도킹이 들어오면 lost_dock_reach_m을 3 cm 근처로 조인다. 지금 값은 도킹 대역의 성공 거리와 같다
+# TODO(pode_dock): 진짜 도킹이 들어오면 lost_dock_reach_m을 3 cm 근처로 조인다
 lost_dock_reach_m: 0.15       # 도킹 결과를 잃었을 때 보고 위치가 도크 지점에서 이만큼 안이면 도킹 완료(IR-62)
 lost_dock_yaw_deg: 15.0       # 그때 보고 방향도 도크 방향에서 이만큼 안이어야 한다
 retreat_clear_m: 0.20         # 물러나기 길이 다른 로봇에 이만큼 안으로 다가가면 내지 않는다
@@ -91,3 +90,4 @@ check_radius_m: 0.10          # CheckClear의 r(보고한 칸 둘레 두 칸과 
 check_interval_s: 5.0         # 한 표시에 이만큼마다 한 번을 넘게 묻지 않는다
 clear_confirm: 2              # clear 답이 이만큼 이어지면 표시를 지운다(BLOCK_CLEARED)
 blocked_retry_max_s: 300.0    # 다시 막히면 다음 지우기까지 시간을 두 배로, 이 값까지
+plan_split: false             # 해결안 B: 켜면 지도 splits의 출발 자리에서 가는 Nav2 goal을 중간 지점을 거쳐 둘로 나눈다. 기본 끔

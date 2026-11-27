@@ -39,7 +39,7 @@ def calls(world, *robots):
 def test_the_line_key_is_read_and_is_off_by_default():
     assert line_map().stations["WORK"].line is True
     assert line_map(line=False).stations["WORK"].line is False
-    for layout in ("d2",):
+    for layout in ("d2", "d", "c"):
         assert not any(s.line for s in load_fleet_map(layout).stations.values()), layout
     v7 = load_fleet_map("v7").stations
     assert v7["WORK"].line and not v7["OUTBOUND"].line  # WORK에만

@@ -11,7 +11,6 @@ import yaml
 from fleet_core.common.params import (
     DEFAULT_PARAMS,
     OPTIONAL,
-    RETRY_JITTER,
     ZERO_MEANS_OFF,
     FleetParams,
     load_params,
@@ -182,6 +181,7 @@ def test_a_float_key_written_as_an_integer_loads(tmp_path):
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "tools"))
 import replay  # noqa: E402
+from fleet_core.common.params import RETRY_JITTER
 
 
 def recorded_head():
@@ -218,6 +218,7 @@ def test_replay_of_a_record_with_stall_s_uses_it():
 
 def old_stall_record(path):
     """stall_s 키가 없던 때의 기록 흉내: 6 s 코어로 기록하고 머리에서 stall_s를 지운다."""
+    from fleet_core.common.commands import OrderRecord
     from fleet_core.fleet_map import load_fleet_map
     from fleet_core.manager import FleetManager
     now = [0.0]
@@ -225,10 +226,10 @@ def old_stall_record(path):
                         lambda: now[0])
     lines = []
     core.record_to(lines.append)
-    x, y = core.site.node_pose("X_W")
+    x, y = core.site.node_pose("P-1")
     for _ in range(3):
         core.on_robot_state("pode1", x, y, 0.0, "IDLE", 90.0)
-    core.on_order_board("RUN", [])
+    core.on_order_board("RUN", [OrderRecord("O-001", {"A": 1})])
     for _ in range(100):
         now[0] += 0.1
         core.on_robot_state("pode1", x, y, 0.0, "MOVING", 90.0)
@@ -283,6 +284,12 @@ def test_without_the_compat_default_the_old_record_would_replay_differently(tmp_
     assert all(abs(t - recorded[0]) > 1.0 for t in stall_times(produced))
 
 
+@pytest.mark.parametrize("bad", [-1.0, 0.0, float("inf")])
+def test_the_lost_dock_heading_tolerance_is_a_positive_angle(tmp_path, bad):
+    with pytest.raises(ValueError, match="lost_dock_yaw_deg"):
+        load_params(write(tmp_path, {**SHIPPED, "lost_dock_yaw_deg": bad}))
+
+
 def test_the_cancel_warning_waits_as_long_as_the_core_waits_for_an_arm():
     """노드의 CANCEL_UNCONFIRMED는 코어가 아직 기다리는 팔을 일찍 부르면 안 된다.
     재시도 간격이 ±20%로 흔들리므로 가장 짧은 경우로 본다(IR-41)."""
@@ -298,12 +305,6 @@ def test_the_settle_time_of_a_timeout_is_no_shorter_than_a_plain_cancel_wait():
     params = load_params()
     assert params.robot_timeout_settle_s == 30.0
     assert params.robot_timeout_settle_s >= params.arm_cancel_wait_s
-
-
-@pytest.mark.parametrize("bad", [-1.0, 0.0, float("inf")])
-def test_the_lost_dock_heading_tolerance_is_a_positive_angle(tmp_path, bad):
-    with pytest.raises(ValueError, match="lost_dock_yaw_deg"):
-        load_params(write(tmp_path, {**SHIPPED, "lost_dock_yaw_deg": bad}))
 
 
 def test_report_retry_defaults_follow_ir40():

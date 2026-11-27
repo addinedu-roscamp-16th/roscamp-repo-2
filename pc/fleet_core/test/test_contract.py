@@ -12,6 +12,19 @@ def contract():
     return load_contract(CONTRACT)
 
 
+def test_force_ship_rejections_use_contract_codes(contract):
+    """강제 출고 거절 사유는 계약의 request_rejected 코드만 쓴다."""
+    from fleet_core.common import commands
+    codes = {getattr(commands, n) for n in dir(commands) if n.startswith("FORCE_")}
+    assert codes and codes <= set(contract.reason_codes["request_rejected"])
+
+
+def test_clear_and_reinstate_rejections_use_contract_codes(contract):
+    from fleet_core.common import commands
+    codes = {getattr(commands, n) for n in dir(commands) if n.startswith("REJECT_")}
+    assert codes and codes <= set(contract.reason_codes["request_rejected"])
+
+
 def test_topic_name_is_built_from_key_and_placeholder(contract):
     assert contract.name("robot_state", pode="pode2") == "/pode2/state"
     assert contract.name("order_board") == "/central/orders"
@@ -69,7 +82,8 @@ def test_entry_with_undefined_qos_profile_is_rejected(tmp_path):
         load_contract(bad)
 
 
-# ---- 계약 0.6: ReportOrder 보류 사유와 CANCELED ----
+# ---- 계약 0.6: 팀 레포 지시서와 글자 하나까지 같다 ----
+SRV = CONTRACT.parent / "srv"
 REPORT_ORDER_0_6 = """string STATUS_SHIPPED="SHIPPED"
 string STATUS_PARTIAL="PARTIAL"
 string STATUS_HELD="HELD"
@@ -88,14 +102,86 @@ bool accepted
 """
 
 
-def test_report_order_matches_the_contract_0_6_text():
-    srv = CONTRACT.parent / "srv" / "ReportOrder.srv"
-    assert srv.read_text(encoding="utf-8") == REPORT_ORDER_0_6
+def test_order_report_keeps_the_team_0_6_text():
+    assert (SRV / "ReportOrder.srv").read_text(encoding="utf-8") == REPORT_ORDER_0_6
 
 
-def test_the_contract_is_version_0_8():
+# ---- 계약 0.9: 인터페이스 명세 v0.2 ----
+def test_the_contract_is_version_0_9():
     import yaml
-    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.8
+    assert yaml.safe_load(CONTRACT.read_text(encoding="utf-8"))["version"] == 0.9
+
+
+def test_contract_0_9_names_the_arms_like_the_spec(contract):
+    assert contract.placeholders["arm"] == ["arm_left", "arm_right", "arm_ship"]
+    assert contract.name("swap_basket", arm="arm_ship") == "/arm_ship/swap_basket"
+    names = {e.name for e in contract.expanded()}
+    assert {"/arm_left/state", "/arm_right/state", "/arm_ship/state"} <= names
+    # 명세 v0.2 (11-24): Phony도 락 해제 · 잠금 대상이다
+    assert "/arm_ship/set_lock" in names and "/arm_ship/fault_resolved" not in names
+    assert {"/arm_ship/set_mode", "/arm_ship/force", "/pode1/charge_end"} <= names
+
+
+SPEC_NAMES = {
+    "system_mode": ("/system/mode", "msg/SystemMode"),
+    "close_state": ("/bridge/close_state", "msg/CloseState"),
+    "submit_trip": ("/central/submit_trip", "srv/SubmitTrip"),
+    "cancel_order": ("/central/cancel_order", "srv/CancelOrder"),
+    "set_run_mode": ("/central/set_run_mode", "srv/SetRunMode"),
+    "set_assign_hold": ("/central/set_assign_hold", "srv/SetAssignHold"),
+    "get_close_state": ("/bridge/get_close_state", "srv/GetCloseState"),
+    "hello": ("/bridge/hello", "srv/Hello"),
+    "list_open_trips": ("/bridge/list_open_trips", "srv/ListOpenTrips"),
+    "report_trip": ("/bridge/report_trip", "srv/ReportTrip"),
+    "report_command": ("/bridge/report_command", "srv/ReportCommand"),
+    "report_event": ("/bridge/report_event", "srv/ReportEvent"),
+    "check_stock": ("/bridge/check_stock", "srv/CheckStock"),
+    "set_lock": ("/fleet/set_lock", "srv/SetLock"),
+    "fault_resolved": ("/fleet/fault_resolved", "srv/RobotCommand"),
+    "resume_arm": ("/fleet/resume_arm", "srv/RobotCommand"),
+    "charge_end": ("/fleet/charge_end", "srv/RobotCommand"),
+    "force_input": ("/fleet/force_input", "srv/ForceInput"),
+    "resume_fill": ("/fleet/resume_fill", "srv/TripCommand"),
+    "force_ship": ("/fleet/force_ship", "srv/TripCommand"),
+    "force_partial": ("/fleet/force_partial", "srv/TripCommand"),
+    "return_to_shelf": ("/fleet/return_to_shelf", "srv/TripCommand"),
+    "resume_held": ("/fleet/resume_held", "srv/TripCommand"),
+    "requeue_trip": ("/fleet/requeue_trip", "srv/TripCommand"),
+}
+
+
+@pytest.mark.parametrize("key", sorted(SPEC_NAMES))
+def test_contract_0_7_has_every_spec_name_with_its_type(contract, key):
+    name, kind = SPEC_NAMES[key]
+    assert contract.name(key) == name
+    assert contract.type(key) == f"fleet_interfaces/{kind}"
+
+
+def test_every_type_the_contract_names_is_built():
+    cmake = (CONTRACT.parent / "CMakeLists.txt").read_text(encoding="utf-8")
+    data = load_contract(CONTRACT)
+    for entry in data.entries.values():
+        package, kind, name = entry.type.split("/")
+        if package == "fleet_interfaces":
+            assert f'"{kind}/{name}.{kind}"' in cmake, entry.type
+            assert (CONTRACT.parent / kind / f"{name}.{kind}").exists(), entry.type
+    assert "ForceShip" not in cmake
+
+
+def test_reason_code_table_has_the_spec_codes(contract):
+    codes = {c for group in contract.reason_codes.values() for c in group}
+    assert {"NOT_FOUND", "LOCK_RELEASED", "HOLDING_ITEM", "MODE_MISMATCH", "NOT_READY",
+            "ROBOT_TIMEOUT", "PICK_FAILED", "FLEET_RESTART", "NOTHING_TO_FILL",
+            "FORCED_PARTIAL", "LATE_REPORT", "NOT_IMPLEMENTED", "NAV_UNAVAILABLE"} <= codes
+    assert len(codes) == 33
+
+
+def test_entries_no_fake_node_opens_are_left_out_of_the_fake_check(contract):
+    fake = {e.name for e in contract.expanded(include_real_only=False)}
+    real = {e.name for e in contract.expanded(include_real_only=True)}
+    assert "/bridge/hello" in real and "/bridge/hello" not in fake
+    assert "/system/mode" in real and "/system/mode" not in fake
+    assert "/arm_left/state" in fake and "/fleet/force_ship" in fake
 
 
 # ---- 계약 0.8: 로봇 운영 모드 (SetMode, IR-73) ----

@@ -5,6 +5,8 @@ import math
 import pytest
 from fleet_core.fleet_map import (
     KNOWN_LAYOUTS,
+    LAYOUTS,
+    TEST_LAYOUTS,
     FleetMap,
     FleetMapError,
     distance,
@@ -49,8 +51,8 @@ SMALL = {
     },
     "nav": [{"nodes": ["N_W", "N_E", "W_Q", "O_Q", "P-1", "P-2"]}],
     "stations": {
-        "WORK": {"dock": "W", "queue": ["W_Q"], "server": "workcell", "arms": ["arm_left", "arm_right"],
-                 "action": "fill"},
+        "WORK": {"dock": "W", "queue": ["W_Q"], "server": "workcell",
+                 "arms": ["arm_left", "arm_right"], "action": "fill"},
         "OUTBOUND": {"dock": "O", "queue": ["O_Q"], "server": "arm_ship", "arms": ["arm_ship"],
                      "action": "swap"},
     },
@@ -280,7 +282,7 @@ def test_a_nav_group_may_add_length_to_the_price_of_its_edges():
     assert shortest_path(plain, "W", "O", no_express)[0].b == "N_W"
 
 
-def test_stations_keep_the_fields_the_arm_and_the_orders_read():
+def test_stations_keep_the_fields_orders_and_arms_read():
     site = build()
     work = site.stations["WORK"]
     assert (work.id, work.dock, work.queue, work.server, work.arms, work.action) == (
@@ -581,9 +583,41 @@ def test_d2_matches_the_instruction():
     assert not any("ends at" in w for w in site.warnings), "D2 backs into the hall"
 
 
+def test_the_test_layout_d2_shelf_is_d2_plus_one_shelf_and_is_not_a_candidate():
+    # 배치를 더해도 유지되는 조건만 본다: 목록의 값 전체를 고정하지 않는다
+    assert "d2_shelf" in TEST_LAYOUTS and "d2_shelf" not in LAYOUTS
+    assert not set(LAYOUTS) & set(TEST_LAYOUTS)
+    assert KNOWN_LAYOUTS == (*LAYOUTS, *TEST_LAYOUTS)
+    d2, test = load_fleet_map("d2"), load_fleet_map("d2_shelf")
+    assert test.name == "arena_d2_shelf"
+    assert test.shelves[0] == d2.shelves[0] and len(test.shelves) == 2
+    # D처럼 마당을 둘로 나누지 않는다: 마당은 구역 하나, 새 진열대는 마당 안에 있다
+    assert list(test.zones) == list(d2.zones) and test.zones["HALL"].capacity == 3
+    x0, y0, x1, y1 = test.shelves[1]
+    assert y1 < 0.775 and (x1 - x0) < 0.5 * 1.98
+    assert test.nodes.keys() == d2.nodes.keys() and len(test.parking) == 3
+    assert test.warnings == d2.warnings
+    # 지도 파일은 이름과 더한 진열대 한 줄만 다르다: D2의 지점이나 경로를 고치면 같이 고친다
+    import yaml
+
+    plain, shelf = (yaml.safe_load(site.source_text) for site in (d2, test))
+    assert (plain.pop("name"), shelf.pop("name")) == ("arena_d2", "arena_d2_shelf")
+    assert shelf.pop("shelves")[:-1] == plain.pop("shelves")
+    assert shelf == plain
+
+
 def test_load_accepts_a_path(tmp_path):
     import yaml
 
     target = tmp_path / "mine.yaml"
     target.write_text(yaml.safe_dump(SMALL), encoding="utf-8")
     assert load_fleet_map(target).name == "small"
+
+
+def test_stations_keep_the_fields_the_arm_and_the_orders_read():
+    site = build()
+    work = site.stations["WORK"]
+    assert (work.id, work.dock, work.queue, work.server, work.arms, work.action) == (
+        "WORK", "W", ("W_Q",), "workcell", ("arm_left", "arm_right"), "fill")
+    assert site.parking == ("P-1", "P-2")
+    assert site.docks == {"W", "O"}

@@ -1,0 +1,37 @@
+# 길 막힘(계약 5절): basic_orders에 pode1 앞 물체를 더했다. pode3은 2초 동안 LOCALIZING이다.
+# pode1이 BLOCKED로 보고하면 관제가 그 길을 막힘으로 표시하고(ZONE_MARKED_BLOCKED) 다른 길을 고른다.
+# 물체는 표시가 나면 치운다. duration_s는 표시가 안 날 때의 상한이다(blocked_timeout_s 60보다 짧게).
+map: d2  # D2 배치용 시나리오(기본 배치는 v7)
+seed: 7
+speed_factor: 5.0
+timeout_s: 900
+stock: {arm_left: {A: 6, B: 6}, arm_right: {C: 6, D: 6}}
+orders:
+  - {at_s: 0, id: O-001, items: {A: 1, C: 1}}
+  - {at_s: 0, id: O-002, items: {B: 1, D: 1}}
+  - {at_s: 10, id: O-003, items: {A: 2}}
+  - {at_s: 20, id: O-004, items: {C: 1, D: 1, A: 1}}
+  - {at_s: 40, id: O-005, items: {B: 2, C: 2}}
+  - {at_s: 60, id: O-006, items: {D: 1}}
+robots:
+  pode1: {start: P-1, speed_scale: 1.0, pose_noise_m: 0.03}
+  pode2: {start: P-2, speed_scale: 0.9, pose_noise_m: 0.03}
+  pode3: {start: P-3, speed_scale: 1.0, pose_noise_m: 0.03, localizing_s: 2.0}
+arm: {seconds_per_item: 4.0, swap_seconds: 8.0, fail_rate: 0.0}
+dock: {duration_s: 3.0, error_cm: 1.0}
+faults:
+  - {at_s: 0, robot: pode1, type: blocked, duration_s: 50.0, after_event: BASE_END_WAIT,
+     after_detail: "at W_Q", until_event: ZONE_MARKED_BLOCKED}
+expect:
+  robot_idle: null  # 고장 시나리오는 ROBOT_IDLE을 세지 않는다
+  all_orders_finished: true
+  orders_shipped: 6
+  orders_partial: 0
+  orders_held: 0
+  fifo_violations: 0
+  zone_holder_max: 1
+  released_without_position_check: 0
+  unheld_zone_pose: 0
+  events_include: [ORDER_BOUND, ORDER_SHIPPED, DOCKED, ZONE_MARKED_BLOCKED]
+  event_counts: {ORDER_BOUND: 6, COMM_LOST: 0, GOAL_RETRY: 0, GOAL_STALLED: 0, GOAL_FAILED: 0, ROBOT_NOT_REPORTING: 0}
+  order_results: {O-001: SHIPPED, O-002: SHIPPED, O-003: SHIPPED, O-004: SHIPPED, O-005: SHIPPED, O-006: SHIPPED}

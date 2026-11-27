@@ -1,17 +1,21 @@
-"""order 모델에서 Nav2 goal 조각의 남은 시간은 피드백의 남은 거리(distance_remaining)로 잰다.
-
-값이 없거나 믿을 수 없으면 투영(left_s)으로 재고, 끝 보정(nav_end_s)은 똑같이 붙는다.
-"""
+"""order 모델에서 Nav2 goal 조각의 남은 시간은 피드백의 남은 거리(distance_remaining)로 잰다. 값이 없거나 믿을 수 없으면 투영(left_s)으로 재고, 끝 보정(nav_end_s)은 똑같이 붙는다."""
+import json
 import math
+import sys
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
-from fleet_core.common.commands import MoveOrderCmd
+from fleet_core.common.commands import MoveOrderCmd, OrderRecord
 from fleet_core.common.params import load_params
-from fleet_core.fleet_map import NAV_GOAL
+from fleet_core.fleet_map import NAV_GOAL, load_fleet_map
+from fleet_core.manager import FleetManager
 from fleet_core.traffic.zone import order_answers
 from fleet_core.traffic.zone.routes import left_s, nav_end_s, nav_stretch, speed, travel_s
 from zone_harness import Harness
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
+import replay  # noqa: E402
 
 ON = replace(load_params(), use_order_model=True)
 
@@ -226,3 +230,50 @@ def test_a_longer_way_left_holds_the_extension_back_by_its_driving_time():
     assert longer - straight == pytest.approx(0.15 / ON.nav_speed_mps, abs=0.15)
     plain = time_of_the_extension_to_q1(None)
     assert plain < longer - 0.5, "the projection does not see the longer way"
+
+
+# ---- 기록과 재생 ----
+
+def recorded_run(with_distance):
+    now = [0.0]
+    core = FleetManager(load_fleet_map("d2"), ON, ["pode1"], lambda: now[0])
+    lines = []
+    core.record_to(lines.append)
+    for _ in range(ON.release_confirm_samples):
+        core.on_robot_state("pode1", *core.site.node_pose("P-1"), 0.0, "IDLE")
+    core.on_order_board("RUN", [OrderRecord("O-001", {"A": 1})])
+    order = None
+    while order is None and now[0] < 5.0:
+        now[0] += 0.1
+        order = next((c for c in core.tick() if isinstance(c, MoveOrderCmd)), None)
+    assert order is not None and order.base[0].mode == NAV_GOAL
+    for step in range(10):
+        now[0] += 0.1
+        extra = (0.9 - 0.02 * step,) if with_distance else ()
+        core.on_move_feedback("pode1", order.goal_id, 0, False, "", *extra)
+        core.tick()
+    return lines
+
+
+def feedback_args(lines):
+    return [json.loads(line)["args"] for line in lines if '"on_move_feedback"' in line]
+
+
+def play(tmp_path, lines):
+    path = tmp_path / "run.jsonl"
+    path.write_text("".join(line + "\n" for line in lines), encoding="utf-8")
+    return replay.replay(path)
+
+
+def test_a_record_without_the_distance_keeps_the_old_five_arguments_and_plays_back(tmp_path):
+    lines = recorded_run(with_distance=False)
+    assert {len(args) for args in feedback_args(lines)} == {5}, "the format before 2026-11-21"
+    result = play(tmp_path, lines)
+    assert result.same and result.compared, result
+
+
+def test_a_record_with_the_distance_plays_back(tmp_path):
+    lines = recorded_run(with_distance=True)
+    assert {len(args) for args in feedback_args(lines)} == {6}
+    result = play(tmp_path, lines)
+    assert result.same and result.compared, result
