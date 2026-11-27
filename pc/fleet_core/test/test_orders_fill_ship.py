@@ -2,12 +2,20 @@ from fleet_core.common.commands import (
     TRIP_ASSIGNED,
     ArmDeclined,
     ArmFailedCmd,
+    ArmFault,
     ArmFillCmd,
+    ArmFillPaused,
+    ArmFillPlaced,
     ArmFillProgress,
     ArmFillResult,
+    ArmFillResumed,
+    ArmLate,
+    ArmLost,
     ArmResetCmd,
     ArmSwapCmd,
+    ArmStationBlocked,
     ArmSwapResult,
+    CancelDispatchCmd,
     DispatchCmd,
     EventOut,
     OrderRecord,
@@ -18,6 +26,7 @@ from fleet_core.common.commands import (
 )
 from fleet_core.common.params import load_params
 from fleet_core.orders.orchestrator import OrderOrchestrator
+from orders_and_arm import OrdersAndArm
 from stations import STATIONS
 
 T1, T2 = OrderRecord("T-1", {"A": 1}), OrderRecord("T-2", {"B": 2})
@@ -341,3 +350,144 @@ def test_a_shipped_order_left_on_the_board_is_not_bound_again():
     o.take_output()
     o.on_order_board("RUN", [T1])
     assert not any(isinstance(c, DispatchCmd) for c in o.take_output())
+
+
+# ---- 팔 관제 합의 보고와 팔 고장(설계 4.4 · 4.5, Task 4) ----
+def filling(order=T1):
+    """주문을 묶고 첫 step으로 담기를 묻고 출력을 비운 코어(시험 도움 함수)."""
+    o = bound(make(), order)
+    o.step("r1")
+    o.take_output()
+    return o
+
+
+def test_a_paused_fill_reports_filling_pause_and_is_not_asked_again():
+    """담기 일시 중지가 FILLING_PAUSE로 보고되고 관리자가 풀 때까지 step이 다시 묻지 않는지 지킨다."""
+    o = filling()
+    o.on_arm_report(ArmFillPaused("r1", "workcell", "RECOGNITION_ERROR", "workcell: x"))
+    assert o.take_output() == [ReportTripCmd("T-1", "r1", "FILLING_PAUSE", {}, {},
+                                             "RECOGNITION_ERROR")]
+    assert o._robots["r1"].asked == "paused"
+    o.step("r1")
+    assert o.take_output() == []
+
+
+def test_a_failed_result_then_pause_keeps_the_placed_count():
+    """실패 결과 뒤 같은 pump의 일시 중지 보고가 결과로 늘어난 placed를 싣는지 지킨다."""
+    o = filling(OrderRecord("T-1", {"A": 2}))
+    o.on_arm_report(ArmFillResult("r1", False, {"A": 1}, "RECOGNITION_ERROR"))
+    o.take_output()
+    o.on_arm_report(ArmFillPaused("r1", "workcell", "RECOGNITION_ERROR", "d"))
+    assert o.take_output() == [ReportTripCmd("T-1", "r1", "FILLING_PAUSE", {"A": 1}, {},
+                                             "RECOGNITION_ERROR")]
+
+
+def test_no_fill_is_asked_while_waiting_for_resume():
+    """재시작(ArmFillPlaced) 뒤 [복구] 전에는 수량만 더하고 남은 상품을 다시 묻지 않는지 지킨다(전역 제약 1)."""
+    o = filling(OrderRecord("T-1", {"A": 2}))
+    o.on_arm_report(ArmFillPlaced("r1", {"A": 1}))
+    assert o.take_output() == []
+    assert o._robots["r1"].order.placed == {"A": 1}
+    assert o._robots["r1"].asked == "resume_wait"
+    o.step("r1")
+    assert o.take_output() == []
+
+
+def test_resume_asks_only_for_the_rest():
+    """[복구] 뒤 step이 이미 담은 수를 뺀 남은 상품만 새 담기 목표로 요청하는지 지킨다."""
+    o = filling(OrderRecord("T-1", {"A": 2}))
+    o.on_arm_report(ArmFillPlaced("r1", {"A": 1}))
+    o.on_arm_report(ArmFillResumed("r1"))
+    o.step("r1")
+    assert o.take_output() == [ArmFillCmd("r1", "WORK", "T-1", {"A": 1})]
+
+
+def test_placed_and_resumed_only_act_in_their_asked_state():
+    """묻지 않은 상태의 Placed와 resume_wait 아닌 상태의 Resumed가 수량이나 asked를 건드리지 않는지 지킨다."""
+    o = bound(make(), OrderRecord("T-1", {"A": 2}))
+    o.on_arm_report(ArmFillPlaced("r1", {"A": 1}))  # 아직 담기를 묻지 않음(asked "")
+    assert o._robots["r1"].order.placed == {} and o._robots["r1"].asked == ""
+    o.step("r1")
+    o.on_arm_report(ArmFillResumed("r1"))  # asked는 fill
+    assert o._robots["r1"].asked == "fill"
+
+
+def test_a_stray_progress_after_the_result_changes_nothing():
+    """결과가 온 뒤 늦게 온 진행 보고가 progress를 되살려 placed를 두 번 세게 하지 않는지 지킨다."""
+    o = filling(OrderRecord("T-1", {"A": 2}))
+    o.on_arm_report(ArmFillResult("r1", True, {"A": 2}))
+    o.take_output()
+    o.on_arm_report(ArmFillProgress("r1", {"A": 2}))
+    assert o._robots["r1"].order.progress == {}
+    assert o.take_output() == []
+
+
+def test_a_held_placed_report_adds_the_count_then_the_fault_holds():
+    """쥔 채 재시작(held=True) Placed가 수량만 더하고, 이어진 ArmFault가 보류로 넘기는지 지킨다."""
+    o = filling(OrderRecord("T-1", {"A": 2}))
+    o.on_arm_report(ArmFillPlaced("r1", {"A": 1}, held=True))
+    assert o.take_output() == []
+    o.on_arm_report(ArmFault("r1", "fill", "workcell", "restarted holding"))
+    assert o.take_output() == [ReportOrderCmd("T-1", "r1", "HELD", {"A": 1}, {"A": 1},
+                                              "restarted holding", "ARM_FAULT")]
+
+
+def test_an_arm_fault_holds_the_order_on_the_robot():
+    """팔 고장이 주문을 로봇에 묶은 채 HELD로 보고하고 보류 목록에 넣고 step을 멈추는지 지킨다."""
+    o = filling()
+    o.on_arm_report(ArmFault("r1", "fill", "workcell", "boom"))
+    assert o.take_output() == [ReportOrderCmd("T-1", "r1", "HELD", {}, {"A": 1}, "boom",
+                                              "ARM_FAULT")]
+    assert o._holds["T-1"] == ("r1", "ARM_FAULT")
+    assert o._robots["r1"].held == "ARM_FAULT"
+    assert o.order_of("r1") == "T-1"
+    o.step("r1")
+    assert o.take_output() == []
+
+
+def test_a_lost_arm_job_only_clears_what_was_asked():
+    """ArmLost가 asked만 비우고 아무것도 내지 않는지(이어지는 ArmFault가 보류함) 지킨다."""
+    o = filling()
+    o.on_arm_report(ArmLost("r1", 5, "workcell", "fill"))
+    assert o._robots["r1"].asked == ""
+    assert o.take_output() == []
+
+
+def test_a_blocked_workcell_cancels_and_reopens_its_calls():
+    """작업대가 막히면 열린 호출을 거두고 풀리면 대기 주문 수만큼 새 호출을 여는지 지킨다(설계 4.5)."""
+    o = make()
+    o.on_order_board("RUN", [T1])
+    assert o.take_output() == [DispatchCmd(1, "WORK")]
+    o.on_arm_report(ArmStationBlocked("WORK", "arm_left ERROR"))
+    assert o.take_output() == [CancelDispatchCmd(1)]
+    o.on_order_board("RUN", [T1])  # 막힌 동안 주문판이 다시 와도 열지 않는다
+    assert o.take_output() == []
+    o.on_arm_report(ArmStationBlocked("WORK", ""))
+    assert o.take_output() == [DispatchCmd(2, "WORK")]
+
+
+def test_a_late_arm_result_only_warns():
+    """늦은 팔 결과(ArmLate)가 경고만 내고 수량을 고치지 않는지 지킨다."""
+    o = filling()
+    o.on_arm_report(ArmLate(9, "fill", {"A": 1}))
+    out = o.take_output()
+    assert len(out) == 1 and out[0].level == "WARN" and out[0].code == "ARM_LATE_RESULT"
+    assert o._robots["r1"].order.placed == {}
+
+
+def test_orders_and_arm_run_one_order_to_shipped():
+    """주문 코어와 실제 ArmJobs를 이어 묶기부터 SHIPPED 보고까지 한 주문이 흐르는지 지킨다."""
+    core = OrdersAndArm(STATIONS, load_params(), ["r1", "r2"], lambda: 0.0)
+    core.on_order_board("RUN", [T1])
+    core.on_dispatch_result(core._open_calls[0], True, "r1")
+    core.take_output()
+    core.step("r1")
+    fill = next(c for c in core.take_output() if type(c).__name__ == "FillCmd")
+    core.on_fill_result(fill.goal_id, True, {"A": 1}, {})
+    core.step("r1")
+    goal = next(c for c in core.take_output() if isinstance(c, DispatchCmd))
+    core.on_dispatch_result(goal.goal_id, True, "r1")
+    core.step("r1")
+    swap = next(c for c in core.take_output() if type(c).__name__ == "SwapCmd")
+    core.on_swap_result(swap.goal_id, True, True, True)
+    assert ReportOrderCmd("T-1", "r1", "SHIPPED", {"A": 1}, {}, "") in core.take_output()
