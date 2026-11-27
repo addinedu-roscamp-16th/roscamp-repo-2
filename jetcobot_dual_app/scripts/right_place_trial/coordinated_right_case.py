@@ -21,8 +21,8 @@ import held_object  # noqa: E402
 from dual_arm_coordinator_real import DualArmCoordinator
 from move_right_sam_yaw import GRASP_CLOSED_TIP_OFFSET_MM, tcp_down_tilt_deg
 from place_right_in_case import (
-    CASE_CONFIG, URDF, RIGHT_ARRIVAL_JOINT_DEG, RIGHT_JOINTS,
-    case_center_and_rim, check_case_scene, close_gripper, measured_tcp,
+    CASE_CONFIG, URDF, RIGHT_JOINTS,
+    case_arrival_pose, case_center_and_rim, check_case_scene, close_gripper, measured_tcp,
     right_see_center, wait_action,
 )
 from paired_progress_route import (sample_arm, first_safe_overlap, make_phase,
@@ -131,19 +131,23 @@ def require_coordinated_gate(coord):
         raise RuntimeError('Restart MoveIt with coordinated_execution:=true')
 
 
-def plan_phase(coord, state, side, goal, label):
+def plan_phase(coord, state, side, goal, label, *, pose_goal=None):
     """Plan one moving arm and validate it with the peer held in the scene."""
     if not coord.valid(state, group_name='both_arms'):
         raise RuntimeError(f'{label}: measured combined state collides in MoveIt scene')
-    if not coord.valid(dict(state, **goal), group_name='both_arms'):
+    if goal is not None and not coord.valid(dict(state, **goal), group_name='both_arms'):
         print(f'{label}: target collides with held arm or case.', flush=True)
         return None
-    attempts = 1 if side == 'both' else 3
+    attempts = 1 if pose_goal is not None or side == 'both' else 3
     for attempt in range(1, attempts+1):
         print(f'{label}: plan attempt {attempt}/{attempts}', flush=True)
         started = time.monotonic()
-        result = (plan_both(coord, state, goal) if side == 'both'
-                  else coord.plan_joint_goal(side, state, goal))
+        if pose_goal is not None:
+            result = coord.plan_pose_goal(side, state, *pose_goal, orientation_tolerance_deg=4.0)
+        elif side == 'both':
+            result = plan_both(coord, state, goal)
+        else:
+            result = coord.plan_joint_goal(side, state, goal)
         if result is None:
             print(f'{label}: planner returned no path in '
                   f'{time.monotonic()-started:.1f}s.', flush=True)
@@ -160,6 +164,8 @@ def plan_phase(coord, state, side, goal, label):
         end.update(zip(trajectory.joint_names, trajectory.points[-1].positions))
         print(f'{label}: checked path in {time.monotonic()-started:.1f}s.',
               flush=True)
+        if goal is None:
+            goal = {name: end[name] for name in trajectory.joint_names}
         return {'side': side, 'goal': goal, 'label': label,
                 'result': result, 'start': state.copy(), 'end': end}
     return None
@@ -199,9 +205,17 @@ def execute_phases(coord, phases):
     for index, phase in enumerate(phases, 1):
         state = coord.state()
         side, goal, label = phase['side'], phase['goal'], phase['label']
+        # Moving arm only: in concurrent mode the other arm may still be picking.
+        # The gate runs this phase alone and checks it against the other arm's
+        # measured pose after that arm has stopped.
         drift = max(abs(math.degrees(state[name]-phase['start'][name]))
-                    for name in ALL_JOINTS)
-        if index == 1 and drift <= 5.0 and coord.valid(state, group_name='both_arms'):
+                    for name in ALL_JOINTS if side == 'both' or name.startswith(side + '_'))
+        reusable = index == 1 or phase.get('reusable', False)
+        if reusable and drift <= (5.0 if index == 1 else 3.0) and coord.valid(state, group_name='both_arms'):
+            if index > 1:
+                # Collision-check only (no planning) from the measured start.
+                coord.check_trajectory(phase['result'].trajectory.joint_trajectory, state,
+                                       group_name='both_arms', geometric_only=True)
             print(f'PHASE {index}/{len(phases)}: use freshly checked {label} '
                   f'plan; start drift={drift:.1f} deg.', flush=True)
             current = phase
@@ -283,11 +297,6 @@ def simple_enough(phase):
 
 ARM_JOINTS = {side: tuple(f'{side}_{i}_Joint' for i in range(1, 7))
               for side in ('left', 'right')}
-# Case-arrival joint goals (deg). Right: offline URDF estimate, validated on
-# the robot 2026-11-19. Left: left_place_trial candidate (model only, not yet
-# run on the robot).
-ARRIVAL_JOINT_DEG = {'right': RIGHT_ARRIVAL_JOINT_DEG,
-                     'left': (-133.56, -57.02, -0.05, -29.60, -0.66, -45.0)}
 
 
 def other(arm):
@@ -373,8 +382,6 @@ def choose_faster_yield(coord, state, arm, peer, mover_phase, order):
 
 def checked_goal(coord, state, case_xy, rim_z_mm, allow_staged=False, arm='right'):
     peer = other(arm)
-    mover_goal = {name: math.radians(angle) for name, angle in
-                  zip(ARM_JOINTS[arm], ARRIVAL_JOINT_DEG[arm])}
     # The small-yield dual route entered the padded collision geometry of
     # left_2_Link and right_gripper_left1 on 2026-11-19. Do not retry it.
     candidates = [(name, goal) for name, goal in
@@ -402,7 +409,8 @@ def checked_goal(coord, state, case_xy, rim_z_mm, allow_staged=False, arm='right
         label = f'{arm.upper()} CASE ARRIVAL'
         options, winding = [], []
         for attempt in range(5):
-            option = plan_phase(coord, projected, arm, mover_goal, label)
+            pose = case_arrival_pose(case_xy, rim_z_mm, arm, reverse_y=attempt % 2 == 1)
+            option = plan_phase(coord, projected, arm, None, label, pose_goal=pose)
             if option is None:
                 continue
             if simple_enough(option):
@@ -468,6 +476,198 @@ def checked_goal(coord, state, case_xy, rim_z_mm, allow_staged=False, arm='right
     raise RuntimeError('No simple paired case route in the live MoveIt scene')
 
 
+PREPLACE_CACHE = Path(__file__).resolve().parent / 'preplace_cache'
+
+
+def named_goals(coord, state_name):
+    """{side: {joint: rad}} for an SRDF group_state of the running MoveIt."""
+    import xml.etree.ElementTree as ET
+    from rcl_interfaces.srv import GetParameters
+    client = coord.node.create_client(
+        GetParameters, '/jetcobot_dual/move_group/get_parameters')
+    if not client.wait_for_service(timeout_sec=6.0):
+        raise RuntimeError('MoveIt semantic model unavailable')
+    response = coord.wait(client.call_async(GetParameters.Request(
+        names=['robot_description_semantic'])), 8.0)
+    root = ET.fromstring(response.values[0].string_value)
+    goals = {}
+    for side in ('left', 'right'):
+        rows = [row for row in root.findall('group_state')
+                if row.get('name') == state_name and row.get('group') == f'arm_{side}']
+        if len(rows) != 1:
+            raise RuntimeError(f'MoveIt has no unique {side} {state_name} state '
+                               '(rebuild jetcobot_dual_control and restart MoveIt)')
+        goals[side] = {j.get('name'): float(j.get('value')) for j in rows[0].findall('joint')}
+    return goals
+
+
+def _preplace_entries(arm, held_type):
+    base = PREPLACE_CACHE / f'{arm}_{held_type or "none"}'
+    # Older single-entry layout (manifest.json directly in base) counts as one entry.
+    return [d for d in sorted(base.glob('entry_*')) if (d / 'manifest.json').is_file()] + \
+        ([base] if (base / 'manifest.json').is_file() else [])
+
+
+def _load_preplace_cache(coord, start, arm, held_type, label):
+    """Reuse a stored see_center -> pre_place path: drift + collision check only.
+
+    One entry per peer pose (the peer may wait at see_center or in a yield pose);
+    the closest entry within 3 deg of the current 12-joint start is used.
+    """
+    from rclpy.serialization import deserialize_message
+    from moveit_msgs.msg import MotionPlanResponse
+    best = None
+    for folder in _preplace_entries(arm, held_type):
+        try:
+            row = json.loads((folder / 'manifest.json').read_text())
+            drift = max(abs(math.degrees(start[n] - row['start'][n])) for n in ALL_JOINTS)
+        except Exception:
+            continue
+        if best is None or drift < best[0]:
+            best = (drift, folder, row)
+    if best is None:
+        return None
+    drift, folder, row = best
+    if drift > 3.0:
+        print(f'{label}: no cached path for this peer pose (closest {drift:.1f} deg); planning.',
+              flush=True)
+        return None
+    try:
+        result = deserialize_message((folder / 'phase.cdr').read_bytes(), MotionPlanResponse)
+        coord.check_trajectory(result.trajectory.joint_trajectory, start,
+                               group_name='both_arms', geometric_only=True)
+    except Exception as exc:  # stale or colliding cache -> replan
+        print(f'{label}: cached path unusable ({exc}); replanning.', flush=True)
+        return None
+    end = start.copy()
+    end.update(row['end'])
+    print(f'{label}: reused cached path (collision-checked, start drift {drift:.1f} deg).',
+          flush=True)
+    return {'side': arm, 'goal': row['goal'], 'label': label, 'result': result,
+            'start': start.copy(), 'end': end, 'reusable': True}
+
+
+def _save_preplace_cache(phase, arm, held_type):
+    from rclpy.serialization import serialize_message
+    base = PREPLACE_CACHE / f'{arm}_{held_type or "none"}'
+    entries = sorted(base.glob('entry_*'))
+    for old in entries[:-4]:  # keep at most 5 peer poses
+        for f in old.iterdir():
+            f.unlink()
+        old.rmdir()
+    folder = base / f'entry_{int(time.time()*1000)}'
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / 'phase.cdr').write_bytes(serialize_message(phase['result']))
+    (folder / 'manifest.json').write_text(json.dumps({
+        'start': {n: float(phase['start'][n]) for n in ALL_JOINTS},
+        'end': {n: float(v) for n, v in phase['end'].items() if n in ALL_JOINTS},
+        'goal': {n: float(v) for n, v in phase['goal'].items()}}, indent=2))
+
+
+def preplace_route(coord, state, arm, held_type, use_cache=True, *, from_center=False):
+    """Lift pose -> see_center -> pre_place with the peer held where it is.
+
+    Single-arm joint goals only: no pose-goal RRT retries, no yield search, no
+    paired progress grid. The see_center -> pre_place leg is cached and only
+    collision-checked on later cycles. Returns phases, or None to fall back.
+    """
+    see_center = named_goals(coord, 'see_center')[arm]
+    pre_place = named_goals(coord, 'pre_place')[arm]
+    if not coord.valid(dict(state, **pre_place), group_name='both_arms'):
+        print(f'PRE_PLACE: {arm} pre_place collides with the {other(arm)} arm where it is now.',
+              flush=True)
+        return None
+    phases = []
+    projected = state.copy()
+    # Stage 2 entry starts at see_center (the pick already returned there).
+    if not from_center and max(abs(math.degrees(state[n] - v)) for n, v in see_center.items()) > 3.0:
+        label = f'{arm.upper()} LIFT->SEE_CENTER'
+        phase = None
+        for _ in range(3):
+            phase = plan_phase(coord, projected, arm, see_center, label)
+            if phase is None or simple_enough(phase):
+                break
+            phase = None
+        if phase is None:
+            return None
+        phases.append(phase)
+        projected = phase['end']
+    label = f'{arm.upper()} SEE_CENTER->PRE_PLACE'
+    phase = _load_preplace_cache(coord, projected, arm, held_type, label) if use_cache else None
+    if phase is None:
+        for _ in range(3):
+            phase = plan_phase(coord, projected, arm, pre_place, label)
+            if phase is None or simple_enough(phase):
+                break
+            phase = None
+        if phase is None:
+            return None
+        phase['reusable'] = True
+        if use_cache:
+            _save_preplace_cache(phase, arm, held_type)
+            print(f'{label}: path saved for reuse.', flush=True)
+    phases.append(phase)
+    return phases
+
+
+def preplace_descend(coord, case_xy, rim_z_mm, arm):
+    """Straight descent from pre_place to the release (arrival) pose."""
+    import place_steps
+    place_steps.ARM = arm
+    place_steps.ARM_JOINTS = tuple(f'{arm}_{i}_Joint' for i in range(1, 7))
+    (x, y, z), _ = case_arrival_pose(case_xy, rim_z_mm, arm)
+    place_steps.move_to(coord, (x, y, z), f'{arm.upper()} PRE_PLACE DESCENT',
+                        tol_mm=5.0, max_moves=2, final_xy_mm=12.0, final_z_mm=10.0)
+
+
+def preplace_return(coord, arm, forward, *, already_at_pre_place=False):
+    """After release: rise to pre_place height, then the stored see_center -> pre_place
+    path played backwards (collision-checked against the measured arms; no RRT)."""
+    import copy
+    import place_steps
+    from builtin_interfaces.msg import Duration
+    from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
+    place_steps.ARM = arm
+    place_steps.ARM_JOINTS = tuple(f'{arm}_{i}_Joint' for i in range(1, 7))
+    pre_place = named_goals(coord, 'pre_place')[arm]
+    see_center = named_goals(coord, 'see_center')[arm]
+    state = coord.state()
+    now = measured_tcp(coord, state, f'{arm}_TCP')
+    target_state = state.copy()
+    target_state.update(pre_place)
+    target = measured_tcp(coord, target_state, f'{arm}_TCP')
+    rise_mm = (target.position.z - now.position.z) * 1000.0
+    if not already_at_pre_place and rise_mm > 2.0:
+        place_steps.vertical_move(coord, min(rise_mm, 55.0), f'{arm.upper()} RISE TO PRE_PLACE')
+    source = forward['result'].trajectory.joint_trajectory
+    total = source.points[-1].time_from_start.sec + source.points[-1].time_from_start.nanosec / 1e9
+    reverse = JointTrajectory()
+    reverse.joint_names = list(source.joint_names)
+    for point in reversed(source.points):
+        t = total - (point.time_from_start.sec + point.time_from_start.nanosec / 1e9)
+        reverse.points.append(JointTrajectoryPoint(
+            positions=list(point.positions),
+            time_from_start=Duration(sec=int(t), nanosec=int((t % 1.0) * 1e9))))
+    result = copy.deepcopy(forward['result'])
+    result.trajectory.joint_trajectory = reverse
+    state = coord.state()
+    start = state.copy()
+    start.update(dict(zip(reverse.joint_names, reverse.points[0].positions)))
+    coord.check_trajectory(reverse, state, group_name='both_arms', geometric_only=True)
+    end = state.copy()
+    end.update(dict(zip(reverse.joint_names, reverse.points[-1].positions)))
+    print(f'{arm.upper()} RETURN: stored pre_place path reversed (collision-checked, no planning).',
+          flush=True)
+    return [{'side': arm, 'goal': see_center, 'label': f'{arm.upper()} PRE_PLACE->SEE_CENTER',
+             'result': result, 'start': start, 'end': end, 'reusable': True}]
+
+
+def write_json_atomic(path, record):
+    temporary = path.with_suffix('.tmp')
+    temporary.write_text(json.dumps(record))
+    temporary.replace(path)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--case-config', type=Path, default=CASE_CONFIG)
@@ -499,15 +699,21 @@ def main():
                         help='Save a checked case-arrival plan for later execution; plan only')
     parser.add_argument('--use-plan', type=Path,
                         help='Recheck a saved arrival plan against the current scene before executing')
+    parser.add_argument('--route', choices=('preplace', 'paired'), default='preplace',
+                        help='preplace (2026-11-24): lift -> see_center -> pre_place -> vertical '
+                             'descent, falls back to paired; paired: previous RRT + yield route')
+    parser.add_argument('--no-preplace-cache', action='store_true',
+                        help='Always replan see_center -> pre_place instead of reusing the stored path')
     parser.add_argument('--checkpoint', type=Path,
                         help='Record completed placement stages for the scheduler')
+    parser.add_argument('--transport-stage', choices=('enter', 'return'))
     args = parser.parse_args()
 
     def checkpoint(stage):
         if args.checkpoint is not None:
-            temporary = args.checkpoint.with_suffix('.tmp')
-            temporary.write_text(json.dumps({'stage': stage, 'arm': args.arm}))
-            temporary.replace(args.checkpoint)
+            write_json_atomic(args.checkpoint, {'stage': stage, 'arm': args.arm})
+    if args.transport_stage and (not args.execute or not args.checkpoint):
+        parser.error('--transport-stage requires --execute and --checkpoint')
     if args.place and not args.execute:
         parser.error('--place requires --execute')
     if args.save_plan and args.execute:
@@ -521,6 +727,19 @@ def main():
         check_case_scene(coord, case_xy, args.case_config, allow_absent=True)
         arm = args.arm
         wait = lambda f, t: coord.wait(f, t)
+        if args.transport_stage == 'return':
+            from moveit_msgs.msg import MotionPlanResponse
+            from rclpy.serialization import deserialize_message
+            progress = json.loads(args.checkpoint.read_text())
+            result = deserialize_message(args.checkpoint.with_suffix('.cdr').read_bytes(), MotionPlanResponse)
+            phases = preplace_return(coord, arm, {'result': result}, already_at_pre_place=True)
+            # The app plans the next arm's approach from this endpoint during the return.
+            print('SEE_CENTER_RETURN_ENDPOINT ' + json.dumps({
+                name: float(phases[-1]['end'][name]) for name in ALL_JOINTS
+            }), flush=True)
+            execute_phases(coord, phases)
+            write_json_atomic(args.checkpoint, dict(progress, stage='returned'))
+            return 0
         if not args.from_pick:
             from coordinated_see_center import see_center_goals
             reference = see_center_goals(coord)[arm]
@@ -536,8 +755,9 @@ def main():
             if args.save_plan or args.use_plan:
                 raise RuntimeError('Cached placement requires a modeled held object')
         if args.from_pick:
+            start_pose = 'see_center' if args.transport_stage == 'enter' else 'the lifted pose'
             print(f'FROM PICK: {arm} gripper already closed on the object; '
-                  'starting from the lifted pose.', flush=True)
+                  f'starting from {start_pose}.', flush=True)
         elif args.execute:
             close_gripper(coord, arm)
             state = coord.state()
@@ -560,6 +780,20 @@ def main():
                 print(f'PREPLANNED CASE unusable: {exc}; planning from measured state.',
                       flush=True)
                 phases = None
+        via_preplace = False
+        if phases is None and args.route == 'preplace' and not args.save_plan:
+            with PlanningMargin(coord, args.planning_extra_mm/1000.0):
+                phases = preplace_route(coord, state, arm, own_held_type,
+                                        use_cache=not args.no_preplace_cache,
+                                        from_center=args.transport_stage == 'enter')
+            if phases is None:
+                if args.transport_stage == 'enter':
+                    raise RuntimeError('No checked stage 2 route from see_center to pre_place')
+                print('PRE_PLACE route unavailable; falling back to the paired case route.',
+                      flush=True)
+            else:
+                strategy, via_preplace = 'held at its pose (pre_place route)', True
+                preplace_forward = phases[-1]
         if phases is None:
             with PlanningMargin(coord, args.planning_extra_mm/1000.0):
                 strategy, phases = checked_goal(coord, state, case_xy, rim_z_mm,
@@ -585,6 +819,13 @@ def main():
             print('COORDINATED PLAN ONLY COMPLETE; no arm or gripper command sent.', flush=True)
             return 0
         execute_phases(coord, phases)
+        if args.transport_stage == 'enter':
+            from rclpy.serialization import serialize_message
+            args.checkpoint.with_suffix('.cdr').write_bytes(serialize_message(preplace_forward['result']))
+            checkpoint('at_pre_place')
+            return 0
+        if via_preplace:
+            preplace_descend(coord, case_xy, rim_z_mm, arm)
         mark('execute case arrival (gate preflight + motion)')
         print(f'COORDINATED ARRIVAL COMPLETE; {arm} gripper remains closed.', flush=True)
         if args.place:
@@ -597,16 +838,26 @@ def main():
             state = coord.state()
             goals = see_center_goals(coord)
             print('STATE PLACE PLANNING BEGIN', flush=True)
-            try:
-                with PlanningMargin(coord, args.planning_extra_mm/1000.0):
-                    strategy, phases = choose_return(coord, state, goals, arm)
-            except RuntimeError as exc:
-                if 'measured combined state collides' not in str(exc):
-                    raise
-                print('RETURN: start pose is inside the enlarged planning margin; '
-                      'replanning with execution padding only.', flush=True)
-                with PlanningMargin(coord, 0.0):
-                    strategy, phases = choose_return(coord, state, goals, arm)
+            phases = None
+            if via_preplace:
+                try:
+                    phases = preplace_return(coord, arm, preplace_forward)
+                    strategy = f'{arm} only (reversed pre_place path)'
+                except Exception as exc:
+                    print(f'RETURN via pre_place unavailable ({exc}); planning a return.', flush=True)
+                    phases = None
+            if phases is None:
+                state = coord.state()
+                try:
+                    with PlanningMargin(coord, args.planning_extra_mm/1000.0):
+                        strategy, phases = choose_return(coord, state, goals, arm)
+                except RuntimeError as exc:
+                    if 'measured combined state collides' not in str(exc):
+                        raise
+                    print('RETURN: start pose is inside the enlarged planning margin; '
+                          'replanning with execution padding only.', flush=True)
+                    with PlanningMargin(coord, 0.0):
+                        strategy, phases = choose_return(coord, state, goals, arm)
             print('STATE PLACE PLANNING END', flush=True)
             mark('plan return to see_center')
             print(f'RETURN PLAN: {strategy}', flush=True)

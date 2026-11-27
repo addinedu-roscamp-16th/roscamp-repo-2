@@ -79,6 +79,8 @@ class AutoFineMixin:
         self.auto_fine_last_count = self.cameras[camera_index].count
         self.auto_fine_deadline = time.monotonic() + 20.
         self.mentos_seen_detection = False
+        # Diagnostics only (2026-11-25): printed when the 20 s stability wait fails.
+        self.auto_fine_diag = {'frames': 0, 'missed': 0, 'peer_start': None, 'peer_max_deg': 0.0}
         if clear_moves:
             self.auto_fine_moves = 0
             self.auto_fine_paused = False
@@ -86,6 +88,37 @@ class AutoFineMixin:
             self.auto_fine_reason = None
             self.mentos_search_done = False
             self.mentos_search_pending = False
+
+    def _auto_fine_diag_update(self, detection):
+        diag = getattr(self, 'auto_fine_diag', None)
+        if diag is None:
+            return
+        diag['frames'] += 1
+        if detection is None:
+            diag['missed'] += 1
+        peer = 'right' if self.args.arm == 'left' else 'left'
+        sample = self.live_poses.samples.get(peer)
+        if sample is not None:
+            q = np.array([sample[2][f'{peer}_{i}_Joint'] for i in range(1, 7)])
+            if diag['peer_start'] is None:
+                diag['peer_start'] = q
+            else:
+                diag['peer_max_deg'] = max(diag['peer_max_deg'],
+                                           float(np.rad2deg(np.max(np.abs(q - diag['peer_start'])))))
+
+    def _auto_fine_diag_print(self):
+        diag = getattr(self, 'auto_fine_diag', None)
+        if diag is None:
+            return
+        f = self.auto_fine_filter
+        xs, ys = list(getattr(f, 'xs', [])), list(getattr(f, 'ys', []))
+        spread = (f'x std {np.std(xs):.1f} px, y std {np.std(ys):.1f} px over last {len(xs)} detections'
+                  if xs else 'no recent detections')
+        peer = 'right' if self.args.arm == 'left' else 'left'
+        print(f'AUTO FINE DIAG {self.args.arm.upper()}: frames {diag["frames"]}, '
+              f'no detection {diag["missed"]}; {spread} '
+              f'(stable needs {getattr(f, "size", "?")} in a row, std <= {getattr(f, "max_std", "?")} px); '
+              f'{peer} arm moved up to {diag["peer_max_deg"]:.1f} deg during the wait', flush=True)
 
     def pause_auto_fine(self, reason):
         self.auto_fine_paused = True
@@ -198,7 +231,10 @@ class AutoFineMixin:
         try:
             best_x, best_y, x_tol, y_up, y_down = self.auto_fine_profile()
             frame = image_to_view(camera.frame)
-            detection, mask = self.auto_fine_detector.detect(frame)
+            if isinstance(self.auto_fine_detector, WrapperDetector):
+                detection, mask = self.auto_fine_detector.detect(frame, prefer_xy=(best_x, best_y))
+            else:
+                detection, mask = self.auto_fine_detector.detect(frame)
             kind = (detection.get('kind', 'chocobar') if detection is not None else None)
             if kind is not None and kind != self.auto_fine_detection_kind:
                 self.auto_fine_filter.reset()
@@ -206,6 +242,7 @@ class AutoFineMixin:
             # Both orientations use the selected Mentos BEST range. Never mix
             # magenta and yellow samples in one stability window.
             stable = self.auto_fine_filter.update(detection)
+            self._auto_fine_diag_update(detection)
             self.auto_fine_detection, self.auto_fine_stable, self.auto_fine_mask = detection, stable, mask
             if detection is not None:
                 self.mentos_seen_detection = True
@@ -220,6 +257,7 @@ class AutoFineMixin:
                         self.start_auto_fine_move('y', virtual_roi,
                             np.array([best_x, best_y], dtype=float), side_index, search=True)
                     else:
+                        self._auto_fine_diag_print()
                         self.pause_auto_fine('selected object not stable within 20 s')
                 return
             target = {'x': best_x, 'y': best_y}

@@ -8,6 +8,7 @@ Green crosshair: horizontal BEST top edge Y and vertical BEST center X.
 Keys: T=update BEST from stable observation; R=reset to preset BEST;
       M=toggle mask, Q/Esc=quit.
 """
+import math
 import argparse
 from collections import deque
 import json
@@ -26,6 +27,11 @@ DEFAULT_X_TOL = 65.0  # Accepted X range: 255..385 px.
 DEFAULT_Y_UP = 70.0     # Top edge may be as high as y=55.
 DEFAULT_Y_DOWN = 60.0   # Top edge may be as low as y=185.
 REFERENCE_METHOD = 'connected_component_topmost_v2'
+# Wrapper mask (2026-11-26, from 10 left + 5 right close-range images).
+LAB_B_MIN = 130       # LAB b (yellowness): wrapper 134-140, white paper 115
+LAB_L_MIN = 140       # bright only
+SMOOTH_STD_MAX = 25   # 9x9 brightness std: wrapper smooth, ArUco board patterned
+MAX_WRAPPER_W = 450   # wider region = several touching bars -> no detection
 
 
 
@@ -111,10 +117,23 @@ class WrapperDetector:
         self.close_kernel = np.ones((9, 9), np.uint8)
         self.open_kernel = np.ones((5, 5), np.uint8)
 
-    def detect(self, bgr):
-        hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
-        mask = cv2.inRange(hsv, self.lower, self.upper)
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.close_kernel)
+    def detect(self, bgr, prefer_xy=None):
+        # 2026-11-26: HSV yellow mask replaced (old lines kept below). Close to
+        # the wrapper, camera auto white balance turns it white (HSV S ~19, the
+        # same as the ArUco board's white cells), so the HSV mask was empty in
+        # 8 of 10 test images (~/camera_code/fine_detector_check/). LAB b still
+        # separates it (wrapper 134-140, white paper 115, board cells 109);
+        # "smooth" (local brightness std) drops the patterned board.
+        # hsv = cv2.cvtColor(bgr, cv2.COLOR_BGR2HSV)
+        # mask = cv2.inRange(hsv, self.lower, self.upper)
+        # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, self.close_kernel)
+        # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.open_kernel)
+        lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2LAB)
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).astype(np.float32)
+        mean = cv2.blur(gray, (9, 9))
+        std = np.sqrt(np.maximum(cv2.blur(gray * gray, (9, 9)) - mean * mean, 0.0))
+        mask = ((lab[..., 2] >= LAB_B_MIN) & (lab[..., 0] >= LAB_L_MIN) &
+                (std < SMOOTH_STD_MAX)).astype(np.uint8) * 255
         mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, self.open_kernel)
         n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=8)
         if n <= 1:
@@ -122,8 +141,23 @@ class WrapperDetector:
 
         # Largest connected yellow region: generally the visible candy wrapper.
         idx = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+        if prefer_xy is not None:
+            # 2026-11-25: two chocobars in view made the largest region switch
+            # between them (never stable). Take the wrapper whose top-center is
+            # nearest the BEST point instead.
+            sizable = [i for i in range(1, n)
+                       if stats[i, cv2.CC_STAT_AREA] >= self.min_area and
+                       stats[i, cv2.CC_STAT_WIDTH] >= 90 and stats[i, cv2.CC_STAT_HEIGHT] >= 55]
+            if sizable:
+                px, py = prefer_xy
+                idx = min(sizable, key=lambda i: math.hypot(
+                    stats[i, 0] + stats[i, 2] / 2.0 - px, stats[i, 1] - py))
         x, y, w, h, area = map(int, stats[idx])
         if area < self.min_area or w < 90 or h < 55:
+            return None, mask
+        # 2026-11-26: two touching bars make one region (621 px wide, one bar
+        # 193-354 px) whose top passed the spread check; never aim between them.
+        if w > MAX_WRAPPER_W:
             return None, mask
 
         # Measure the actual upper edge in the central 50% of the wrapper.

@@ -1,0 +1,13 @@
+train: ../train/images
+val: ../valid/images
+test: ../test/images
+
+nc: 2
+names: ['chocolate_bar', 'mentos']
+
+roboflow:
+  workspace: chohui
+  project: bar_mantos
+  version: 1
+  license: CC BY 4.0
+  url: https://universe.roboflow.com/chohui/bar_mantos/dataset/1

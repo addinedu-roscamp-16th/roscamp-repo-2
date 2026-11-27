@@ -7,8 +7,12 @@
 
 명령:
     mode NORMAL | mode TEST      두 팔에 set_mode
-    fill N [kind]                kind(기본 chocobar) N개 담기 목표
-    cancel                       진행 중 목표 취소
+    fill N [kind]                kind(기본 choco_bar) N개 담기 목표
+    cancel                       진행 중 목표 취소 (Phody: 멈춘 뒤 C = 초기화)
+    resume [left|right]          이어서 하기 (Phody: U와 같음, 기본 left)
+    lock off|on [left|right]     락 해제 / 잠금 (해제 = 두 팔 see_center + 그리퍼 열기, 기본 left)
+    fault [left|right]           장애 처리 완료 (기본 left)
+    hb off | hb on               관제 신호(/fleet/heartbeat, 0.5초마다) 멈추기 / 다시 보내기
     state                        두 팔 상태 한 번 출력
     quit
 """
@@ -20,8 +24,10 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from fleet_link import ARMS, PENDING_NAMES, _load_yaml, contract_path, qos_from_contract  # noqa: E402
 
-HELP = ('commands: mode NORMAL|TEST, fill N [kind], cancel, state, quit')
-DEFAULT_KIND = 'chocobar'
+HELP = ('commands: mode NORMAL|TEST, fill N [kind], cancel, resume [arm], lock off|on [arm], '
+        'fault [arm], hb off|on, state, quit')
+SIDES = ('left', 'right')
+DEFAULT_KIND = 'choco_bar'  # 팀 상품 코드 (PH-01)
 SENDING = object()  # goal sent, handle not back yet (ClientGoalHandle == str raises)
 
 
@@ -39,6 +45,13 @@ def parse_command(line):
         except ValueError:
             return ('error', f'count must be a number: {args[0]!r}')
         return ('fill', count, args[1] if len(args) == 2 else DEFAULT_KIND)
+    if cmd in ('resume', 'fault') and len(args) <= 1 and (not args or args[0].lower() in SIDES):
+        return (cmd, f'arm_{args[0].lower() if args else "left"}')
+    if (cmd == 'lock' and len(args) in (1, 2) and args[0].lower() in ('off', 'on') and
+            (len(args) == 1 or args[1].lower() in SIDES)):
+        return ('lock', args[0].lower() == 'on', f'arm_{args[1].lower() if len(args) == 2 else "left"}')
+    if cmd == 'hb' and len(args) == 1 and args[0].lower() in ('off', 'on'):
+        return ('hb', args[0].lower() == 'on')
     if cmd in ('cancel', 'state', 'quit', 'exit', 'help') and not args:
         return ('quit',) if cmd == 'exit' else (cmd,)
     return ('error', HELP)
@@ -63,6 +76,7 @@ class FakeFleet:
         self._requested = 0
         self._last_feedback = {}   # arm_id -> (phase, placed)
         self._last_state = {}      # arm_id -> (state, detail)
+        self._boot = {}            # arm_id -> boot_id (바뀌면 [초기화] = 앱 또는 브리지 재시작)
         self.results = []          # 받은 결과 (시험용)
         self._context = self._node = self._executor = self._thread = None
 
@@ -71,15 +85,17 @@ class FakeFleet:
         import rclpy
         from fleet_interfaces.action import FillBasket
         from fleet_interfaces.msg import ArmState
-        from fleet_interfaces.srv import SetMode
+        from fleet_interfaces.srv import RobotCommand, SetLock, SetMode
         from rclpy.action import ActionClient
         from rclpy.executors import MultiThreadedExecutor
 
         contract = _load_yaml(contract_path())
-        pending = _load_yaml(PENDING_NAMES)['arm_state']
+        state_entry = next(t for t in contract['topics'] if t['key'] == 'arm_state')  # contract 0.9 (PH-02)
         mode_name = next(s for s in contract['services'] if s['key'] == 'robot_set_mode')['name']
         fill_name = next(a for a in contract['actions'] if a['key'] == 'fill_basket')['name']
-        qos = qos_from_contract(contract, pending['qos'])
+        services = {s['key']: s['name'] for s in contract['services']}
+        resume_name = _load_yaml(PENDING_NAMES)['arm_resume']['name']  # TODO(Q-05)
+        qos = qos_from_contract(contract, state_entry['qos'])
 
         self._context = rclpy.Context()
         rclpy.init(context=self._context)
@@ -87,13 +103,32 @@ class FakeFleet:
         self._mode_clients = {arm: self._node.create_client(SetMode, mode_name.replace('{robot}', arm))
                               for arm in ARMS}
         self._fill = ActionClient(self._node, FillBasket, fill_name)
-        for arm in pending['arms']:
-            self._node.create_subscription(ArmState, pending['name'].replace('{arm}', arm),
+        self._admin_clients = {}
+        for arm in ARMS:
+            self._admin_clients[('lock', arm)] = self._node.create_client(
+                SetLock, services['robot_set_lock'].replace('{robot}', arm))
+            self._admin_clients[('fault', arm)] = self._node.create_client(
+                RobotCommand, services['arm_fault_resolved'].replace('{arm}', arm))
+            self._admin_clients[('resume', arm)] = self._node.create_client(
+                RobotCommand, resume_name.replace('{arm}', arm))
+        for arm in ARMS:
+            self._node.create_subscription(ArmState, state_entry['name'].replace('{arm}', arm),
                                            self._on_state, qos)
+        # 11-27: 관제 신호. 진짜 관제처럼 0.5초마다 보낸다(통신 규칙 HEARTBEAT).
+        from std_msgs.msg import Header
+        hb = next(t for t in contract['topics'] if t['key'] == 'heartbeat')
+        self._hb_pub = self._node.create_publisher(Header, hb['name'], qos_from_contract(contract, hb['qos']))
+        self.heartbeat_on = True
+        self._node.create_timer(0.5, self._send_heartbeat)
         self._executor = MultiThreadedExecutor(context=self._context)
         self._executor.add_node(self._node)
         self._thread = threading.Thread(target=self._executor.spin, name='fake_fleet', daemon=True)
         self._thread.start()
+
+    def _send_heartbeat(self):
+        from std_msgs.msg import Header
+        if self.heartbeat_on:
+            self._hb_pub.publish(Header(stamp=self._node.get_clock().now().to_msg(), frame_id='fleet'))
 
     def stop(self):
         if self._executor is not None:
@@ -122,6 +157,29 @@ class FakeFleet:
         reply = future.result()
         text = 'accepted' if reply.accepted else f'rejected {reply.reason} {reply.detail}'.rstrip()
         self.out(f'[MODE ] {arm} {text}')
+
+    def send_admin(self, name, arm, locked=None):
+        from fleet_interfaces.srv import RobotCommand, SetLock
+
+        client = self._admin_clients[(name, arm)]
+        if not client.service_is_ready():
+            self.out(f'[ADMIN] {arm} {name}: server not found')
+            return
+        rid = str(uuid.uuid4())
+        if name == 'lock':
+            # 가짜 관제라 관리자 확인(confirm_drop)은 늘 한 것으로 보낸다.
+            request = SetLock.Request(request_id=rid, robot_id=arm, locked=locked, confirm_drop=True)
+            label = 'lock ' + ('on' if locked else 'off')
+        else:
+            request = RobotCommand.Request(request_id=rid, robot_id=arm)
+            label = name
+        future = client.call_async(request)
+        future.add_done_callback(lambda f: self._on_admin_reply(arm, label, f))
+
+    def _on_admin_reply(self, arm, label, future):
+        reply = future.result()
+        text = 'accepted' if reply.accepted else f'rejected {reply.reason} {reply.detail}'.rstrip()
+        self.out(f'[ADMIN] {arm} {label} {text}')
 
     def send_fill(self, count, kind=DEFAULT_KIND):
         from fleet_interfaces.action import FillBasket
@@ -186,13 +244,22 @@ class FakeFleet:
         handle.cancel_goal_async()
 
     def _on_state(self, msg):
-        key = (msg.state, msg.detail)
+        key = (msg.state, msg.detail, msg.mode, msg.lock, msg.holding)
+        with self._lock:
+            old_boot = self._boot.get(msg.arm_id)
+            self._boot[msg.arm_id] = msg.boot_id
+        if old_boot is not None and old_boot != msg.boot_id:
+            # 진짜 관제는 여기서 set_mode를 다시 보낸다. 가짜 관제는 알리기만 한다.
+            self.out(f'[BOOT ] {arm_label(msg.arm_id).strip()} boot_id changed '
+                     f'({old_boot[:8]} -> {msg.boot_id[:8]}): restart; send mode again')
         with self._lock:
             if self._last_state.get(msg.arm_id) == key:
                 return
             self._last_state[msg.arm_id] = key
         self.out(f'[STATE] {arm_label(msg.arm_id).strip()}={msg.state}'
-                 + (f' ({msg.detail})' if msg.detail else ''))
+                 + (f' ({msg.detail})' if msg.detail else '')
+                 + f' mode={msg.mode or "-"} lock={"on" if msg.lock else "OFF"}'
+                 + (' holding' if msg.holding else ''))
 
     def print_state(self):
         with self._lock:
@@ -202,7 +269,7 @@ class FakeFleet:
             return
         self.out('[STATE] ' + '  '.join(
             f'{arm_label(arm).strip()}={state}' + (f' ({detail})' if detail else '')
-            for arm, (state, detail) in sorted(states.items())))
+            for arm, (state, detail, *_rest) in sorted(states.items())))
 
 
 def main():
@@ -225,6 +292,14 @@ def main():
                 fleet.send_fill(command[1], command[2])
             elif name == 'cancel':
                 fleet.cancel()
+            elif name in ('resume', 'fault'):
+                fleet.send_admin(name, command[1])
+            elif name == 'lock':
+                fleet.send_admin('lock', command[2], locked=command[1])
+            elif name == 'hb':
+                fleet.heartbeat_on = command[1]
+                print(f'[HB   ] heartbeat {"on" if command[1] else "OFF (Phody shows HEARTBEAT_LOST after 30 s)"}',
+                      flush=True)
             elif name == 'state':
                 fleet.print_state()
             elif name in ('help', 'error'):

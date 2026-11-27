@@ -43,6 +43,11 @@ class ReadOnlyState(Node):
         self.latest_arm = None
         self.gripper_time = 0.0
         self.next_gripper_read = 0.0
+        # Diagnostics only (2026-11-25): 19:43 the left joint states stopped for
+        # ~8 s with no log while the Pi still executed goals. Report slow serial
+        # reads and publish gaps; behavior unchanged.
+        self._diag_last_tick = None
+        self._diag_last_publish = None
         self.timer = self.create_timer(1.0/state_hz, self.read)
         self.get_logger().info(f'READ ONLY: querying arm angles at {state_hz:g} Hz; no motion commands.'
                                if node_name == 'jetcobot_read_only_state'
@@ -53,9 +58,23 @@ class ReadOnlyState(Node):
             return self.mc.get_gripper_value()
         return self.mc.get_gripper_value(self.gripper_type)
 
+    def _diag_slow(self, what, started):
+        took = time.monotonic() - started
+        if took > 0.8:
+            self.get_logger().warning(
+                f'STATE DIAG: {what} took {took:.2f} s (busy={bool(getattr(self, "busy", False))})')
+
     def read(self):
+        tick = time.monotonic()
+        if self._diag_last_tick is not None and tick - self._diag_last_tick > 1.5:
+            self.get_logger().warning(
+                f'STATE DIAG: read timer delayed {tick - self._diag_last_tick:.2f} s since last tick '
+                f'(busy={bool(getattr(self, "busy", False))})')
+        self._diag_last_tick = tick
         try:
+            started = time.monotonic()
             angles = self.mc.get_angles()
+            self._diag_slow('get_angles', started)
             if not isinstance(angles, (list, tuple)) or len(angles) != 6:
                 self.get_logger().warning(f'Invalid arm reading: {angles!r}')
                 return
@@ -70,7 +89,16 @@ class ReadOnlyState(Node):
             msg.position = [math.radians(value) for value in values]
             self.publisher.publish(msg)
             now = time.monotonic()
+            if self._diag_last_publish is not None and now - self._diag_last_publish > 1.5:
+                self.get_logger().warning(
+                    f'STATE DIAG: joint state publish gap {now - self._diag_last_publish:.2f} s')
+            self._diag_last_publish = now
             moving = bool(getattr(self, 'busy', False))
+            # 2026-11-24: read the gripper on the first idle tick after a motion so
+            # the gate's <5 s gripper check passes at once (grip/release waited 1-3 s).
+            if getattr(self, '_was_moving', False) and not moving:
+                self.next_gripper_read = 0.0
+            self._was_moving = moving
             # 2026-11-20: at most ONE extra serial query per tick (gripper, temps
             # or coords) so an idle tick never delays the next angle publish.
             aux = None
@@ -78,9 +106,11 @@ class ReadOnlyState(Node):
                 aux = ('gripper' if now >= self.next_gripper_read else
                        'temps' if now >= self.next_temp_read else 'coords')
             if aux == 'gripper':
-                self.next_gripper_read = now + 2.0
+                self.next_gripper_read = now + 1.0
                 try:
+                    started = time.monotonic()
                     value = self.read_gripper_value()
+                    self._diag_slow('gripper read', started)
                     if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and 0 <= value <= 100:
                         first = self.gripper_sample is None
                         self.gripper_sample = float(value)
@@ -99,7 +129,9 @@ class ReadOnlyState(Node):
             # Reuse this process's serial connection; do not open a second SDK client.
             if aux == 'coords':
                 try:
+                    started = time.monotonic()
                     coords = self.mc.get_coords()
+                    self._diag_slow('get_coords', started)
                     if (isinstance(coords, (list, tuple)) and len(coords) == 6
                             and all(math.isfinite(float(v)) for v in coords)):
                         self.sdk_pose_pub.publish(Float64MultiArray(
@@ -110,7 +142,9 @@ class ReadOnlyState(Node):
                 if True:
                     self.next_temp_read = now + 10.0
                     try:
+                        started = time.monotonic()
                         temps = self.mc.get_servo_temps()
+                        self._diag_slow('get_servo_temps', started)
                         if (isinstance(temps, (list, tuple)) and len(temps) == 6 and
                                 all(isinstance(v, (int, float)) for v in temps)):
                             self.temp_pub.publish(Float64MultiArray(

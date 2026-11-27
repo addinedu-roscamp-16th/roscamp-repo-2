@@ -31,9 +31,6 @@ CASE_CONFIG = _pkg_share('jetcobot_dual_control', '~/pinky_ws/src/jetcobot_dual/
 URDF = Path.home() / 'jetcobot_moveit2_real_upload/test_urdf/urdf/jetcobot_dual_real.urdf'
 CASE_HEIGHT_MM = 60.0
 RIGHT_JOINTS = tuple(f'right_{i}_Joint' for i in range(1, 7))
-# Right target estimated from offline FK; live MoveIt must validate collision
-# and planning, with the tips about 30 mm above the rim and TCP Y parallel to base Y.
-RIGHT_ARRIVAL_JOINT_DEG = (160.86, -62.04, 0.02, -24.11, 0.09, 70.71)
 MAX_PLAN_ATTEMPTS = 6
 
 
@@ -45,6 +42,14 @@ def case_center_and_rim(config_path):
     if not all(math.isfinite(v) for v in (x, y, bottom)):
         raise ValueError('Nonfinite case position')
     return np.array([x, y]) / 1000.0, bottom + CASE_HEIGHT_MM
+
+
+def case_arrival_pose(case_xy, rim_z_mm, arm, reverse_y=False):
+    """TCP above the case center with closed tips 30 mm over the rim."""
+    tcp_z = (rim_z_mm + 30.0 + GRASP_CLOSED_TIP_OFFSET_MM[arm]) / 1000.0
+    # Both orientations point TCP +Z down and keep TCP Y parallel to base Y.
+    quaternion = (1.0, 0.0, 0.0, 0.0) if reverse_y else (0.0, 1.0, 0.0, 0.0)
+    return (*case_xy, tcp_z), quaternion
 
 
 def right_see_center(coord):
@@ -205,18 +210,15 @@ def close_gripper(coord, arm='right'):
     goal.trajectory.joint_names = [f'{arm}_gripper_controller']
     goal.trajectory.points = [JointTrajectoryPoint(
         positions=[-0.83], time_from_start=Duration(sec=3))]
-    print(f'CLOSE {arm.upper()} GRIPPER at see_center.', flush=True)
+    print(f'CLOSE {arm.upper()} GRIPPER.', flush=True)
     wait_action(coord, client, goal, f'{arm.upper()} GRIPPER CLOSE')
 
 
 def plan_closed_arrival(coord, state, case_xy, rim_z_mm):
-    goal = {name: math.radians(angle) for name, angle in
-            zip(RIGHT_JOINTS, RIGHT_ARRIVAL_JOINT_DEG)}
-    if not coord.valid(dict(state, **goal), group_name='arm_right'):
-        raise RuntimeError('Right arrival pose collides in the current MoveIt scene')
     planned = None
     for attempt in range(1, MAX_PLAN_ATTEMPTS + 1):
-        candidate = coord.plan_joint_goal('right', state, goal)
+        pose = case_arrival_pose(case_xy, rim_z_mm, 'right', reverse_y=attempt % 2 == 0)
+        candidate = coord.plan_pose_goal('right', state, *pose, orientation_tolerance_deg=4.0)
         if candidate is None:
             print(f'RIGHT plan attempt {attempt}/{MAX_PLAN_ATTEMPTS} rejected; '
                   'searching another collision-free route.', flush=True)

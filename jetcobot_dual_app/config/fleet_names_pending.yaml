@@ -1,13 +1,16 @@
-# 팀 contract(fleet_interfaces/contract.yaml) 0.8에 아직 없는 이름 (작업지시서 R10).
-# 11-26 회의: 팀이 contract에 넣어 주기로 함(FIX-1).
-# contract에 들어오면 이 항목을 지우고 contract.yaml에서 읽는다.
-arm_state:
-  name: "/{arm}/state"          # 인터페이스 명세 v0.2 3.5 · 4.5
-  type: fleet_interfaces/msg/ArmState
-  qos: STATE                    # contract.yaml qos_profiles.STATE
-  arms: [arm_left, arm_right]
+# 팀 contract(fleet_interfaces/contract.yaml)에 없는 Phody 쪽 설정 (작업지시서 R10).
+# 2026-11-27 PH-02: 팔 상태 토픽(arm_state)은 contract 0.9에 들어와(FIX-1) 여기서 지웠다.
+#   지금은 fleet_link.py가 contract.yaml topics의 arm_state(/{arm}/state, STATE)를 읽는다.
 
 # 상품 코드(OrderItem.kind) -> Phody YOLO 클래스.
-# TODO(DECIDE-2): 팀 상품 코드 목록이 아직 없다(11-26 회의: 나중에 알려줌). 기본 chocobar로 진행, 팀 파일이 오면 고친다.
+# 2026-11-27 PH-01: 팀 코드가 원본(팀 통합 작업 목록 6장, 주문 DB product.kind). Phody 클래스와 다르면 여기서 바꾼다.
+# 다른 상품은 인식을 켤 때 '코드: 클래스' 줄을 더한다 (mentos · mygummy · choco_ball · bungeo_cake).
 kinds:
-  chocobar: chocolate_bar
+  choco_bar: chocolate_bar
+
+# 이어서 하기 (fleet -> 팔). 11-27 회의: 팀이 서비스를 추가할 예정, 이름은 나중에 정함.
+# 사용자 결정(11-27): 그 전까지 이 이름 · 타입으로 연다. 팀 /fleet/resume_arm(RobotCommand)과 같은 타입.
+# TODO(Q-05): 팀 이름이 정해지면 바꾸고, contract에 들어오면 이 항목을 지운다.
+arm_resume:
+  name: "/{arm}/resume_arm"
+  type: fleet_interfaces/srv/RobotCommand

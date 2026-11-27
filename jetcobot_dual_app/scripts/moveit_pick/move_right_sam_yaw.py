@@ -12,19 +12,26 @@ controller, clearance and physical workspace independently.
 import argparse
 import json
 import math
+import os
 import signal
 import sys
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 
 from motion_math import trajectory_motion_cost, sdk_goal_motion_cost
 
 # Physical jaw tips are below the fixed model TCP; values are from the user's measurements.
-GRASP_FLOOR_Z_MM = -5.0
+# Work surface height in right_base_link.
+GRASP_FLOOR_Z_MM = 8.0
 GRASP_CLOSED_TIP_ABOVE_FLOOR_MM = 3.0
-GRASP_CLOSED_TIP_OFFSET_MM = {'left': 40.0, 'right': 25.0}
+GRASP_CLOSED_TIP_OFFSET_MM = {'left': 30.0, 'right': 25.0}
+
+
+FINE_PRE_MOTION_RETRY_EXIT = 75
+PICK_FEEDBACK_WAIT_S = 30.0
 
 
 def grasp_tcp_target_z_m(side):
@@ -50,10 +57,14 @@ def fine_request_argv(request_path):
             '--min-valid-points', str(data['min_valid_points']), '--execute']
     if data.get('allow_uncertain_yaw'):
         argv.append('--allow-uncertain-yaw')
-    if data['arm'] == 'right':
+    if data['arm'] in ('right', 'left'):
         # 2026-11-20: right SDK MoveL XY added +3.4 deg rx per move (11.7 deg
         # after 4 moves). Right uses a MoveIt joint goal at a LEVELLED TCP.
+        # 2026-11-24: left gripper also no longer vertical in descent (hardware);
+        # left now uses the same levelled joint goal (Z hold + joint bias).
         argv.append('--fine-joint-goal')
+    if not data.get('fine_moveit_planning', True):
+        argv.append('--fine-ik-goal')
     return argv
 
 
@@ -190,6 +201,8 @@ def main():
     ap.add_argument('--arm', choices=('left', 'right'), default='right')
     ap.add_argument('--yaw-camera', choices=('auto','left','right'), default='auto')
     ap.add_argument('--peer-home', action='store_true', help='Plan/execute opposite arm to SRDF home first')
+    ap.add_argument('--joint-goal-pick', action='store_true')
+    ap.add_argument('--fine-ik-goal', action='store_true')
     ap.add_argument('--phase', choices=('approach','align','descend','close','lift','grasp'), default='approach',
                     help='grasp = descend + close + lift in one process (auto mode, 2026-11-19)')
     ap.add_argument('--group', default=None, help='Exact MoveIt SRDF group name; verify with local config')
@@ -252,7 +265,7 @@ def main():
     from action_msgs.msg import GoalStatus
     from sensor_msgs.msg import JointState
     from moveit_msgs.action import MoveGroup, ExecuteTrajectory
-    from moveit_msgs.srv import GetPositionFK, GetStateValidity
+    from moveit_msgs.srv import GetCartesianPath, GetPositionFK, GetStateValidity
     from std_srvs.srv import Trigger
     from example_interfaces.srv import AddTwoInts
     from control_msgs.action import FollowJointTrajectory
@@ -270,23 +283,19 @@ def main():
     from rclpy.qos import QoSProfile, DurabilityPolicy, ReliabilityPolicy
 
     from rclpy.signals import SignalHandlerOptions
-    rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
-    node = rclpy.create_node(f'sam_yaw_moveit_{args.arm}')
-    joint_current = {'msg': None, 'at': 0.}
-    def joint_cb(msg):
-        joint_current['msg'] = msg
-        joint_current['at'] = time.monotonic()
-    sub = node.create_subscription(JointState, f'/{args.arm}/real_joint_states', joint_cb, 10)
-    peer_current = {'msg': None, 'at': 0.}
-    peer_sub = node.create_subscription(JointState, f'/{peer}/real_joint_states',
-        lambda msg: peer_current.update(msg=msg, at=time.monotonic()), 10)
+    # 2026-11-24: node + joint subscriptions are kept alive in the worker server
+    # (see serve_worker) so each fine/grasp step skips ROS start-up and discovery.
+    node, joint_current, peer_current = _ros_context(args.arm, peer)
 
-    def fresh_state(timeout=4.):
-        end = time.monotonic()+timeout
+    def fresh_state(timeout=None, *, received_after=0.):
+        if timeout is None:
+            timeout = PICK_FEEDBACK_WAIT_S if args.phase in ('align', 'descend', 'grasp') else 4.0
+        end = time.monotonic() + timeout
         while rclpy.ok() and time.monotonic() < end:
             rclpy.spin_once(node, timeout_sec=.10)
             msg = joint_current['msg']
-            if msg is not None and time.monotonic()-joint_current['at'] <= 1.0:
+            received = joint_current['at']
+            if msg is not None and received > received_after and time.monotonic() - received <= 1.0:
                 q = dict(zip(msg.name, msg.position))
                 out = {}
                 for i in range(1, 7):
@@ -297,7 +306,7 @@ def main():
                     out[name] = float(v)
                 if len(out) == 6:
                     return out
-        raise RuntimeError(f'Missing recent valid /{args.arm}/real_joint_states (received within 1 s)')
+        raise RuntimeError(f'No recent valid /{args.arm}/real_joint_states after {timeout:g} s of waiting')
 
     def fresh_peer_state(timeout=4.):
         end = time.monotonic()+timeout
@@ -389,6 +398,55 @@ def main():
                                f'({meanings.get(code, "see MoveIt log")})')
         return wrapped.result
 
+    def execute_left_descent(trajectory, planned_start):
+        """Send a MoveIt plan to the same controller used by the approach."""
+        controller = '/jetcobot_dual/guarded_both_controller/follow_joint_trajectory'
+        client = ActionClient(node, FollowJointTrajectory, controller)
+        if not client.wait_for_server(timeout_sec=8.):
+            raise RuntimeError('Combined execution gate unavailable for left descent')
+        states = {}
+        topic = '/jetcobot_dual/joint_states'
+        from rclpy.qos import qos_profile_sensor_data
+        sub = node.create_subscription(JointState, topic,
+                                       lambda msg: states.update(msg=msg),
+                                       qos_profile_sensor_data)
+        try:
+            print('LEFT DESCENT: waiting for fresh combined joint feedback.', flush=True)
+            deadline = time.monotonic() + PICK_FEEDBACK_WAIT_S
+            while rclpy.ok() and time.monotonic() < deadline:
+                rclpy.spin_once(node, timeout_sec=.1)
+                msg = states.get('msg')
+                if msg is None:
+                    continue
+                stamp = msg.header.stamp
+                age = (node.get_clock().now().nanoseconds -
+                       (stamp.sec * 1_000_000_000 + stamp.nanosec)) / 1e9
+                if not -.25 <= age <= 1.0:
+                    continue
+                measured = dict(zip(msg.name, msg.position))
+                if not all(name in measured and np.isfinite(measured[name])
+                           for name in planned_start):
+                    continue
+                drift = max(abs(math.degrees(measured[name] - planned_start[name]))
+                            for name in planned_start)
+                if drift > args.max_state_change_deg:
+                    raise RuntimeError(f'Left descent start changed {drift:.1f} deg while waiting; replan')
+                break
+            else:
+                raise RuntimeError(f'No fresh combined state before left descent after '
+                                   f'{PICK_FEEDBACK_WAIT_S:g} s')
+        finally:
+            node.destroy_subscription(sub)
+        reply = run_action(client, FollowJointTrajectory.Goal(trajectory=trajectory),
+                           'LEFT DESCENT EXECUTE', 90.)
+        if reply is None:
+            raise RuntimeError('LEFT DESCENT EXECUTE: gate rejected before movement; see gate log')
+        if (reply.status != GoalStatus.STATUS_SUCCEEDED or
+                reply.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL):
+            raise RuntimeError(f'LEFT DESCENT EXECUTE: status={reply.status}, '
+                               f'controller error={reply.result.error_code}; '
+                               f'{reply.result.error_string}')
+
     def plan(goal_position, orientation, peer_at_home=False, joint_goal=None):
         request = MoveGroup.Goal()
         r = request.request
@@ -457,6 +515,56 @@ def main():
         print(f'Planning: group={args.group}, tip={args.tip_link}, goal={goal_kind}, frame=right_base_link', flush=True)
         return action_goal(move_client, request, 'MoveGroup PLAN', 35.)
 
+    def ik_goal(position, orientation, state):
+        from joint_goal import pose_joint_goal
+        goal = pose_joint_goal(node, await_future, state, args.arm, position, orientation)
+        if goal is None:
+            raise RuntimeError(f'No direct IK solution for {args.arm} TCP goal')
+        return goal
+
+    def run_joint_goal(goal, label):
+        from joint_goal import JOINT_GOAL_ACTION, endpoint_request
+        client = ActionClient(node, FollowJointTrajectory, JOINT_GOAL_ACTION)
+        if not client.wait_for_server(timeout_sec=8.0):
+            raise RuntimeError('Combined execution gate unavailable')
+        wrapped = run_action(client, endpoint_request(goal), label, 150.)
+        if wrapped is None:
+            raise RuntimeError(f'{label}: gate rejected the goal')
+        if wrapped.status != GoalStatus.STATUS_SUCCEEDED or wrapped.result.error_code != 0:
+            raise RuntimeError(f'{label}: {wrapped.result.error_string}')
+
+    def plan_cartesian(goal_position, orientation, current, label):
+        """Follow the Cartesian line from the measured configuration."""
+        client = node.create_client(GetCartesianPath, '/jetcobot_dual/compute_cartesian_path')
+        try:
+            if not client.wait_for_service(timeout_sec=5.):
+                raise RuntimeError('MoveIt Cartesian path service unavailable')
+            request = GetCartesianPath.Request()
+            request.header.frame_id = 'right_base_link'
+            request.group_name = args.group
+            request.link_name = args.tip_link
+            request.start_state.is_diff = True
+            request.start_state.joint_state.name = list(current)
+            request.start_state.joint_state.position = [float(value) for value in current.values()]
+            waypoint = Pose()
+            waypoint.position.x, waypoint.position.y, waypoint.position.z = map(float, goal_position)
+            (waypoint.orientation.x, waypoint.orientation.y,
+             waypoint.orientation.z, waypoint.orientation.w) = map(float, orientation)
+            request.waypoints = [waypoint]
+            request.max_step = .001
+            request.avoid_collisions = True
+            request.max_velocity_scaling_factor = args.velocity_scale
+            request.max_acceleration_scaling_factor = args.acceleration_scale
+            response = await_future(client.call_async(request), 12.)
+        finally:
+            node.destroy_client(client)
+        print(f'{label} Cartesian path: {response.fraction:.1%}; '
+              f'MoveIt code={response.error_code.val}', flush=True)
+        if response.error_code.val != MoveItErrorCodes.SUCCESS or response.fraction < 1.0 - 1e-6:
+            raise RuntimeError(f'{label}: no complete collision-free Cartesian path from current pose')
+        return SimpleNamespace(planned_trajectory=response.solution,
+                               trajectory_start=response.start_state)
+
     def ik_straight_lift(pose, quat, current, heights_m=(.05, .03, .02)):
         """IK at the lift pose, then a straight joint path (<=2 deg steps)."""
         import types as _types
@@ -514,6 +622,7 @@ def main():
         raise RuntimeError('Lift failed: neither MoveIt plan nor IK straight lift (5/3/2 cm) found a pose')
 
     if args.phase in ('align', 'descend', 'close', 'lift', 'grasp'):
+        fine_command_attempted = False
         try:
             summary_path = log_dir / 'moveit_plan_summary.json'
             summary = json.loads(summary_path.read_text())
@@ -557,9 +666,10 @@ def main():
                 count = int(aligned['count']) if align_record.exists() else 0
                 if not args.fine_axis and count >= 1:
                     raise RuntimeError('One-shot predicted move already used for this capture; recapture')
-                move_client = ActionClient(node, MoveGroup, args.move_action)
-                if not move_client.wait_for_server(timeout_sec=8.):
-                    raise RuntimeError('MoveGroup unavailable')
+                if not args.fine_ik_goal:
+                    move_client = ActionClient(node, MoveGroup, args.move_action)
+                    if not move_client.wait_for_server(timeout_sec=8.):
+                        raise RuntimeError('MoveGroup unavailable')
                 fk_client = node.create_client(GetPositionFK, '/jetcobot_dual/compute_fk')
                 if not fk_client.wait_for_service(timeout_sec=5.):
                     raise RuntimeError('MoveIt FK service unavailable')
@@ -575,6 +685,19 @@ def main():
                 before = before_fk.pose_stamped[0].pose
                 before_xyz = np.array([before.position.x, before.position.y, before.position.z])
                 goal_xyz = before_xyz + np.array([delta_mm[0], delta_mm[1], 0.]) / 1000.
+                fine_ref_path = log_dir / 'fine_reference.json'
+                if args.fine_axis and args.fine_joint_goal:
+                    # 2026-11-24: each slow joint goal dropped the right TCP 4-6 mm and the
+                    # drop accumulated. Hold the TCP Z of the first fine step instead.
+                    try:
+                        ref_z = float(json.loads(fine_ref_path.read_text())['tcp_z_m'])
+                    except (FileNotFoundError, KeyError, ValueError):
+                        ref_z = float(before_xyz[2])
+                        fine_ref_path.write_text(json.dumps({'arm': args.arm, 'tcp_z_m': ref_z}))
+                    dz = float(np.clip(ref_z - before_xyz[2], -0.015, 0.015))
+                    goal_xyz[2] = before_xyz[2] + dz
+                    print(f'FINE Z HOLD: reference {ref_z*1000:.1f} mm, now {before_xyz[2]*1000:.1f} mm, '
+                          f'correct {dz*1000:+.1f} mm', flush=True)
                 if not (args.min_z_m <= goal_xyz[2] <= args.max_z_m) or np.linalg.norm(goal_xyz) > args.max_radius_m:
                     raise RuntimeError('Alignment target outside configured workspace')
                 quat = np.array([before.orientation.x, before.orientation.y,
@@ -595,7 +718,15 @@ def main():
                 if args.fine_axis and start_tilt_deg > (15.0 if level else 8.0):
                     raise RuntimeError(f'Fine correction starts with TCP tilted '
                                        f'{start_tilt_deg:.1f} deg; inspect the approach pose')
-                planned = plan(goal_xyz, quat)
+                if args.fine_ik_goal:
+                    from joint_goal import joint_goal_result
+                    result = joint_goal_result(current, ik_goal(goal_xyz, quat, current))
+                    planned = SimpleNamespace(planned_trajectory=result.trajectory,
+                                              trajectory_start=result.trajectory_start)
+                elif args.arm == 'left' and args.fine_axis:
+                    planned = plan_cartesian(goal_xyz, quat, current, 'LEFT FINE')
+                else:
+                    planned = plan(goal_xyz, quat)
                 jt = planned.planned_trajectory.joint_trajectory
                 if not jt.points or set(jt.joint_names) != set(expected):
                     raise RuntimeError('Invalid alignment trajectory joints')
@@ -603,8 +734,9 @@ def main():
                                  for name,q in zip(jt.joint_names, pt.positions))
                 if plan_delta > args.max_joint_change_deg:
                     raise RuntimeError(f'Predicted XY plan changes a joint {plan_delta:.1f} deg; limit is {args.max_joint_change_deg:.1f} deg')
-                validate_trial(FollowJointTrajectory.Goal(trajectory=jt), args.arm,
-                    [current[f'{args.arm}_{i}_Joint'] for i in range(1, 7)])
+                if not args.fine_ik_goal:
+                    validate_trial(FollowJointTrajectory.Goal(trajectory=jt), args.arm,
+                        [current[f'{args.arm}_{i}_Joint'] for i in range(1, 7)])
                 start = dict(zip(planned.trajectory_start.joint_state.name,
                                  planned.trajectory_start.joint_state.position))
                 measured = fresh_state()
@@ -663,37 +795,85 @@ def main():
                                                f'(start {start_tilt_deg:.1f}), '
                                                f'orientation change={turn_deg:.1f} deg '
                                                '(limits: 8 deg tilt, 3 deg turn); no motion sent')
-                    duration = max(5., max_joint_delta / .07)
-                    direct = JointTrajectory()
-                    direct.joint_names = list(expected)
-                    direct.points = [
-                        JointTrajectoryPoint(positions=[measured[name] for name in expected],
-                                             time_from_start=Duration()),
-                        JointTrajectoryPoint(positions=[goal_joint[name] for name in expected],
-                                             time_from_start=Duration(sec=int(duration),
-                                                 nanosec=int((duration%1.)*1e9)))]
-                    slow_goal = FollowJointTrajectory.Goal(trajectory=direct)
-                    validate_trial(slow_goal, args.arm,
-                        [measured[f'{args.arm}_{i}_Joint'] for i in range(1, 7)])
-                    service_name = f'/{args.arm}/sdk_slow_goal_controller/follow_joint_trajectory'
-                    slow_client = ActionClient(node, FollowJointTrajectory, service_name)
-                    if not slow_client.wait_for_server(timeout_sec=5.):
-                        raise RuntimeError(f'Pi slow joint action unavailable: {service_name}; restart updated bridge')
-                    pending_path.write_text(json.dumps({'arm':args.arm,
-                        'predicted_delta_mm':delta_mm.tolist(),
-                        'commanded_joint_goal_rad':goal_joint, 'at':time.time()}))
-                    print(f'EXECUTE ALIGN PREDICTION: slow SDK joint goal for XY '
-                          f'{np.round(delta_mm, 1).tolist()} mm, speed=1.', flush=True)
-                    wrapped = run_action(slow_client, slow_goal, 'Pi slow joint goal',
-                                         95.0, accept_timeout=8.0)
-                    if wrapped is None:
-                        raise RuntimeError('Pi rejected slow joint goal')
-                    if (wrapped.status != GoalStatus.STATUS_SUCCEEDED or
-                            wrapped.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL):
-                        raise RuntimeError(f'Pi slow joint goal failed: '
-                            f'status={wrapped.status}, code={wrapped.result.error_code}, '
-                            f'message={wrapped.result.error_string}')
-                    print(f'Pi slow joint goal: {wrapped.result.error_string}', flush=True)
+                    # 2026-11-24: the Pi accepts a slow goal within 5 deg and the right
+                    # J4 stopped ~1.8 deg short every time, eating 7-9 mm corrections.
+                    # Feed forward the learned per-joint shortfall (gain 0.6, <=3 deg).
+                    # Kept across objects (the shortfall repeats run to run); git-ignored folder.
+                    bias_path = Path(__file__).resolve().parents[1] / 'sam_yaw_output' / f'fine_joint_bias_{args.arm}.json'
+                    try:
+                        joint_bias = {k: float(v) for k, v in json.loads(bias_path.read_text()).items()
+                                      if k in expected}
+                    except (FileNotFoundError, ValueError):
+                        joint_bias = {}
+                    desired_goal = dict(goal_joint)
+                    send_goal = {name: desired_goal[name] + joint_bias.get(name, 0.)
+                                 for name in expected}
+                    if joint_bias:
+                        check = GetStateValidity.Request()
+                        check.group_name = args.group
+                        check.robot_state.is_diff = True
+                        values = dict(send_goal); values.update(peer_now)
+                        check.robot_state.joint_state.name = list(values)
+                        check.robot_state.joint_state.position = list(values.values())
+                        if not await_future(validity.call_async(check), 5.).valid:
+                            print('FINE BIAS: compensated goal invalid; sending uncompensated goal.',
+                                  flush=True)
+                            send_goal = dict(desired_goal)
+                        else:
+                            print('FINE BIAS deg: ' + ', '.join(
+                                f'J{i+1} {math.degrees(joint_bias.get(n, 0.)):+.2f}'
+                                for i, n in enumerate(expected)), flush=True)
+                    goal_joint = send_goal
+                    if args.fine_ik_goal:
+                        pending_path.write_text(json.dumps({'arm': args.arm,
+                            'predicted_delta_mm': delta_mm.tolist(),
+                            'commanded_joint_goal_rad': goal_joint, 'at': time.time()}))
+                        fine_command_attempted = True
+                        print('FINE: direct IK joint goal via execution gate.', flush=True)
+                        run_joint_goal(goal_joint, 'FINE IK GOAL')
+                    else:
+                        max_joint_delta = max(abs(goal_joint[name]-measured[name]) for name in expected)
+                        duration = max(5., max_joint_delta / .07)
+                        direct = JointTrajectory()
+                        direct.joint_names = list(expected)
+                        direct.points = [
+                            JointTrajectoryPoint(positions=[measured[name] for name in expected],
+                                                 time_from_start=Duration()),
+                            JointTrajectoryPoint(positions=[goal_joint[name] for name in expected],
+                                                 time_from_start=Duration(sec=int(duration),
+                                                     nanosec=int((duration%1.)*1e9)))]
+                        slow_goal = FollowJointTrajectory.Goal(trajectory=direct)
+                        validate_trial(slow_goal, args.arm,
+                            [measured[f'{args.arm}_{i}_Joint'] for i in range(1, 7)])
+                        service_name = f'/{args.arm}/sdk_slow_goal_controller/follow_joint_trajectory'
+                        slow_client = ActionClient(node, FollowJointTrajectory, service_name)
+                        if not slow_client.wait_for_server(timeout_sec=5.):
+                            raise RuntimeError(f'Pi slow joint action unavailable: {service_name}; restart updated bridge')
+                        pending_path.write_text(json.dumps({'arm':args.arm,
+                            'predicted_delta_mm':delta_mm.tolist(),
+                            'commanded_joint_goal_rad':goal_joint, 'at':time.time()}))
+                        print(f'EXECUTE ALIGN PREDICTION: slow SDK joint goal for XY '
+                              f'{np.round(delta_mm, 1).tolist()} mm, speed=1.', flush=True)
+                        fine_command_attempted = True
+                        wrapped = run_action(slow_client, slow_goal, 'Pi slow joint goal',
+                                             95.0, accept_timeout=8.0)
+                        if wrapped is None:
+                            raise RuntimeError('Pi rejected slow joint goal')
+                        if (wrapped.status != GoalStatus.STATUS_SUCCEEDED or
+                                wrapped.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL):
+                            raise RuntimeError(f'Pi slow joint goal failed: '
+                                f'status={wrapped.status}, code={wrapped.result.error_code}, '
+                                f'message={wrapped.result.error_string}')
+                        print(f'Pi slow joint goal: {wrapped.result.error_string}', flush=True)
+                    reached_now = fresh_state()
+                    limit = math.radians(3.0)
+                    new_bias = {name: float(np.clip(joint_bias.get(name, 0.) +
+                                                    0.6 * (desired_goal[name] - reached_now[name]),
+                                                    -limit, limit)) for name in expected}
+                    bias_path.write_text(json.dumps(new_bias))
+                    print('FINE SHORTFALL deg (desired - reached): ' + ', '.join(
+                        f'J{i+1} {math.degrees(desired_goal[n]-reached_now[n]):+.2f}'
+                        for i, n in enumerate(expected)), flush=True)
                 else:
                     service_name = f'/{args.arm}/sdk_linear_xy_tenth_mm'
                     linear_client = node.create_client(AddTwoInts, service_name)
@@ -706,6 +886,7 @@ def main():
                         'commanded_delta_mm':[command.a/10., command.b/10.], 'at':time.time()}))
                     print(f'EXECUTE ALIGN PREDICTION: SDK MoveL one-shot XY '
                           f'{[command.a/10.,command.b/10.]} mm, Z/orientation fixed.', flush=True)
+                    fine_command_attempted = True
                     linear_reply = await_future(linear_client.call_async(command), 60.)
                     if linear_reply.sum != 1:
                         raise RuntimeError('Native SDK XY prediction failed; inspect Pi bridge log and robot pose')
@@ -789,12 +970,26 @@ def main():
                       f'G calibrated TCP Z target: {target_z_m*1000:.1f} mm, down {down_mm:.1f} mm', flush=True)
                 if descend_pos[2] < args.min_z_m or np.linalg.norm(descend_pos) > args.max_radius_m:
                     raise RuntimeError(f'Descent target outside configured workspace: {descend_pos.tolist()}')
-                result = plan(descend_pos, quat)
+                descent_plan_tolerance_mm = min(args.pos_tolerance_mm, 2.0)
+                if args.joint_goal_pick:
+                    from joint_goal import joint_goal_result
+                    descent_goal = (ik_goal(descend_pos, quat, current)
+                                    if abs(down_mm) >= 5.0 else {n: current[n] for n in expected})
+                    direct = joint_goal_result(current, descent_goal)
+                    result = SimpleNamespace(planned_trajectory=direct.trajectory,
+                                             trajectory_start=direct.trajectory_start)
+                elif args.arm == 'left':
+                    result = plan_cartesian(descend_pos, quat, current, 'LEFT DESCENT')
+                else:
+                    result = plan(descend_pos, quat)
                 jt = result.planned_trajectory.joint_trajectory
                 if not jt.points or set(jt.joint_names) != set(expected):
                     raise RuntimeError('Invalid descent trajectory joints')
-                validate_trial(FollowJointTrajectory.Goal(trajectory=jt), args.arm,
-                    [current[f'{args.arm}_{i}_Joint'] for i in range(1, 7)])
+                # The left descent sends a full MoveIt path to the combined gate.
+                if not args.joint_goal_pick:
+                    validate_trial(FollowJointTrajectory.Goal(trajectory=jt), args.arm,
+                                   [current[f'{args.arm}_{i}_Joint'] for i in range(1, 7)],
+                                   allow_path=(args.arm == 'left'))
                 start = dict(zip(result.trajectory_start.joint_state.name,
                                  result.trajectory_start.joint_state.position))
                 measured = fresh_state()
@@ -815,33 +1010,50 @@ def main():
                     print(f'DESCENT SKIPPED: TCP is only {down_mm:.1f} mm above the grasp '
                           'height (< 5 mm). Closing gripper next.', flush=True)
                 else:
-                    service_name = f'/{args.arm}/sdk_linear_descend_tenth_mm'
-                    linear_client = node.create_client(AddTwoInts, service_name)
-                    if not linear_client.wait_for_service(timeout_sec=5.):
-                        raise RuntimeError(f'Native SDK MoveL service unavailable: {service_name}; deploy updated Pi bridge')
-                    distance = AddTwoInts.Request()
-                    distance.a = int(round(down_mm * 10.))
-                    distance.b = 0
-                    attempt_path.write_text(json.dumps({'arm': args.arm, 'down_mm': distance.a / 10.,
-                         'target_tcp_z_mm': target_z_m * 1000.0, 'at': time.time()}))
                     if args.arm == 'left':
-                        # Left SDK MoveL ignored 2.9 mm and 6.7 mm descents (Z did
-                        # not change in 45 s, 2026-11-19); the right arm's MoveL is
-                        # calibrated and kept. Execute the already planned and
-                        # validated MoveIt descent in joint space through the gate.
-                        print(f'EXECUTE: left descent {down_mm:.1f} mm via MoveIt joint path '
-                              '(SDK MoveL not used on the left arm).', flush=True)
-                        exec_client = ActionClient(node, ExecuteTrajectory, args.execute_action)
-                        goal = ExecuteTrajectory.Goal()
-                        goal.trajectory = result.planned_trajectory
-                        action_goal(exec_client, goal, 'LEFT DESCENT EXECUTE', 90.)
-                        time.sleep(0.6)
+                        fk_req.robot_state.joint_state.name = list(jt.joint_names)
+                        fk_req.robot_state.joint_state.position = list(jt.points[-1].positions)
+                        endpoint_fk = await_future(fk_client.call_async(fk_req), 8.)
+                        if (endpoint_fk.error_code.val != MoveItErrorCodes.SUCCESS or
+                                len(endpoint_fk.pose_stamped) != 1):
+                            raise RuntimeError('Could not verify planned left descent endpoint')
+                        point = endpoint_fk.pose_stamped[0].pose.position
+                        error_mm = np.linalg.norm(np.array([point.x, point.y, point.z]) - descend_pos) * 1000.
+                        print(f'LEFT DESCENT planned TCP Z={point.z*1000.:.1f} mm; '
+                              f'target error={error_mm:.1f} mm', flush=True)
+                        if error_mm > descent_plan_tolerance_mm + 0.1:
+                            raise RuntimeError('Planned left descent endpoint is outside target tolerance')
+                    if args.joint_goal_pick:
+                        attempt_path.write_text(json.dumps({'arm': args.arm, 'down_mm': down_mm,
+                            'target_tcp_z_mm': target_z_m * 1000.0, 'at': time.time()}))
+                        run_joint_goal(descent_goal, 'PICK DESCENT JOINT GOAL')
                     else:
-                        print(f'EXECUTE: native SDK MoveL {distance.a / 10.:g} mm vertical (+down) with fixed orientation.', flush=True)
-                        linear_reply = await_future(linear_client.call_async(distance), 60.)
-                        if linear_reply.sum != 1:
-                            raise RuntimeError('Native SDK MoveL failed; inspect Pi bridge log and robot pose')
-                    reached = fresh_state()
+                        service_name = f'/{args.arm}/sdk_linear_descend_tenth_mm'
+                        linear_client = node.create_client(AddTwoInts, service_name)
+                        if not linear_client.wait_for_service(timeout_sec=5.):
+                            raise RuntimeError(f'Native SDK MoveL service unavailable: {service_name}; deploy updated Pi bridge')
+                        distance = AddTwoInts.Request()
+                        distance.a = int(round(down_mm * 10.))
+                        distance.b = 0
+                        attempt_path.write_text(json.dumps({'arm': args.arm, 'down_mm': distance.a / 10.,
+                             'target_tcp_z_mm': target_z_m * 1000.0, 'at': time.time()}))
+                        if args.arm == 'left':
+                            # Left SDK MoveL ignored 2.9 mm and 6.7 mm descents (Z did
+                            # not change in 45 s, 2026-11-19); the right arm's MoveL is
+                            # calibrated and kept. Execute the already planned and
+                            # validated MoveIt descent in joint space through the gate.
+                            print(f'EXECUTE: left descent {down_mm:.1f} mm via MoveIt joint path '
+                                  '(SDK MoveL not used on the left arm).', flush=True)
+                            execute_left_descent(jt, {name: start[name] for name in expected})
+                            time.sleep(0.6)
+                        else:
+                            print(f'EXECUTE: native SDK MoveL {distance.a / 10.:g} mm vertical (+down) with fixed orientation.', flush=True)
+                            linear_reply = await_future(linear_client.call_async(distance), 60.)
+                            if linear_reply.sum != 1:
+                                raise RuntimeError('Native SDK MoveL failed; inspect Pi bridge log and robot pose')
+                    reached = (fresh_state(received_after=time.monotonic())
+                               if args.arm == 'left' else fresh_state())
+                    fk_req.robot_state.joint_state.name = list(reached)
                     fk_req.robot_state.joint_state.position = list(reached.values())
                     after_fk = await_future(fk_client.call_async(fk_req), 8.)
                     if after_fk.error_code.val != MoveItErrorCodes.SUCCESS or len(after_fk.pose_stamped) != 1:
@@ -853,15 +1065,21 @@ def main():
                                            after_pose.orientation.z, after_pose.orientation.w])
                     angle_deg = math.degrees(2 * math.acos(min(1., abs(float(np.dot(quat, after_quat))))))
                     delta = after_xyz - before_xyz
-                    print(f'Measured TCP MoveL delta [mm]: {(delta * 1000).round(1).tolist()}, '
+                    backend = ('IK joint goal' if args.joint_goal_pick else
+                               'MoveIt' if args.arm == 'left' else 'SDK MoveL')
+                    print(f'Measured {backend} TCP delta [mm]: {(delta * 1000).round(1).tolist()}, '
                           f'orientation change={angle_deg:.1f} deg', flush=True)
-                    z_tolerance_m = min(.010, max(.002, abs(down_mm) / 1000. * .5))
+                    # 2026-11-26 (user): the arm does not move in mm steps, so short
+                    # descents often end a few mm off (11.6 mm request measured
+                    # 17.8 mm, gripper still above the bar). Accept < 10 mm error.
+                    # Was: min(.010, max(.002, abs(down_mm) / 1000. * .5))
+                    z_tolerance_m = .010
                     if np.linalg.norm(delta[:2]) > .015 or abs(delta[2] + down_mm / 1000.) > z_tolerance_m or angle_deg > 7.:
-                        raise RuntimeError('Native MoveL endpoint differs from requested vertical TCP target')
+                        raise RuntimeError(f'{backend} endpoint differs from requested vertical TCP target')
                     (log_dir/'descend_complete.json').write_text(json.dumps({
                         'arm': args.arm, 'endpoint_rad': reached, 'tcp_xyz_m': after_xyz.tolist(),
                         'at': time.time()}))
-                    print('NATIVE MOVEL DESCENT SUCCESS. Camera remains live; closing gripper next.', flush=True)
+                    print(f'{backend} DESCENT SUCCESS. Camera remains live; closing gripper next.', flush=True)
                 if args.phase != 'grasp':
                     return 0
                 current = fresh_state()  # chained grasp: continue to close
@@ -914,9 +1132,10 @@ def main():
             closed = json.loads((log_dir/'gripper_close_complete.json').read_text())
             if closed.get('arm') != args.arm:
                 raise RuntimeError('No matching completed gripper close')
-            move_client = ActionClient(node, MoveGroup, args.move_action)
-            if not move_client.wait_for_server(timeout_sec=8.):
-                raise RuntimeError('MoveGroup unavailable')
+            if not args.joint_goal_pick:
+                move_client = ActionClient(node, MoveGroup, args.move_action)
+                if not move_client.wait_for_server(timeout_sec=8.):
+                    raise RuntimeError('MoveGroup unavailable')
             # Lift from the measured TCP pose, not the camera's earlier target pose.
             fk_client = node.create_client(GetPositionFK, '/jetcobot_dual/compute_fk')
             if not fk_client.wait_for_service(timeout_sec=5.):
@@ -937,6 +1156,19 @@ def main():
             print(f'Measured TCP xyz [m]: {[pose.position.x, pose.position.y, pose.position.z]}; 5 cm lift target: {lift_pos.tolist()}', flush=True)
             if lift_pos[2] > args.max_z_m or np.linalg.norm(lift_pos) > args.max_radius_m:
                 raise RuntimeError(f'Lift target outside configured workspace: {lift_pos.tolist()}')
+            if args.joint_goal_pick:
+                from return_see_center import parse_see_center
+                from rcl_interfaces.srv import GetParameters
+                params = node.create_client(GetParameters, '/jetcobot_dual/move_group/get_parameters')
+                if not params.wait_for_service(timeout_sec=5.0):
+                    raise RuntimeError('MoveIt semantic model unavailable')
+                response = await_future(params.call_async(GetParameters.Request(
+                    names=['robot_description_semantic'])), 8.0)
+                center = parse_see_center(response.values[0].string_value)[args.arm]
+                run_joint_goal(ik_goal(lift_pos, quat, current), 'PICK LIFT JOINT GOAL')
+                run_joint_goal(center, 'PICK RETURN TO SEE_CENTER')
+                print('PICK COMPLETE: holding object at see_center.', flush=True)
+                return 0
             try:
                 lift = plan(lift_pos, quat)
             except RuntimeError as exc:
@@ -974,10 +1206,13 @@ def main():
             action_goal(exec_client, goal, 'LIFT EXECUTE', 90.)
             print('LIFT SUCCESS.', flush=True)
             return 0
+        except RuntimeError as exc:
+            if args.phase == 'align' and args.fine_axis and not fine_command_attempted:
+                print(f'FINE PRE-MOTION FAILURE: {exc}', flush=True)
+                return FINE_PRE_MOTION_RETRY_EXIT
+            raise
         finally:
-            node.destroy_node()
-            if rclpy.ok():
-                rclpy.shutdown()
+            _release_ros_context()
 
     def plan_peer_home(current):
         if max(abs(math.degrees(current[name])) for name in current) <= 2.0:
@@ -1324,12 +1559,183 @@ def main():
         return 0
     finally:
         # rclpy cancellation best-effort; physical stop is an external responsibility.
+        _release_ros_context()
+
+# ---------------------------------------------------------------- worker server
+# 2026-11-24: every fine step / grasp used to start a new process (rclpy init,
+# node, MoveIt + gate discovery: ~1.5-2 s each). The UI still launches this
+# script per step, but it now only forwards its argv to a long-lived server that
+# keeps the ROS node, and streams the output and exit code back. SIGINT from the
+# UI is forwarded as STOP. If the server cannot be used, the step runs in-process.
+_SERVING = False
+_CONTEXTS = {}
+_SOCKET = Path.home() / '.cache' / 'jetcobot_move_worker.sock'
+_SERVER_LOG = Path.home() / '.cache' / 'jetcobot_move_worker.log'
+
+
+def _ros_context(arm, peer):
+    import rclpy
+    from rclpy.signals import SignalHandlerOptions
+    from sensor_msgs.msg import JointState
+    if not rclpy.ok():
+        rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
+    if arm not in _CONTEXTS:
+        node = rclpy.create_node(f'sam_yaw_moveit_{arm}')
+        joint_current = {'msg': None, 'at': 0.}
+        peer_current = {'msg': None, 'at': 0.}
+        node.create_subscription(JointState, f'/{arm}/real_joint_states',
+            lambda msg: joint_current.update(msg=msg, at=time.monotonic()), 10)
+        node.create_subscription(JointState, f'/{peer}/real_joint_states',
+            lambda msg: peer_current.update(msg=msg, at=time.monotonic()), 10)
+        _CONTEXTS[arm] = (node, joint_current, peer_current)
+    node, joint_current, peer_current = _CONTEXTS[arm]
+    # Queued messages from before this step get a new receive time when spun;
+    # drain them and require a sample that arrives during this step.
+    for _ in range(40):
+        rclpy.spin_once(node, timeout_sec=0.0)
+    joint_current.update(msg=None, at=0.)
+    peer_current.update(msg=None, at=0.)
+    return node, joint_current, peer_current
+
+
+def _release_ros_context():
+    import rclpy
+    if _SERVING:
+        return
+    for node, _, _ in _CONTEXTS.values():
         node.destroy_node()
-        if rclpy.ok():
-            rclpy.shutdown()
+    _CONTEXTS.clear()
+    if rclpy.ok():
+        rclpy.shutdown()
+
+
+def _run_main_like_cli():
+    try:
+        return int(main() or 0)
+    except KeyboardInterrupt:
+        print('INTERRUPTED. Check physical robot; ROS goal cancellation is not guaranteed.', flush=True)
+        return 130
+    except SystemExit as exc:
+        return exc.code if isinstance(exc.code, int) else (0 if exc.code is None else 1)
+    except Exception as exc:
+        print(f'ERROR {type(exc).__name__}: {exc}', flush=True)
+        return 1
+
+
+def serve_worker(max_requests=60, idle_s=900.0):
+    import socket, threading
+    global _SERVING
+    _SERVING = True
+    def code_mtime():  # imported helpers here and in right_place_trial/ count too
+        here = Path(__file__).resolve().parent
+        return max(f.stat().st_mtime for d in (here, here.parent / 'right_place_trial')
+                   for f in d.glob('*.py'))
+    source_mtime = code_mtime()
+    _SOCKET.parent.mkdir(parents=True, exist_ok=True)
+    _SOCKET.unlink(missing_ok=True)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(_SOCKET))
+    server.listen(4)
+    server.settimeout(idle_s)
+    real_out, real_err = sys.stdout, sys.stderr
+    try:
+        for _ in range(max_requests):
+            try:
+                conn, _ = server.accept()
+            except socket.timeout:
+                break
+            with conn:
+                reader = conn.makefile('r', encoding='utf-8', errors='replace')
+                stream = conn.makefile('w', buffering=1, encoding='utf-8', errors='replace')
+                request = json.loads(reader.readline())
+                if code_mtime() != source_mtime:
+                    stream.write('\x00RESTART\n'); stream.flush()
+                    break  # code changed: the client starts a fresh server
+                active = [True]
+                def watch_stop():
+                    for line in reader:
+                        if line.strip() == 'STOP' and active[0]:
+                            os.kill(os.getpid(), signal.SIGINT)
+                threading.Thread(target=watch_stop, daemon=True).start()
+                os.chdir(request['cwd'])
+                sys.argv = [str(Path(__file__))] + request['argv']
+                sys.stdout = sys.stderr = stream
+                try:
+                    code = _run_main_like_cli()
+                finally:
+                    active[0] = False
+                    sys.stdout, sys.stderr = real_out, real_err
+                try:
+                    stream.write(f'\x00EXIT {code}\n'); stream.flush()
+                except OSError:
+                    pass
+    finally:
+        server.close()
+        _SOCKET.unlink(missing_ok=True)
+        _SERVING = False
+        _release_ros_context()
+
+
+def run_via_server(argv):
+    """Forward this step to the worker server; None if it cannot be used."""
+    import socket, subprocess
+    def connect():
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        client.connect(str(_SOCKET))
+        return client
+    for attempt in range(2):
+        try:
+            client = connect()
+        except OSError:
+            _SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
+            with open(_SERVER_LOG, 'a') as log:
+                subprocess.Popen([sys.executable, str(Path(__file__)), '--serve-worker'],
+                                 stdout=log, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL,
+                                 start_new_session=True, env=os.environ.copy())
+            client = None
+            deadline = time.monotonic() + 20.0
+            while time.monotonic() < deadline:
+                try:
+                    client = connect(); break
+                except OSError:
+                    time.sleep(0.1)
+            if client is None:
+                return None
+        reader = client.makefile('r', encoding='utf-8', errors='replace')
+        stream = client.makefile('w', buffering=1, encoding='utf-8', errors='replace')
+        stream.write(json.dumps({'argv': argv, 'cwd': os.getcwd()}) + '\n'); stream.flush()
+        def forward_stop(*_):
+            try:
+                stream.write('STOP\n'); stream.flush()
+            except OSError:
+                pass
+        signal.signal(signal.SIGINT, forward_stop)
+        signal.signal(signal.SIGTERM, forward_stop)
+        restart = False
+        for line in reader:
+            if line.startswith('\x00EXIT '):
+                return int(line.split()[1])
+            if line.startswith('\x00RESTART'):
+                restart = True
+                break
+            sys.stdout.write(line); sys.stdout.flush()
+        client.close()
+        if not restart:
+            print('WORKER SERVER connection lost; check the robot before continuing.', flush=True)
+            return 1
+        time.sleep(0.3)
+    return None
+
 
 
 if __name__ == '__main__':
+    if sys.argv[1:] == ['--serve-worker']:
+        serve_worker()
+        sys.exit(0)
+    if not os.environ.get('JETCOBOT_NO_WORKER_SERVER'):
+        forwarded = run_via_server(sys.argv[1:])
+        if forwarded is not None:
+            sys.exit(forwarded)
     try:
         sys.exit(main())
     except KeyboardInterrupt:

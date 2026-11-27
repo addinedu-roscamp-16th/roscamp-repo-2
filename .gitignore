@@ -12,3 +12,10 @@ sam_yaw_output/
 *.pt
 *.pth
 .venv/
+
+# trained YOLO weights are versioned
+!models/**/*.pt
+# cached see_center -> pre_place paths (runtime)
+preplace_cache/
+# local code backups (2026-11-24 refactors)
+backup/

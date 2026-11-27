@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """One serial client with separate endpoint and collision-checked drag actions."""
+import sys
+
 import rclpy
 from control_msgs.action import FollowJointTrajectory
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
@@ -41,8 +43,39 @@ class SDKDragHybridBridge(SDKDragBridge):
         return SDKGoalBridge.execute(self, handle)
 
 
+# 2026-11-25: the standard Pi command's values are the defaults here, so
+#   ~/venv/mycobot/bin/python sdk_drag_hybrid_bridge.py left    (or right)
+# is enough. Any later `--ros-args -p name:=value` (or the launch's
+# --params-file) still overrides these. Same values as config/bridge.yaml.
+DEFAULTS = {
+    'enable_motion': 'true',
+    'native_interpolation': 'true',
+    'state_hz': '2.0',
+    'gripper_type': '0',
+    'drag_speed': '200',
+    'drag_step_deg': '8.0',
+    'drag_deviation_deg': '1.5',
+    'drag_corner_trim_deg': '0.0',
+    'drag_send_interval_s': '0.4',
+    'endpoint_settle_s': '0.5',
+    'feedback_grace_s': '2.5',
+}
+
+
+def ros_args(argv):
+    """Optional first argument left/right sets the namespace and robot_side."""
+    args = list(argv[1:])
+    side = args.pop(0) if args and args[0] in ('left', 'right') else None
+    defaults = ['--ros-args']
+    for name, value in DEFAULTS.items():
+        defaults += ['-p', f'{name}:={value}']
+    if side:
+        defaults += ['-r', f'__ns:=/{side}', '-p', f'robot_side:={side}']
+    return [argv[0], *defaults, *args]
+
+
 def main():
-    rclpy.init()
+    rclpy.init(args=ros_args(sys.argv))
     node = None
     executor = MultiThreadedExecutor(num_threads=4)
     try:

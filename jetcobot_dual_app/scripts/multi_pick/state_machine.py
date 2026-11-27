@@ -74,6 +74,12 @@ class WorkState:
         if release_pick and self.pick_owner == side:
             self.pick_owner = None
 
+    def resume_pick(self, side):
+        if self.stopped or self.pick_owner != side or self.arms.get(side) != 'paused':
+            raise RuntimeError(f'{side} has no paused pick to resume')
+        self.arms[side] = 'picking'
+        self.reasons.pop(side, None)
+
     def error(self, reason):
         self.stopped = True
         self.reasons['service'] = str(reason)

@@ -16,6 +16,26 @@ MAX_SECTION_STEP = math.radians(15.0)
 CHECK_STEP = math.radians(1.0)
 
 
+def ordered_endpoint(trajectory, measured):
+    """Read an immediate joint target, with the uncommanded arm held."""
+    names = tuple(trajectory.joint_names)
+    valid_orders = (*ARM_JOINTS.values(), ALL_JOINTS)
+    if not any(len(names) == len(order) and set(names) == set(order) for order in valid_orders):
+        raise ValueError('Joint goal requires one complete arm or both arms')
+    if len(trajectory.points) != 1:
+        raise ValueError('Joint goal requires exactly one target point')
+    point = trajectory.points[0]
+    if len(point.positions) != len(names):
+        raise ValueError('Joint goal has incomplete joint positions')
+    target = dict(zip(ALL_JOINTS, measured))
+    target.update(zip(names, point.positions))
+    ordered = tuple(float(target[name]) for name in ALL_JOINTS)
+    for value, (low, high) in zip(ordered, LEFT_LIMITS_DEG + LIMITS_DEG):
+        if not math.isfinite(value) or not math.radians(low) <= value <= math.radians(high):
+            raise ValueError('Joint goal has a nonfinite position or exceeds a hardware joint limit')
+    return ordered
+
+
 def ordered_points(trajectory, measured):
     names = tuple(trajectory.joint_names)
     if len(names) == 12 and set(names) == set(ALL_JOINTS):

@@ -12,6 +12,7 @@ import json
 import math
 import os
 import sys
+from contextlib import ExitStack
 from pathlib import Path
 
 from dual_arm_coordinator_real import DualArmCoordinator, StopRequested, load_target
@@ -23,6 +24,21 @@ def target_digest(data):
             'multi_object')
     payload={key:data.get(key) for key in fields}
     return hashlib.sha256(json.dumps(payload,sort_keys=True).encode()).hexdigest()
+
+
+def lock_plan_folder(locks, folder, *, execute):
+    def acquire(path, error):
+        handle = locks.enter_context(path.open('a'))
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise RuntimeError(error) from exc
+
+    if execute:
+        domain = os.environ.get('ROS_DOMAIN_ID', '0')
+        acquire(Path('/tmp') / f'jetcobot_dual_auto_{domain}.lock',
+                'Another dual auto execution worker is active')
+    acquire(folder / '.approach_plan.lock', 'Another worker is using this saved plan')
 
 
 def main():
@@ -43,6 +59,7 @@ def main():
     ap.add_argument('--planning-budget-sec',type=float,default=25.)
     ap.add_argument('--max-capture-age',type=float,default=120.)
     ap.add_argument('--max-state-change-deg',type=float,default=1.)
+    ap.add_argument('--joint-goal', action='store_true')
     ap.add_argument('--execute-saved-plan',action='store_true')
     args=ap.parse_args()
     if not 10<=args.above_mm<=100 or not 0<args.velocity_scale<=.2 or not 0<args.acceleration_scale<=.2:
@@ -55,10 +72,10 @@ def main():
     urdf=Path(data['urdf'])
     if not urdf.is_file():raise RuntimeError(f'Captured URDF missing: {urdf}')
     digest=target_digest(data)
-    lock_path=Path('/tmp')/f'jetcobot_dual_auto_{os.environ.get("ROS_DOMAIN_ID","0")}.lock'
-    with lock_path.open('w') as lock:
-        try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        except BlockingIOError:raise RuntimeError('Another dual auto worker is active')
+    with ExitStack() as locks:
+        # Separate output folders can be planned in parallel. Protect each
+        # saved plan from a simultaneous read or write in the same folder.
+        lock_plan_folder(locks, folder, execute=args.execute_saved_plan)
         coordinator=DualArmCoordinator(urdf,args.velocity_scale,args.acceleration_scale,
                                        args.plan_time,args.max_plans,args.planning_budget_sec)
         try:
@@ -69,6 +86,7 @@ def main():
                 summary=json.loads(summary_path.read_text())
                 if (not summary.get('dual_auto_real') or summary.get('phase')!='approach' or
                         summary.get('target_digest')!=digest or
+                        bool(summary.get('joint_goal', False)) != args.joint_goal or
                         abs(summary.get('above_mm',-1)-args.above_mm)>1e-6 or
                         bool(summary.get('allow_gripper_tilt',False)) != args.allow_gripper_tilt):
                     raise RuntimeError('Saved dual-arm plan does not match this capture; plan again')
@@ -78,17 +96,31 @@ def main():
                     phases.append({'side':row['side'],'result':result,'start':row['start'],
                                    'route':row['route']})
                 chosen={'phases':phases,'selected_arm':summary['selected_arm'],
-                        'yield_strategy':summary['yield_strategy'],'cost_deg':summary['path_cost_deg']}
+                        'yield_strategy':summary['yield_strategy'],'cost_deg':summary['path_cost_deg'],
+                        'joint_goal':args.joint_goal}
                 current=coordinator.ready()
+                # Selected arm only: the other arm may be placing meanwhile;
+                # the gate checks the pair (both arms' paths) before motion.
+                own=summary['selected_arm']+'_'
                 drift=max(abs(math.degrees(current[n]-phases[0]['start'][n]))
-                          for n in phases[0]['start'])
+                          for n in phases[0]['start'] if n.startswith(own))
                 if drift>args.max_state_change_deg:
-                    raise RuntimeError(f'Both arms changed {drift:.1f} deg since preview; plan again')
+                    raise RuntimeError(f'{own[:-1]} arm changed {drift:.1f} deg since preview; plan again')
                 if (folder/'approach_complete.json').exists():
                     raise RuntimeError('This capture already completed approach; recapture')
                 print(f'EXECUTE SAVED: {chosen["selected_arm"].upper()} arm; '
                       f'peer={chosen["yield_strategy"]}; routes={[p["route"] for p in phases]}',flush=True)
-                reached=coordinator.execute(chosen)
+                # A reset can discard this queue only before execution is attempted.
+                (folder/'approach_execution_started').touch()
+                try:
+                    reached=coordinator.execute(chosen)
+                except Exception as exc:
+                    if type(exc).__name__=='GoalRejectedNoMotion':
+                        # Nothing moved: let U re-plan this object (2026-11-24).
+                        (folder/'approach_execution_started').unlink(missing_ok=True)
+                        print('NO MOTION SENT: approach rejected before forwarding; U retries this object.',
+                              flush=True)
+                    raise
                 side=chosen['selected_arm']
                 endpoint={f'{side}_{i}_Joint':reached[f'{side}_{i}_Joint'] for i in range(1,7)}
                 (folder/'approach_complete.json').write_text(json.dumps({
@@ -103,8 +135,10 @@ def main():
                 # Saved-plan execution checks it against both measured arms.
                 assumed=data.get('multi_object', {}).get('assumed_start_rad') or {}
                 if captured:
+                    own=data.get('multi_object', {}).get('assigned_arm')
                     drift=max((abs(math.degrees(current[n]-float(captured[n])))
-                               for n in current if n not in assumed),default=0.)
+                               for n in current if n not in assumed
+                               and (own is None or n.startswith(own+'_'))),default=0.)
                     if drift>args.max_state_change_deg:
                         raise RuntimeError(f'Arms changed {drift:.1f} deg since camera capture; recapture')
                 if assumed:
@@ -114,7 +148,8 @@ def main():
                              else args.peer_mode)
                 chosen=coordinator.choose(target,args.tcp_closing_axis,args.yaw_offset_deg,
                                           peer_mode,args.allow_gripper_tilt,
-                                          required_arm=required_arm,start_override=assumed)
+                                          required_arm=required_arm,start_override=assumed,
+                                          joint_goal=args.joint_goal)
                 rows=[]
                 for index,phase in enumerate(chosen['phases']):
                     name=f'dual_phase_{index+1}.cdr'
@@ -124,7 +159,10 @@ def main():
                                  'points':len(phase['result'].trajectory.joint_trajectory.points)})
                 summary={'dual_auto_real':True,'phase':'approach','selected_arm':chosen['selected_arm'],
                          'yield_strategy':chosen['yield_strategy'],'path_cost_deg':chosen['cost_deg'],
+                         'joint_goal':args.joint_goal,
                          'distance_m':chosen['distance_m'],'yaw_deg':chosen['yaw_deg'],
+                         'approach_offset_xy_mm':chosen['approach_offset_xy_mm'],
+                         'j6_travel_deg':chosen['j6_travel_deg'],
                          'target_digest':digest,'above_mm':args.above_mm,
                           'allow_gripper_tilt':args.allow_gripper_tilt,'phases':rows,
                          'execution_allowed':True,'execution_block_reasons':[],

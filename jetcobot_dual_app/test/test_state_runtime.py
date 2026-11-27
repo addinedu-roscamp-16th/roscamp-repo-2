@@ -8,8 +8,8 @@ from unittest.mock import patch
 
 import numpy as np
 
-from multi_pick.sam_multi_real import MultiApp
 from multi_pick import sam_multi_real
+from multi_pick.sam_multi_real import MultiApp
 from multi_pick.state_machine import WorkState
 
 
@@ -36,81 +36,83 @@ class RuntimeHandoffTests(unittest.TestCase):
         app._watch_pick_height()
         self.assertIsNone(app.work.pick_owner)
 
-    def test_pick_handoff_only_after_height_release(self):
+    def test_pick_handoff_starts_stage2_entry(self):
         app = MultiApp.__new__(MultiApp)
         app.work = WorkState()
-        app.work.request_pick('left')
-        app.held_jobs = [{'arm': 'left', 'folder': Path('/tmp/left')}]
-        app.queue = [{'assigned_arm': 'right'}]
+        app.held_jobs = []
         app.active_arm = 'left'
-        app.queue_started = True
-        app._watch_pick_height = lambda: None
-        app._await_pick_release = lambda side: app.work.pick_owner != side
+        app.preview_file = Path('/tmp/test_pick/target.json')
+        events = []
+        app._watch_pick_height = lambda: events.append('watch')
+        app._start_place = lambda job: events.append(('transport', job['arm']))
+
+        app.start_place_after_lift()
+
+        self.assertEqual(events, ['watch', ('transport', 'left')])
+
+    def _finish(self, app, stage):
         app.motion_log_reader = io.StringIO()
         app.motion_log_writer = io.StringIO()
-        app.motion_child = Finished()
-        app.motion_stage = 'HOLD_RETURN'
-        app._finish_custom(Finished(), 'HOLD_RETURN')
-        self.assertEqual(app.work.arms['left'], 'paused')
-        self.assertEqual(app.work.pick_owner, 'left')
+        app._finish_custom(Finished(), stage)
 
-        app.work = WorkState()
-        app.work.request_pick('left')
-        app.work.release_pick_at_height('left', .30, .30)
-        app.motion_log_reader = io.StringIO()
-        app.motion_log_writer = io.StringIO()
-        app.motion_child = Finished()
-        app.motion_stage = 'HOLD_RETURN'
-        started = []
-        app.start_next_object = lambda: started.append('right')
-        with patch.object(sam_multi_real.sam.SAMYawApp, 'reset'):
-            app._finish_custom(Finished(), 'HOLD_RETURN')
-        self.assertEqual(started, ['right'])
-        self.assertIsNone(app.active_arm)
+    def test_concurrent_handoff_frees_pick_slot_and_places_in_own_slot(self):
+        for placing in ('left', 'right'):
+            with self.subTest(placing=placing):
+                app = MultiApp.__new__(MultiApp)
+                app.work = WorkState()
+                app.work.request_pick(placing)
+                app.work.release_pick_at_height(placing, .30, .30)
+                app.held_jobs = []
+                app.queue = [{'id': 'b'}]
+                app.queue_total = 2
+                app.active_arm = placing
+                app.active_object = {'id': 'a'}
+                app.preview_file = Path('/tmp/test_pick/target.json')
+                app._watch_pick_height = lambda: None
+                app.motion_child = None
+                launched = []
+                app._launch_place_worker = lambda stage, script, args, folder: launched.append(stage)
 
-    def test_two_held_objects_preplan_then_place_in_order(self):
+                with patch.object(sam_multi_real.MULTI, 'concurrent_pick_place', True), \
+                        patch.object(sam_multi_real.sam.SAMYawApp, 'reset'):
+                    app.start_place_after_lift()
+
+                self.assertEqual(launched, ['STAGE2_ENTER'])
+                self.assertIsNone(app.active_arm)          # pick slot free for the other arm
+                self.assertEqual(app.work.basket_owner, placing)
+
+                # Placement slot finishes stage by stage, without touching the pick slot.
+                events = []
+                app._continue_place = lambda job, stage: events.append(stage)
+                app.operator_paused = False
+                app.active_arm = 'other'
+                for stage in ('STAGE2_ENTER', 'STAGE3_PLACE', 'STAGE2_RETURN'):
+                    app.place_child = Finished()
+                    app.place_stage = stage
+                    app.place_log_reader = io.StringIO()
+                    app.place_log_writer = io.StringIO()
+                    app._finish_custom(app.place_child, stage)
+                self.assertEqual(events, ['STAGE3_PLACE', 'STAGE2_RETURN'])
+                self.assertEqual(app.held_jobs, [])
+                self.assertIsNone(app.work.basket_owner)
+                self.assertEqual(app.active_arm, 'other')
+                self.assertIsNone(app.place_child)
+
+    def test_sequential_mode_places_alone(self):
         app = MultiApp.__new__(MultiApp)
         app.work = WorkState()
-        app.work.request_pick('left')
-        app.work.release_pick_at_height('left', .30, .30)
-        app.work.request_pick('right')
-        app.work.release_pick_at_height('right', .30, .30)
-        app.held_jobs = [{'arm': 'left', 'folder': Path('/tmp/left')},
-                         {'arm': 'right', 'folder': Path('/tmp/right')}]
+        job = {'arm': 'left', 'folder': Path('/tmp/place')}
+        app.held_jobs = [job]
         app.queue = []
-        app.queue_total = 2
-        app.queue_started = True
-        app.active_arm = 'right'
-        app.preplanned_case = None
-        app._watch_pick_height = lambda: None
-        app._await_pick_release = lambda side: app.work.pick_owner != side
+        app.bg = None
+        app.place_child = None
+        app.operator_paused = False
         events = []
-        app._start_preplan = lambda: events.append('preplan right')
-
-        def start_place(job):
-            if app.work.basket_owner != job['arm']:
-                self.assertTrue(app.work.request_place(job['arm']))
-            events.append('place ' + job['arm'])
-
-        app._start_place = start_place
-
-        def finish(stage):
-            app.motion_log_reader = io.StringIO()
-            app.motion_log_writer = io.StringIO()
-            app.motion_child = Finished()
-            app.motion_stage = stage
-            app._finish_custom(Finished(), stage)
-
-        finish('HOLD_RETURN')
-        self.assertEqual(events, ['preplan right'])
-        self.assertEqual(app.work.arms['right'], 'place_waiting')
-        finish('PREPLAN_PLACE')
-        self.assertEqual(events[-1], 'place left')
-        finish('PLACE')
-        self.assertEqual(events[-1], 'place right')
-        finish('PLACE')
-        self.assertEqual(app.work.arms, {'left': 'idle', 'right': 'idle'})
-        self.assertEqual(app.status, 'ALL 2 OBJECTS DONE - R NEW CAPTURE')
+        app._continue_place = lambda job, stage: events.append(stage)
+        with patch.object(sam_multi_real.MULTI, 'concurrent_pick_place', False):
+            self._finish(app, 'STAGE2_ENTER')
+            self._finish(app, 'STAGE3_PLACE')
+        self.assertEqual(events, ['STAGE3_PLACE', 'STAGE2_RETURN'])
 
 
 if __name__ == '__main__':

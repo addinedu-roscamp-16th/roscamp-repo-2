@@ -91,12 +91,22 @@ def build_model(gazebo_share, layout_path, package_resolver):
     for state in list(semantic.findall('group_state')):
         if state.get('group') in ('arm_left', 'arm_right', 'both_arms'):
             semantic.remove(state)
+    # Left: measured with the full ArUco board visible on 2026-11-25 12:38.
+    # Right: fixed stereo reference from the 2026-11-23 21:02 board capture.
     see_center_deg = {
-        'left': (-31.64, 20.74, -41.39, -47.54, 2.10, -17.75),
-        'right': (28.30, 18.19, -39.46, -46.75, 13.97, -42.36),
+        'left': (-103.53, 54.31, -72.86, -44.12, -10.37, -11.07),
+        'right': (160.75, 47.54, -69.16, -49.57, -5.62, -2.54),
     }
     see_center_rad = {side: tuple(map(math.radians, angles))
                       for side, angles in see_center_deg.items()}
+    # 2026-11-24: fixed pose straight above the case center (TCP +Z down,
+    # TCP Y parallel to base Y, closed tips ~75 mm above the rim), from offline
+    # URDF IK. Place route: lift -> see_center -> pre_place -> vertical descent.
+    # Not yet checked against the real case / peer arm.
+    pre_place_deg = {
+        'left': (-20.2, -30.7, -45.6, -13.6, 0.0, 69.8),
+        'right': (53.4, -32.6, -51.6, -5.8, 0.0, -36.5),
+    }
     for side in SIDES:
         home = ET.SubElement(semantic, 'group_state', name='home', group=f'arm_{side}')
         for index in range(1, 7):
@@ -105,6 +115,10 @@ def build_model(gazebo_share, layout_path, package_resolver):
         for index, radians in enumerate(see_center_rad[side], 1):
             ET.SubElement(see_center, 'joint', name=f'{side}_{index}_Joint',
                            value=str(radians))
+        pre_place = ET.SubElement(semantic, 'group_state', name='pre_place', group=f'arm_{side}')
+        for index, degrees in enumerate(pre_place_deg[side], 1):
+            ET.SubElement(pre_place, 'joint', name=f'{side}_{index}_Joint',
+                           value=str(math.radians(degrees)))
     for mesh in robot.iter('mesh'):
         uri = mesh.get('filename', '')
         if uri.startswith('package://'):

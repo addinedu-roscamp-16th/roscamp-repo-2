@@ -706,7 +706,8 @@ def mask_rectangle_world(mask, T_wc, z_plane):
         corners_xy=corners, vertical_cos=cosine)
 
 
-def estimate_grasp_preview(masks, T_wc_list, tri, min_points=6, arm='right', yaw_camera='auto'):
+def estimate_grasp_preview(masks, T_wc_list, tri, min_points=6, arm='right', yaw_camera='auto',
+                           *, footprint_ranges=None):
     points = triangulated_good(tri)
     if len(points) < min_points:
         return None, f'TOO FEW 3D POINTS ({len(points)})'
@@ -717,9 +718,15 @@ def estimate_grasp_preview(masks, T_wc_list, tri, min_points=6, arm='right', yaw
     options = []
     for index, (mask, T_wc) in enumerate(zip(masks, T_wc_list)):
         candidate = mask_rectangle_world(mask, T_wc, z_ref)
-        if candidate is not None:
-            candidate['source'] = ('LEFT', 'RIGHT')[index]
-            options.append(candidate)
+        if candidate is None:
+            continue
+        if footprint_ranges is not None:
+            (min_length, max_length), (min_width, max_width) = footprint_ranges
+            if not (min_length <= candidate['length_m'] <= max_length
+                    and min_width <= candidate['width_m'] <= max_width):
+                continue
+        candidate['source'] = ('LEFT', 'RIGHT')[index]
+        options.append(candidate)
     # A more top-down camera is not necessarily the cleaner silhouette. Compare
     # each planar mask center to the stereo 3D median and reward elongation.
     for candidate in options:
@@ -930,7 +937,7 @@ class SAMYawApp(AutoFineMixin):
     def reset(self):
         if self.motion_child is not None and self.motion_child.poll() is None:
             print('Motion planning/execution is still active; R is blocked.', flush=True)
-            return
+            return False
         self.plan_ready = False
         self.selected_object_type = None
         self.args.object_type = None
@@ -1089,7 +1096,9 @@ class SAMYawApp(AutoFineMixin):
         self.grasp_preview_file = None
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
         request_path = self.preview_file.parent / f'fine_{axis}_{stamp}_request.json'
-        request_path.write_text(json.dumps(self.fine_request, indent=2))
+        request = dict(self.fine_request,
+                       fine_moveit_planning=getattr(self.args, 'fine_moveit_planning', True))
+        request_path.write_text(json.dumps(request, indent=2))
         logpath = self.preview_file.parent / f'fine_{axis}_{stamp}.log'
         self.motion_log_writer = logpath.open('w')
         self.motion_log_reader = logpath.open('r')
@@ -1164,9 +1173,12 @@ class SAMYawApp(AutoFineMixin):
                  measured_joint_positions_rad=np.asarray(joints),
                  measured_joint_stamps_unix=np.asarray(stamps))
         print(f'BOARD CAPTURE saved: {folder}\n'
-              f'  next: ~/camera_code/.venv/bin/python ~/camera_code/moveit_pick/'
-              f'make_stereo_correction.py --capture {folder}', flush=True)
+              f'  next: {self.board_capture_command(folder)}', flush=True)
         self.status = 'BOARD CAPTURE SAVED - SEE TERMINAL'
+
+    def board_capture_command(self, folder):
+        return (f'~/camera_code/.venv/bin/python ~/camera_code/moveit_pick/'
+                f'make_stereo_correction.py --capture {folder}')
 
     def start_place_after_lift(self):
         """After lift: carry the held object to the case, release, return.
@@ -1788,7 +1800,9 @@ class SAMYawApp(AutoFineMixin):
         except RuntimeError as exc:
             print(f'PLAN/EXECUTE BLOCKED: {exc}', flush=True)
             return
-        delta = float(np.max(np.abs(joints - self.frozen_joints)))
+        # Assigned arm only: in concurrent mode the other arm may be placing.
+        row = 0 if self.args.arm == 'left' else 1
+        delta = float(np.max(np.abs(joints[row] - self.frozen_joints[row])))
         if (not execute or self.execute_phase == 'approach') and delta > np.deg2rad(self.args.max_state_change_deg):
             print(f'PLAN/EXECUTE BLOCKED: arm moved {np.rad2deg(delta):.2f} deg after capture; R recapture.', flush=True)
             self.plan_ready = False
@@ -1823,6 +1837,8 @@ class SAMYawApp(AutoFineMixin):
                 cmd.extend(['--orientation-tolerance-deg', '8'])
             if self.args.allow_uncertain_yaw:
                 cmd.append('--allow-uncertain-yaw')
+            if getattr(self.args, 'joint_goal_pick', False):
+                cmd.append('--joint-goal-pick')
             if self.args.minimal_drag:
                 cmd.append('--minimal-drag')
         if execute:
@@ -1870,6 +1886,24 @@ class SAMYawApp(AutoFineMixin):
         except OSError:
             pass
         self._timing_started = None
+
+    def _approach_completed(self):
+        self.plan_ready = False
+        if self.args.auto_fine:
+            self.execute_phase = 'fine_y'
+            self.align_roi = None
+            self.fine_request = None
+            self.reset_auto_fine(clear_moves=True)
+            self.status = 'APPROACH DONE - AUTO FINE WATCHING'
+            print(self.status, flush=True)
+        elif self.args.camera_center:
+            self.execute_phase = 'done'
+            self.status = f'CAMERA-CENTER APPROACH DONE - {self.args.arm.upper()} CAMERA LIVE'
+            print('Camera-centered observation complete. Descent is only available in TCP-above-target mode.', flush=True)
+        else:
+            self.execute_phase = 'done'
+            self.status = 'APPROACH DONE - G GRASP'
+            print('Approach complete. Press G to preview the grasp height.', flush=True)
 
     def poll_motion(self):
         if self.motion_child is None:
@@ -1982,21 +2016,7 @@ class SAMYawApp(AutoFineMixin):
             if code == 0 and self.motion_stage == 'EXECUTE':
                 completed = self.execute_phase
                 if completed == 'approach':
-                    if self.args.auto_fine:
-                        self.execute_phase = 'fine_y'
-                        self.align_roi = None
-                        self.fine_request = None
-                        self.reset_auto_fine(clear_moves=True)
-                        self.status = 'APPROACH DONE - AUTO FINE WATCHING'
-                        print(self.status, flush=True)
-                    elif self.args.camera_center:
-                        self.execute_phase = 'done'
-                        self.status = f'CAMERA-CENTER APPROACH DONE - {self.args.arm.upper()} CAMERA LIVE'
-                        print('Camera-centered observation complete. Descent is only available in TCP-above-target mode.', flush=True)
-                    else:
-                        self.execute_phase = 'done'
-                        self.status = 'APPROACH DONE - G GRASP'
-                        print('Approach complete. Press G to preview the grasp height.', flush=True)
+                    self._approach_completed()
                 elif completed == 'descend':
                     self.execute_phase = 'close'
                     next_phase = 'close'
@@ -2066,6 +2086,9 @@ class SAMYawApp(AutoFineMixin):
             self.motion_child.wait(timeout=5.)
         except subprocess.TimeoutExpired:
             print(f'Worker still active, PID={self.motion_child.pid}.', flush=True)
+
+
+SKIP_SAM = False  # set by multi_pick/sam_multi_real.py in YOLO-seg mode
 
 
 def main(*, max_state_change_deg=1.0, pause_key=False):
@@ -2211,19 +2234,25 @@ def main(*, max_state_change_deg=1.0, pause_key=False):
         parser.error('--fine-roi and --camera-center cannot be combined')
     if not args.urdf.is_file():
         parser.error(f'URDF not found: {args.urdf}')
-    if not args.sam_checkpoint.is_file():
-        parser.error(f'SAM2 checkpoint not found: {args.sam_checkpoint}. See setup instructions.')
-    try:
-        from sam2.build_sam import build_sam2
-        from sam2.sam2_image_predictor import SAM2ImagePredictor
-    except ImportError as exc:
-        parser.error(f'SAM 2 library not installed in this Python environment: {exc}')
+    if not SKIP_SAM:
+        if not args.sam_checkpoint.is_file():
+            parser.error(f'SAM2 checkpoint not found: {args.sam_checkpoint}. See setup instructions.')
+        try:
+            from sam2.build_sam import build_sam2
+            from sam2.sam2_image_predictor import SAM2ImagePredictor
+        except ImportError as exc:
+            parser.error(f'SAM 2 library not installed in this Python environment: {exc}')
 
     device=args.device or ('cuda' if torch.cuda.is_available() else 'cpu')
     print('Inference device:',device,flush=True)
-    print('Loading SAM2.1:',args.sam_checkpoint,flush=True)
-    sam_model=build_sam2(args.sam_config,str(args.sam_checkpoint),device=device)
-    predictor=SAM2ImagePredictor(sam_model)
+    if SKIP_SAM:
+        # 2026-11-24: YOLO-seg multi pick never calls SAM (fine alignment does not use it).
+        print('SAM2 not loaded (YOLO-seg masks).', flush=True)
+        predictor=None
+    else:
+        print('Loading SAM2.1:',args.sam_checkpoint,flush=True)
+        sam_model=build_sam2(args.sam_config,str(args.sam_checkpoint),device=device)
+        predictor=SAM2ImagePredictor(sam_model)
     extractor=SuperPoint(max_num_keypoints=None).eval().to(device)
     matcher=LightGlue(features='superpoint').eval().to(device)
     Gst.init(None)
@@ -2239,7 +2268,8 @@ def main(*, max_state_change_deg=1.0, pause_key=False):
         cv2.setMouseCallback(MAIN_WINDOW,app.on_mouse)
         print(f'Moving arm=AUTO (initial preview={args.arm}); yaw camera={args.yaw_camera}; group={args.group}; approach={"CAMERA CENTER" if args.camera_center else "TCP ABOVE TARGET"} +{args.above_mm:.0f} mm. Initial stereo ROIs -> match; 1 chocolate / 2 Mentos -> PLAN; E approaches. ' + ('AUTO FINE OK -> calibrated descent -> gripper close -> 5 cm lift -> both see_center; S stops.' if args.auto_fine else 'After approach: G previews grasp; L lifts.') + ' O open gripper; C both see_center + open both grippers; R reset; S stop; Q quit.', flush=True)
         if pause_key:
-            print('P pauses the queue and requests motion cancellation.', flush=True)
+            print('P pauses the queue. While paused, C returns to observation for a fresh capture '
+                  'if grasp has not started; U retries supported failures.', flush=True)
         while True:
             live.poll()
             for cam in cameras:
@@ -2268,15 +2298,18 @@ def main(*, max_state_change_deg=1.0, pause_key=False):
             if paused and key in (ord('u'), ord('U')):
                 app.recover_work()
                 continue
-            if paused and key not in (ord('r'), ord('s')):
+            if paused and key in (ord('c'), ord('C')):
+                app.start_reset_return()
+                continue
+            if paused and key not in (ord('r'), ord('R'), ord('s')):
                 continue
             if key in (ord('c'), ord('C')):
                 app.start_return_see_center()
-            elif key==ord('r'):
-                app.reset()
-                for name in (RESULT_WINDOW,TOP_WINDOW,APPROACH_CAMERA_WINDOW):
-                    try: cv2.destroyWindow(name)
-                    except cv2.error: pass
+            elif key in (ord('r'), ord('R')):
+                if app.reset() is not False:
+                    for name in (RESULT_WINDOW, TOP_WINDOW, APPROACH_CAMERA_WINDOW):
+                        try: cv2.destroyWindow(name)
+                        except cv2.error: pass
             elif key==ord('m'):
                 app.run()
             elif key == ord('a'):

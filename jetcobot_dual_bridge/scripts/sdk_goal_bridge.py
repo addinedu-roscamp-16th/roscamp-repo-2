@@ -81,6 +81,10 @@ class SDKGoalBridge(HardwareBridge):
         self.slow_joint_cancel = threading.Event()
         self.descend_active = False
         self.descend_cancel = threading.Event()
+        self.declare_parameter('endpoint_sdk_speed', 30)
+        self.endpoint_sdk_speed = int(self.get_parameter('endpoint_sdk_speed').value)
+        if not 1 <= self.endpoint_sdk_speed <= 50:
+            raise ValueError('endpoint_sdk_speed must be 1..50')
         self.declare_parameter('slow_joint_speed', 1)
         self.slow_joint_speed = int(self.get_parameter('slow_joint_speed').value)
         if not 1 <= self.slow_joint_speed <= 10:
@@ -657,7 +661,8 @@ class SDKGoalBridge(HardwareBridge):
         return points
 
     def execute(self, handle):
-        return self._execute_sdk_goal(handle, 10)
+        # 2026-11-24: was a fixed 10; endpoint moves were the slow part of every cycle.
+        return self._execute_sdk_goal(handle, self.endpoint_sdk_speed)
 
     def execute_slow_goal(self, handle):
         self.slow_joint_active = True

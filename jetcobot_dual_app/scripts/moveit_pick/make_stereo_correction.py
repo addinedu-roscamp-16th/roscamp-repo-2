@@ -127,8 +127,9 @@ def main():
         print('DRY RUN: nothing written. Add --write to replace the correction the UI loads.')
         return
     if TARGET.is_file():
-        backup = TARGET.with_name(
+        backup = TARGET.parent / 'history' / (
             f'stereo_see_center_correction_before_{capture.name.split("capture_")[-1]}.json')
+        backup.parent.mkdir(exist_ok=True)
         shutil.copy2(TARGET, backup)
         print(f'backup: {backup}')
     TARGET.write_text(json.dumps(record, indent=2) + '\n')

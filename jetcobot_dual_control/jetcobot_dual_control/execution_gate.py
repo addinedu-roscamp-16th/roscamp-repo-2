@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import rclpy
 from action_msgs.msg import GoalStatus
@@ -26,7 +27,7 @@ from ament_index_python.packages import get_package_share_directory
 
 from .model import LIMITS_DEG, LEFT_LIMITS_DEG
 from .clearance import ArmClearance
-from .coordinated_route import (ALL_JOINTS, ordered_points, safe_sections,
+from .coordinated_route import (ALL_JOINTS, ARM_JOINTS, ordered_endpoint, ordered_points, safe_sections,
                                 continuous_sections, independent_path_valid,
                                 independent_arms_valid, dense_path,
                                 chord_deviation)
@@ -187,7 +188,16 @@ class ExecutionGate(Node):
                     sys.path.pop(0)
         self.selected_route = None
         self.guard = threading.Lock()
+        # 2026-11-25 per-arm execution: `active` = exclusive both-arm execution
+        # (MoveIt trajectory, 12-joint goal). `lanes[side]` = one-arm joint goal or
+        # gripper goal of that arm; the two lanes run at the same time.
+        self.cv = threading.Condition(self.guard)
         self.active = False
+        self.lanes = {'left': None, 'right': None}
+        self.exclusive_waiting = 0
+        # One lane at a time does its pairwise check and Pi dispatch, so the
+        # other lane always sees a target that is already moving (no deadlock).
+        self.dispatch_lock = threading.Lock()
         self.faulted = False
         self.latest = None
         self.gripper_feedback = {}
@@ -197,6 +207,7 @@ class ExecutionGate(Node):
         self.combined_pending = {}
         self.combined_points = None
         self.combined_sections = None
+        self.combined_endpoint_only = False
         self.combined_may_move = False
         self.last_invalid_combined = None
         self.stop_late_goal = False
@@ -232,6 +243,7 @@ class ExecutionGate(Node):
                     goal_callback=lambda request, side=side, kind=kind: self.goal(request, side, kind),
                     cancel_callback=lambda _: CancelResponse.ACCEPT, callback_group=self.callback_group)
         self.combined_server = None
+        self.endpoint_server = None
         self.fault_reset_service = None
         if self.coordinated_execution:
             self.combined_server = ActionServer(
@@ -241,10 +253,17 @@ class ExecutionGate(Node):
                 goal_callback=self.goal_combined,
                 cancel_callback=lambda _: CancelResponse.ACCEPT,
                 callback_group=self.callback_group)
+            self.endpoint_server = ActionServer(
+                self, FollowJointTrajectory,
+                '/jetcobot_dual/guarded_joint_goal/follow_joint_trajectory',
+                execute_callback=self.execute_joint_goal,
+                goal_callback=lambda request: self.goal_combined(request, endpoint_only=True),
+                cancel_callback=lambda _: CancelResponse.ACCEPT,
+                callback_group=self.callback_group)
             self.fault_reset_service = self.create_service(
                 SetBool, '/jetcobot_dual/reset_execution_fault',
                 self.reset_execution_fault, callback_group=self.callback_group)
-        mode = ('coordinated controller enabled for single-arm or dual-arm MoveIt plans'
+        mode = ('coordinated controller enabled; one-arm joint goals and grippers run per arm'
                 if self.combined_server is not None else 'ONE ARM AT A TIME')
         self.get_logger().warning(f'{self.side} SDK connections enabled; {mode}. '
                                    'Multi-joint targets allowed; hardware joint limits enforced. '
@@ -465,26 +484,89 @@ class ExecutionGate(Node):
                 return False
         return True
 
-    def goal_combined(self, request):
+    def goal_combined(self, request, *, endpoint_only=False):
+        """Validate only. A busy gate no longer rejects: execute waits its turn."""
         with self.guard:
+            if self.faulted:
+                self.get_logger().warning('Combined plan rejected: fault latched')
+                return GoalResponse.REJECT
             try:
-                if self.active or self.faulted:
-                    raise ValueError('Execution gate busy or fault latched')
-                measured = self._combined_positions()
-                points = ordered_points(request.trajectory, measured)
+                try:
+                    measured = self._combined_positions()
+                except ValueError as exc:
+                    # 2026-11-25: Pi->PC joint states vanished for ~7 s while the
+                    # Pi kept publishing. Accept; execute waits for fresh feedback
+                    # and validates against it before any motion.
+                    if not self._temporary_state_gap(exc):
+                        raise
+                    measured = None
+                    self.get_logger().warning(
+                        'Goal accepted during a joint-state gap; waits for fresh feedback before motion')
+                if measured is not None and endpoint_only:
+                    ordered_endpoint(request.trajectory, measured)
+                elif measured is not None:
+                    ordered_points(request.trajectory, measured)
                 for side in ('left', 'right'):
-                    if not self.sdk_clients[side, 'arm'].server_is_ready():
+                    if not endpoint_only and not self.sdk_clients[side, 'arm'].server_is_ready():
                         raise ValueError(f'{side} Pi drag controller unavailable')
                     if not self.drag_hybrid_clients[side].server_is_ready():
                         raise ValueError(f'{side} Pi endpoint controller unavailable')
-                self.combined_points = points
-                self.active = True
                 return GoalResponse.ACCEPT
             except Exception as exc:
-                self.combined_points = None
-                self.combined_sections = None
                 self.get_logger().warning(f'Combined plan rejected before motion: {exc}')
                 return GoalResponse.REJECT
+
+    @staticmethod
+    def _goal_side(request):
+        """'left'/'right' for a complete one-arm joint goal, None for both arms."""
+        names = set(request.trajectory.joint_names)
+        for side in ('left', 'right'):
+            if names == set(ARM_JOINTS[side]):
+                return side
+        return None
+
+    def _busy(self):
+        return self.active or any(lane is not None for lane in self.lanes.values())
+
+    def _acquire(self, handle, side=None):
+        """Wait for a turn. side=None: exclusive (both arms idle); else that arm's lane."""
+        with self.cv:
+            if side is None:
+                self.exclusive_waiting += 1
+            try:
+                reported = False
+                while True:
+                    if self.faulted:
+                        raise RuntimeError('Fault latched while waiting; no motion sent')
+                    if handle.is_cancel_requested:
+                        raise RuntimeError('Canceled while waiting for the other arm; no motion sent')
+                    if side is None:
+                        free = not self.active and all(lane is None for lane in self.lanes.values())
+                    else:
+                        free = (not self.active and self.lanes[side] is None
+                                and not self.exclusive_waiting)
+                    if free:
+                        break
+                    if not reported:
+                        self.get_logger().info(
+                            f'{side or "both-arm"} goal waiting for the running motion to finish')
+                        reported = True
+                    self.cv.wait(0.1)
+                if side is None:
+                    self.active = True
+                else:
+                    self.lanes[side] = {'target': None, 'remote': None, 'pending': None}
+            finally:
+                if side is None:
+                    self.exclusive_waiting -= 1
+
+    def _release(self, side=None):
+        with self.cv:
+            if side is None:
+                self.active = False
+            else:
+                self.lanes[side] = None
+            self.cv.notify_all()
 
     @staticmethod
     def _section_goal(side, path):
@@ -669,25 +751,26 @@ class ExecutionGate(Node):
             else:
                 future.add_done_callback(cancel_late)
 
-    def _wait_combined_stable(self, timeout=10.0):
-        """Wait for three successive fresh 12-joint samples with little motion."""
+    def _wait_combined_stable(self, handle, timeout=30.0):
+        """Wait for fresh, settled samples before sending any motion."""
         deadline = time.monotonic() + timeout
         previous_stamp = None
         previous = None
         settled_samples = 0
-        last_fresh = time.monotonic()
-        while time.monotonic() < deadline:
-            # 2026-11-20: one late Pi sample (idle right arm, 1.53 s) aborted a
-            # LIFT here before any command was sent. Tolerate a bounded gap;
-            # three fresh settled samples are still required.
+        reported_gap = False
+        while rclpy.ok() and time.monotonic() < deadline:
+            if handle.is_cancel_requested:
+                raise RuntimeError('Combined motion canceled while waiting for fresh feedback')
             try:
                 measured = self._combined_positions()
-                last_fresh = time.monotonic()
             except ValueError as exc:
-                if (not self._temporary_state_gap(exc) or
-                        time.monotonic()-last_fresh > self.state_gap_grace_s):
+                if not self._temporary_state_gap(exc):
                     raise
+                if not reported_gap:
+                    self.get_logger().info('Waiting for fresh combined feedback before motion')
+                    reported_gap = True
                 settled_samples = 0
+                previous = None
                 time.sleep(.03)
                 continue
             stamp = self.latest[1]
@@ -723,16 +806,25 @@ class ExecutionGate(Node):
                     raise
                 time.sleep(.03)
 
-    def _wait_combined_update(self, previous_stamp, timeout=2.5):
+    def _wait_combined_update(self, previous_stamp, timeout=30.0):
         """Wait for one new combined feedback sample after both Pi results."""
+        # 2026-11-26 (user): was 5 s. Pi->PC joint-state gaps (often 5-7 s)
+        # after a finished goal latched a fault mid-pick (right lift). The Pi
+        # already reported the goal settled and nothing is sent while waiting,
+        # so wait as long as the pre-motion fresh-feedback wait (30 s).
         started = time.monotonic()
         deadline = started + timeout
+        reported_gap = False
         while time.monotonic() < deadline:
             try:
                 measured = self._combined_positions()
             except ValueError as exc:
                 if not self._temporary_state_gap(exc):
                     raise
+                if not reported_gap:
+                    self.get_logger().warning(
+                        'Joint-state gap after Pi goal completion; waiting for fresh feedback')
+                    reported_gap = True
                 time.sleep(.03)
                 continue
             if self.latest[1] != previous_stamp and time.monotonic()-started >= .15:
@@ -776,7 +868,7 @@ class ExecutionGate(Node):
             response.message = 'Inspect both physical arms, then request data=true'
             return response
         with self.guard:
-            if self.active:
+            if self._busy():
                 response.message = 'An execution is still active; fault not cleared'
                 return response
             if not self.faulted:
@@ -786,7 +878,7 @@ class ExecutionGate(Node):
         try:
             self._confirm_recovery_stopped()
             with self.guard:
-                if self.active:
+                if self._busy():
                     raise RuntimeError('A new execution became active')
                 self.faulted = False
             response.success = True
@@ -901,20 +993,31 @@ class ExecutionGate(Node):
             raise RuntimeError('Measured arms are outside the Pi goal tolerance')
         self.combined_remotes = {}
 
-    def execute_combined(self, handle):
+    def execute_combined(self, handle, endpoint_only=False):
         result = FollowJointTrajectory.Result()
+        try:
+            self._acquire(handle)
+        except Exception as exc:
+            result.error_code = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+            result.error_string = str(exc)
+            if handle.is_active:
+                handle.canceled() if handle.is_cancel_requested else handle.abort()
+            return result
         self.combined_may_move = False
         self.last_invalid_combined = None
+        self.combined_endpoint_only = endpoint_only
         try:
-            points = self.combined_points
-            if not points:
-                raise RuntimeError('Combined plan reservation missing')
-            measured = self._wait_combined_stable()
+            measured = self._wait_combined_stable(handle)
+            points = ([measured, ordered_endpoint(handle.request.trajectory, measured)]
+                      if endpoint_only else ordered_points(handle.request.trajectory, measured))
             if max(abs(a-b) for a, b in zip(measured, points[0])) > math.radians(5.0):
                 raise RuntimeError('Combined start changed before section preflight; replan')
             preflight_started = time.monotonic()
-            self.get_logger().warning(
-                'Checking combined shortcuts and drag detours; no arm command sent yet')
+            if self.combined_endpoint_only:
+                self.get_logger().info('Checking direct joint goal before Pi dispatch')
+            else:
+                self.get_logger().warning(
+                    'Checking combined shortcuts and drag detours; no arm command sent yet')
             checked_states = {}
             def valid(q):
                 key = tuple(q)
@@ -923,7 +1026,16 @@ class ExecutionGate(Node):
                 return checked_states[key]
             valid.many = lambda states: self._combined_valid_many(states, checked_states)
             target = points[-1]
-            if independent_path_valid([measured, target], valid):
+            if self.combined_endpoint_only:
+                target = ordered_endpoint(handle.request.trajectory, measured)
+                path = [measured, target]
+                if not independent_path_valid(path, valid):
+                    raise ValueError('Direct joint goal is not collision-free; no Pi goal sent')
+                if max(abs(a-b) for a, b in zip(*path)) <= 1e-4:
+                    routes = []
+                else:
+                    routes = [(self._active_mode(path), 'endpoint', path)]
+            elif independent_path_valid([measured, target], valid):
                 left_moves = max(abs(a-b) for a, b in zip(measured[:6], target[:6])) > 1e-4
                 right_moves = max(abs(a-b) for a, b in zip(measured[6:], target[6:])) > 1e-4
                 mode = ('both' if left_moves and right_moves else
@@ -934,7 +1046,7 @@ class ExecutionGate(Node):
                 blocks = continuous_sections(sections, valid)
                 routes = [route for mode, path in blocks
                           for route in self._minimal_drag_routes(mode, path, valid)]
-            if self.endpoint_as_drag:
+            if self.endpoint_as_drag and not self.combined_endpoint_only:
                 routes = self._endpoints_as_drag(routes, valid)
             if self.merge_endpoint_routes and len(routes) > 1:
                 routes = self._merged_routes(routes, valid)
@@ -970,7 +1082,9 @@ class ExecutionGate(Node):
                     f'contacts={contacts or "not supplied by MoveIt"}')
             self.faulted = self.faulted or self.combined_may_move
             result.error_code = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
-            result.error_string = str(exc) + '; Pi cancellation does not prove physical stop'
+            result.error_string = str(exc)
+            if self.combined_may_move:
+                result.error_string += '; Pi cancellation does not prove physical stop'
             if handle.is_active:
                 if handle.is_cancel_requested:
                     handle.canceled()
@@ -984,17 +1098,221 @@ class ExecutionGate(Node):
             self.combined_points = None
             self.combined_sections = None
             self.combined_may_move = False
+            self.combined_endpoint_only = False
+            self._release()
+
+    def execute_joint_goal(self, handle):
+        side = self._goal_side(handle.request)
+        if side is None:
+            return self.execute_combined(handle, endpoint_only=True)
+        return self.execute_arm_goal(handle, side)
+
+    def _wait_arm_stable(self, handle, side, timeout=30.0):
+        """Fresh samples with this arm settled; the other arm may be moving."""
+        offset = 0 if side == 'left' else 6
+        deadline = time.monotonic() + timeout
+        previous_stamp = previous = None
+        settled = 0
+        while rclpy.ok() and time.monotonic() < deadline:
+            if handle.is_cancel_requested:
+                raise RuntimeError('Canceled while waiting for fresh feedback')
+            if self.faulted:
+                raise RuntimeError('Fault latched by the other arm; no motion sent')
+            try:
+                measured = self._combined_positions()
+            except ValueError as exc:
+                if not self._temporary_state_gap(exc):
+                    raise
+                settled, previous = 0, None
+                time.sleep(.03)
+                continue
+            stamp = self.latest[1]
+            if stamp != previous_stamp:
+                if not self._combined_valid(measured):
+                    raise RuntimeError('Measured arms entered a MoveIt collision state')
+                own = measured[offset:offset+6]
+                if previous is not None and max(abs(a-b) for a, b in zip(own, previous)) <= math.radians(0.5):
+                    settled += 1
+                else:
+                    settled = 0
+                previous_stamp, previous = stamp, own
+                if settled >= 3:
+                    return measured
+            time.sleep(.05)
+        raise RuntimeError(f'{side} arm did not become stationary')
+
+    def _arm_goal_path_valid(self, side, measured, own_target):
+        """Own straight joint path x the other arm's remaining path (start->target)."""
+        peer = 'right' if side == 'left' else 'left'
+        offset = 0 if side == 'left' else 6
+        peer_offset = 6 - offset
+        own_start = tuple(measured[offset:offset+6])
+        peer_now = tuple(measured[peer_offset:peer_offset+6])
+        with self.guard:
+            lane = self.lanes[peer]
+            peer_target = lane['target'] if lane is not None and lane['target'] is not None else None
+        peer_path = [peer_now] if peer_target is None else [peer_now, tuple(peer_target)]
+        own_path = [own_start, tuple(own_target)]
+        if len(peer_path) == 1:
+            peer_path = peer_path * 2
+        checked = {}
+        def valid(q):
+            key = tuple(q)
+            if key not in checked:
+                checked[key] = self._combined_valid(q)
+            return checked[key]
+        valid.many = lambda states: self._combined_valid_many(states, checked)
+        left, right = (own_path, peer_path) if side == 'left' else (peer_path, own_path)
+        return independent_arms_valid(left, right, valid), peer_target is not None
+
+    def execute_arm_goal(self, handle, side):
+        """One-arm direct joint goal in this arm's lane, while the other lane may move."""
+        result = FollowJointTrajectory.Result()
+        offset = 0 if side == 'left' else 6
+        may_move = False
+        dispatching = False
+        remote = pending = None
+        try:
+            self._acquire(handle, side)
+        except Exception as exc:
+            result.error_code = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+            result.error_string = str(exc)
+            if handle.is_active:
+                handle.canceled() if handle.is_cancel_requested else handle.abort()
+            return result
+        try:
+            measured = self._wait_arm_stable(handle, side)
+            target = ordered_endpoint(handle.request.trajectory, measured)
+            own_target = tuple(target[offset:offset+6])
+            if max(abs(a-b) for a, b in zip(measured[offset:offset+6], own_target)) <= 1e-4:
+                handle.succeed()
+                result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+                result.error_string = f'{side} already at the joint goal'
+                return result
+            self.dispatch_lock.acquire()
+            dispatching = True
             with self.guard:
-                self.active = False
+                self.lanes[side]['target'] = own_target
+            started = time.monotonic()
+            self.get_logger().info(f'{side} joint goal: checking against the other arm path')
+            ok, peer_moving = self._arm_goal_path_valid(side, measured, own_target)
+            if not ok and peer_moving:
+                # The other arm's remaining path blocks this one: wait for it to
+                # stop, then check again from the new measured state.
+                self.get_logger().warning(f'{side} joint goal waits for the other arm to finish')
+                peer = 'right' if side == 'left' else 'left'
+                with self.cv:
+                    while self.lanes[peer] is not None:
+                        if self.faulted or handle.is_cancel_requested:
+                            raise RuntimeError('Canceled or fault while waiting; no motion sent')
+                        self.cv.wait(0.1)
+                measured = self._wait_arm_stable(handle, side)
+                ok, _ = self._arm_goal_path_valid(side, measured, own_target)
+            if not ok:
+                raise ValueError(f'{side} joint goal collides with the other arm path; no Pi goal sent')
+            self.get_logger().info(f'{side} joint goal checked in {time.monotonic()-started:.1f}s; sending')
+            if handle.is_cancel_requested:
+                raise RuntimeError('Canceled before dispatch; no motion sent')
+            command = list(measured)
+            command[offset:offset+6] = own_target
+            pending = self.drag_hybrid_clients[side].send_goal_async(
+                self._section_goal(side, [measured, tuple(command)]))
+            with self.guard:
+                self.lanes[side]['pending'] = pending
+            may_move = True
+            self.dispatch_lock.release()
+            dispatching = False
+            deadline = time.monotonic() + 5.0
+            while not pending.done():
+                if handle.is_cancel_requested or time.monotonic() > deadline:
+                    raise RuntimeError(f'{side} Pi goal acceptance failed or canceled')
+                time.sleep(.02)
+            remote = pending.result()
+            if remote is None or not remote.accepted:
+                may_move = False
+                raise RuntimeError(f'{side} Pi rejected the joint goal; no motion sent')
+            with self.guard:
+                self.lanes[side]['remote'] = remote
+            reply_future = remote.get_result_async()
+            deadline = time.monotonic() + 130.0
+            last_fresh = time.monotonic()
+            while not reply_future.done():
+                if handle.is_cancel_requested:
+                    raise RuntimeError(f'{side} joint goal canceled')
+                if self.faulted:
+                    raise RuntimeError(f'Fault latched by the other arm; stopping {side}')
+                if time.monotonic() > deadline:
+                    raise RuntimeError(f'{side} Pi joint goal timed out')
+                try:
+                    now = self._combined_positions()
+                    last_fresh = time.monotonic()
+                except ValueError as exc:
+                    if (not self._temporary_state_gap(exc) or
+                            time.monotonic()-last_fresh > self.state_gap_grace_s):
+                        raise
+                    time.sleep(.03)
+                    continue
+                if not self._combined_valid(now):
+                    raise RuntimeError('Measured arms entered a MoveIt collision state')
+                time.sleep(.05)
+            reply = reply_future.result()
+            if (reply.status != GoalStatus.STATUS_SUCCEEDED or
+                    reply.result.error_code != FollowJointTrajectory.Result.SUCCESSFUL):
+                raise RuntimeError(f'{side} Pi joint goal failed: {reply.result.error_string}')
+            completed_stamp = self.latest[1] if self.latest is not None else None
+            reached = self._wait_combined_update(completed_stamp)
+            if max(abs(a-b) for a, b in zip(reached[offset:offset+6], own_target)) > math.radians(5.0):
+                raise RuntimeError(f'Measured {side} arm is outside the Pi goal tolerance')
+            handle.succeed()
+            result.error_code = FollowJointTrajectory.Result.SUCCESSFUL
+            result.error_string = f'{side} joint goal completed'
+            return result
+        except Exception as exc:
+            if remote is not None and remote.accepted:
+                try:
+                    remote.cancel_goal_async()
+                except Exception as cancel_exc:
+                    self.get_logger().error(f'{side} Pi cancel failed: {cancel_exc}')
+            elif pending is not None:
+                def cancel_late(done):
+                    try:
+                        late = done.result()
+                        if late is not None and late.accepted:
+                            late.cancel_goal_async()
+                    except Exception as late_exc:
+                        self.get_logger().error(f'{side} late Pi cancel failed: {late_exc}')
+                pending.add_done_callback(cancel_late)
+            if may_move:
+                self.faulted = True
+            result.error_code = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+            result.error_string = str(exc)
+            if may_move:
+                result.error_string += '; Pi cancellation does not prove physical stop'
+            if handle.is_active:
+                handle.canceled() if handle.is_cancel_requested else handle.abort()
+            self.get_logger().error(result.error_string)
+            return result
+        finally:
+            if dispatching:
+                self.dispatch_lock.release()
+            self._release(side)
 
     def goal(self, request, side, kind='arm'):
         with self.guard:
             try:
-                if self.active or self.faulted:
+                if self.faulted or (self.active and not self.coordinated_execution):
                     raise ValueError('Busy or fault latched; inspect robot, then call reset_execution_fault')
                 if self.coordinated_execution and kind == 'arm':
                     raise ValueError('Single-arm motion disabled during coordinated execution')
-                current, peer = self.positions(side)
+                try:
+                    current, peer = self.positions(side)
+                except ValueError as exc:
+                    if not (self.coordinated_execution and kind == 'gripper'
+                            and self._temporary_state_gap(exc)):
+                        raise
+                    current = peer = None  # gripper: execute waits for fresh feedback
+                    self.get_logger().warning(
+                        f'{side} gripper goal accepted during a joint-state gap; waits for fresh feedback')
                 route = (self.hybrid_route(request, side, current, peer)
                          if kind == 'arm' and self.trajectory_backend == 'sdk_hybrid'
                          else self.drag_avoidance_route(request, side, current, peer)
@@ -1006,12 +1324,14 @@ class ExecutionGate(Node):
                 if not client.server_is_ready():
                     raise ValueError(f'{side} Pi {kind} SDK {route} action server is not available')
                 if kind == 'gripper':
-                    self.require_gripper_feedback(side)
+                    if current is not None:  # in a gap, execute checks it after fresh feedback
+                        self.require_gripper_feedback(side)
                     validate_gripper(request, side)
                 else:
                     validate_trial(request, side, current, allow_path=self.trajectory_backend in ('sdk_path', 'sdk_refresh_trial', 'sdk_hybrid', 'sdk_drag', 'sdk_drag_hybrid'))
-                self.selected_route = route
-                self.active = True
+                if not self.coordinated_execution:
+                    self.selected_route = route
+                    self.active = True
                 return GoalResponse.ACCEPT
             except ValueError as exc:
                 self.get_logger().warning(f'Execution rejected without forwarding: {exc}')
@@ -1019,12 +1339,44 @@ class ExecutionGate(Node):
 
     def execute(self, handle, side, kind='arm'):
         result = FollowJointTrajectory.Result()
-        self.remote = None
-        self.pending_remote = None
-        self.stop_late_goal = False
+        if self.coordinated_execution:
+            # Coordinated mode: only grippers come here (arm goals are rejected).
+            try:
+                self._acquire(handle, side)
+            except Exception as exc:
+                result.error_code = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
+                result.error_string = str(exc)
+                if handle.is_active:
+                    handle.canceled() if handle.is_cancel_requested else handle.abort()
+                return result
+        # Per-call state: left and right grippers may run at the same time.
+        st = SimpleNamespace(remote=None, pending=None, stop=False)
+        if not self.coordinated_execution:
+            self.remote = None
         sent = False
         try:
-            arm_start, peer_start = self.positions(side)
+            if self.coordinated_execution:
+                deadline = time.monotonic() + 30.0
+                while True:
+                    try:
+                        arm_start, peer_start = self.positions(side)
+                        break
+                    except ValueError as exc:
+                        if (not self._temporary_state_gap(exc) or time.monotonic() > deadline
+                                or handle.is_cancel_requested or self.faulted):
+                            raise
+                        time.sleep(.05)
+                while kind == 'gripper':
+                    try:
+                        self.require_gripper_feedback(side)
+                        break
+                    except ValueError:
+                        if (time.monotonic() > deadline or handle.is_cancel_requested
+                                or self.faulted):
+                            raise
+                        time.sleep(.05)
+            else:
+                arm_start, peer_start = self.positions(side)
             if kind == 'gripper':
                 self.require_gripper_feedback(side)
                 validate_gripper(handle.request, side)
@@ -1056,12 +1408,12 @@ class ExecutionGate(Node):
                 remote_goal.trajectory.points = [
                     copy.deepcopy(handle.request.trajectory.points[0]),
                     copy.deepcopy(handle.request.trajectory.points[-1])]
-            self.pending_remote = client.send_goal_async(
+            st.pending = client.send_goal_async(
                 remote_goal, feedback_callback=lambda msg: handle.publish_feedback(msg.feedback))
             sent = True
 
             def late_response(future):
-                if self.stop_late_goal:
+                if st.stop:
                     try:
                         remote = future.result()
                         if remote.accepted:
@@ -1069,7 +1421,7 @@ class ExecutionGate(Node):
                     except Exception as exc:
                         self.get_logger().error(f'Late goal cancellation failed: {exc}')
 
-            self.pending_remote.add_done_callback(late_response)
+            st.pending.add_done_callback(late_response)
             planned_seconds = (handle.request.trajectory.points[-1].time_from_start.sec +
                                handle.request.trajectory.points[-1].time_from_start.nanosec/1e9)
             timeout = (max(120., min(380., 3.*planned_seconds+20.))
@@ -1087,8 +1439,10 @@ class ExecutionGate(Node):
                     own, peer = self.positions(side, max_age=3.0 if kind == 'gripper' else 1.5)
                     last_fresh_state = time.monotonic()
                 except ValueError as exc:
-                    if (kind != 'arm' or
-                            time.monotonic()-last_fresh_state > 2.5 or
+                    # 2026-11-25: grippers too. Pi angle reads take 1.1-1.5 s while a
+                    # gripper moves, so a short combined-state gap is normal there.
+                    # The arm-moved check above still runs on every fresh sample.
+                    if (time.monotonic()-last_fresh_state > 2.5 or
                             str(exc) not in ('Both measured arms must be fresh',
                                              'Combined state stale or clocks differ')):
                         raise
@@ -1100,18 +1454,25 @@ class ExecutionGate(Node):
                     continue
                 if kind == 'gripper' and max(abs(a-b) for a, b in zip(own, arm_start)) > math.radians(3.0):
                     raise RuntimeError('Arm moved more than 3 deg during gripper execution')
-                if max(abs(a-b) for a, b in zip(peer, peer_start)) > math.radians(3.0):
+                if (not self.coordinated_execution and
+                        max(abs(a-b) for a, b in zip(peer, peer_start)) > math.radians(3.0)):
+                    # Coordinated mode: the other arm may move in its own lane.
                     raise RuntimeError('Other arm moved more than 3 deg during selected-arm execution')
                 if handle.is_cancel_requested:
                     raise RuntimeError('User canceled; remote stop requested')
                 if time.monotonic() > deadline:
                     raise RuntimeError('SDK result timeout')
-                if self.remote is None:
-                    if self.pending_remote.done():
-                        self.remote = self.pending_remote.result()
-                        if not self.remote.accepted:
+                if st.remote is None:
+                    if st.pending.done():
+                        st.remote = st.pending.result()
+                        if not self.coordinated_execution:
+                            self.remote = st.remote
+                        if self.coordinated_execution:
+                            with self.guard:
+                                self.lanes[side]['remote'] = st.remote
+                        if not st.remote.accepted:
                             raise RuntimeError('Pi rejected SDK goal; no movement confirmed')
-                        remote_result = self.remote.get_result_async()
+                        remote_result = st.remote.get_result_async()
                     elif time.monotonic() > response_deadline:
                         raise RuntimeError('Pi goal acknowledgement timeout; state uncertain')
                 if remote_result is not None and remote_result.done():
@@ -1126,13 +1487,13 @@ class ExecutionGate(Node):
                 time.sleep(.03)
             raise RuntimeError('ROS shutdown during SDK request')
         except Exception as exc:
-            self.stop_late_goal = True
+            st.stop = True
             if sent:
                 self.faulted = True
-            if self.remote is not None and self.remote.accepted:
-                self.remote.cancel_goal_async()
-            elif self.pending_remote is not None and self.pending_remote.done():
-                late_response(self.pending_remote)
+            if st.remote is not None and st.remote.accepted:
+                st.remote.cancel_goal_async()
+            elif st.pending is not None and st.pending.done():
+                late_response(st.pending)
             result.error_code = FollowJointTrajectory.Result.PATH_TOLERANCE_VIOLATED
             result.error_string = str(exc)+'; cancellation requests do not verify physical stop'
             if handle.is_active:
@@ -1143,15 +1504,19 @@ class ExecutionGate(Node):
             self.get_logger().error(result.error_string)
             return result
         finally:
-            with self.guard:
-                self.active = False
-                self.selected_route = None
+            if self.coordinated_execution:
+                self._release(side)
+            else:
+                with self.guard:
+                    self.active = False
+                    self.selected_route = None
 
 
 def main():
     rclpy.init()
     node = None
-    executor = MultiThreadedExecutor(num_threads=4)
+    # Two arm lanes + a waiting exclusive goal + service/feedback callbacks.
+    executor = MultiThreadedExecutor(num_threads=10)
     try:
         node = ExecutionGate()
         executor.add_node(node)
@@ -1163,6 +1528,13 @@ def main():
             node.stop_late_goal = True
             if node.active and node.combined_server is not None:
                 node._cancel_combined()
+            for lane in node.lanes.values():
+                remote = lane and lane.get('remote')
+                if remote is not None and remote.accepted:
+                    try:
+                        remote.cancel_goal_async()
+                    except Exception as exc:
+                        node.get_logger().error(f'Shutdown lane cancel failed: {exc}; check physical robot')
             if node.remote is not None and node.active and node.remote.accepted:
                 try:
                     node.remote.cancel_goal_async()

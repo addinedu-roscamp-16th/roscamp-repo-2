@@ -43,6 +43,8 @@ def main():
     parser.add_argument('--out-dir', type=Path, required=True)
     parser.add_argument('--plan-only', action='store_true')
     parser.add_argument('--open-grippers', action='store_true')
+    parser.add_argument('--detach-held', action='store_true',
+                        help='Remove any held object from the MoveIt scene first (missed grasp recovery)')
     args = parser.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     rclpy.init()
@@ -117,6 +119,12 @@ def main():
         if len(reply.values) != 1 or not reply.values[0].string_value:
             raise RuntimeError('MoveIt did not provide robot_description_semantic')
         goal = parse_see_center(reply.values[0].string_value)
+        if args.detach_held and not args.plan_only:
+            # 2026-11-25: a missed grasp leaves the chocobar attached to the TCP
+            # in MoveIt; remove it before the return so later plans are clean.
+            import held_object
+            for side in SIDES:
+                held_object.apply(node, wait, arm=side, remove=True)
         current = measured_states()
         print('MoveIt named pose: see_center for arm_left and arm_right.', flush=True)
         for side in SIDES:

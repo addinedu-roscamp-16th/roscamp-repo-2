@@ -4,9 +4,10 @@
   ros__parameters:
     enable_motion: true
     native_interpolation: true
-    state_hz: 2.0
+    state_hz: 2.0   # 4 Hz was tried before and did not work (user, 2026-11-24)
     gripper_type: 0
     drag_speed: 200
+    endpoint_sdk_speed: 30   # 2026-11-24: SDK send_angles speed for endpoint moves (was fixed 10)
     drag_step_deg: 8.0
     drag_deviation_deg: 1.5
     drag_corner_trim_deg: 0.0

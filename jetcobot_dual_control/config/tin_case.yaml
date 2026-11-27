@@ -1,7 +1,8 @@
 # Case position relative to the right robot base, in millimetres.
-# X=-230, Y=155 is the center of the case footprint; Z=-10 is its outer bottom.
+# Measured in left_base_link: [188, -145, -55] mm (outer bottom center).
+# The left base is +300 mm along right-base Y.
 frame_id: right_base_link
-bottom_center_xyz_mm: [-230.0, 155.0, -10.0]
+bottom_center_xyz_mm: [188.0, 155.0, -55.0]
 yaw_deg: 90.0  # 98 mm side along +Y; 74 mm side along -X.
 
 # Open-top tin case: outside 98 x 74 x 60 mm; inside 95 x 71 x 57 mm.

@@ -4,7 +4,7 @@ Single target: nearest feasible arm plus minimum-cost peer yielding.
 Two targets: evaluate both task assignments and plan both arms together.
 Objects are not added to the collision scene; robot self/inter-arm checks stay on.
 """
-import copy,itertools,json,math,signal,time
+import copy,itertools,json,math,os,signal,time
 from pathlib import Path
 import numpy as np
 from motion_math import ALL_JOINTS,JOINTS,SIDES,sampled_positions
@@ -80,7 +80,8 @@ class DualArmCoordinator:
         signal.signal(signal.SIGINT,lambda *_:setattr(self,'stop',True))
         signal.signal(signal.SIGTERM,lambda *_:setattr(self,'stop',True))
         rclpy.init(signal_handler_options=SignalHandlerOptions.NO)
-        self.node=rclpy.create_node('dual_arm_coordinator',parameter_overrides=[Parameter('use_sim_time',value=False)])
+        # JETCOBOT_COORD_NODE: own name when a pick worker runs at the same time.
+        self.node=rclpy.create_node(os.environ.get('JETCOBOT_COORD_NODE','dual_arm_coordinator'),parameter_overrides=[Parameter('use_sim_time',value=False)])
         self.measured=None;self.received=0.;self.velocity=velocity;self.acceleration=acceleration
         self.plan_time=plan_time;self.max_plans=max_plans;self.planning_budget=planning_budget
         self.sub=self.node.create_subscription(JointState,'/jetcobot_dual/joint_states',self.receive,10)

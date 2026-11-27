@@ -129,8 +129,11 @@ MULTI = parse_multi_args()
 if MULTI.fleet:
     MULTI.auto_execute = True  # 사용자 결정(11-26): fleet 모드는 항상 자동 실행
 PLACE_STAGES = ('STAGE2_ENTER', 'STAGE3_PLACE', 'STAGE2_RETURN')
-# Team fleet FillBasket result reasons (interface spec v0.2 4.6; dev has only CANCELED).
-FLEET_PICK_STAGES = ('PLAN', 'FINE', 'EXECUTE')   # stage A: pause here -> PICK_FAILED
+EXEC_STALE_WAIT_SEC = 30.0   # 11-27 user decision (same as the gate's fresh-state wait)
+SELF_RECOVERY_MAX = 2        # 11-27 user decision: Phody tries U by itself twice, then reports
+GATE_RESET_SERVICE = '/jetcobot_dual/reset_execution_fault'
+GATE_RESET_WAIT_SEC = 15.0   # the gate confirms both arms stationary before it clears
+# 11-27: FLEET_PICK_STAGES removed (a pause no longer ends the fleet goal; was PICK_FAILED for A).
 
 
 def job_arm(args):
@@ -159,6 +162,16 @@ class MultiApp(sam.SAMYawApp):
     fleet_last_pause = None   # (reason, stage, auto fine was paused) of the last pause
     fleet_goal = None         # running /workcell/fill_basket goal (main thread only)
     fleet_spares = ()         # recognised bars of the requested class that were not queued
+    fleet_gate_latched = False  # 11-27: sent motion canceled -> gate fault latch (fault_resolved clears)
+    fleet_last_error = ''     # 11-27: last worker error line for the fleet detail
+    exec_retry = None         # 11-27: {'deadline', 'next'} while waiting for fresh joints
+    self_recovery = None      # 11-27: {'n', 'at', 'state', 'key', 'reason'} automatic U pending
+    self_recovery_used = {}   # 11-27: key -> automatic U attempts (max SELF_RECOVERY_MAX)
+    fleet_recover_pending = False  # 11-27: fleet [복구] -> after see_center, recapture the rest
+    fleet_heartbeat_lost = False   # 11-27: /fleet/heartbeat lost for 30 s (shown on screen)
+    auto_reset_pending = False     # 11-27: R by itself after all objects / a fleet goal ended
+    fine_stop_pending = None       # 11-27: AUTO FINE PAUSED -> a real pause once the other arm is done
+    fleet_after_stop = None   # 11-27: 'reset_return' (fleet cancel = C) or 'miss_return' (lock release)
 
     def board_capture_command(self, folder):
         if MULTI.no_table_markers:
@@ -309,6 +322,9 @@ class MultiApp(sam.SAMYawApp):
 
     def view(self):
         out = super().view()
+        if self.fleet_heartbeat_lost:  # 11-27 fleet note: show it on the Phody screen too
+            cv2.putText(out, 'FLEET HEARTBEAT LOST (30 s) - work continues', (10, 108),
+                        cv2.FONT_HERSHEY_SIMPLEX, .6, (0, 0, 255), 2)
         if self.queue_started or self.frozen is None:
             if self.queue_started:
                 cv2.putText(out, f'MULTI: object {self.queue_total-len(self.queue)}/{self.queue_total}',
@@ -400,6 +416,10 @@ class MultiApp(sam.SAMYawApp):
         self.plan_wait_sample = None
         self.plan_wait_seconds = 0.0
         self.next_start_retry_at = 0.0
+        self.exec_retry = None
+        self.self_recovery = None
+        self.self_recovery_used = {}
+        self.fine_stop_pending = None
         self.see_center_z = {}
         self.multi_folder = None
         self.multi_capture_time = None
@@ -516,7 +536,7 @@ class MultiApp(sam.SAMYawApp):
         assignments = alternating_assignments(len(objects), MULTI.first_arm)
         if self.fleet_goal is not None:
             # Requested count only; _order_by_side picks each arm's nearest of all candidates.
-            assignments = assignments[:self.fleet_goal['requested']]
+            assignments = assignments[:self.fleet_goal.get('need', self.fleet_goal['requested'])]
         self.queue = self._order_by_side(objects, assignments)
         self.work = WorkState()
         self.see_center_z = self._load_see_center_z()
@@ -746,6 +766,7 @@ class MultiApp(sam.SAMYawApp):
         if not self.queue:
             self.queue_started = False
             self.status = f'ALL {self.queue_total} OBJECTS DONE - R NEW CAPTURE'
+            self.auto_reset_pending = True  # 11-27: back to the first screen by itself
             print(self.status, flush=True)
             return
         obj = self.queue[0]
@@ -1075,6 +1096,7 @@ class MultiApp(sam.SAMYawApp):
         args = ['--execute', '--place', '--from-pick', '--transport-stage', 'enter', '--arm', side,
                 '--checkpoint', str(checkpoint.resolve())]
         self._launch_worker('STAGE2_ENTER', script, args, job['folder'])
+        job['stage'], job['stage_ok'] = 'STAGE2_ENTER', False  # 11-27: for U (_recover_place)
 
     def _continue_place(self, job, stage):
         side = job['arm']
@@ -1088,6 +1110,7 @@ class MultiApp(sam.SAMYawApp):
             script = workers / 'stage3_place.py'
             args = ['--placing', side, '--checkpoint', checkpoint]
         self._launch_worker(stage, script, args, job['folder'])
+        job['stage'], job['stage_ok'] = stage, False  # 11-27: for U (_recover_place)
         if stage == 'STAGE2_RETURN' and not MULTI.concurrent_pick_place:
             self.bg_pending_arm = side  # plan the next approach from the return endpoint
 
@@ -1112,8 +1135,13 @@ class MultiApp(sam.SAMYawApp):
             self.bg_waiting = False
             self.pause_motion(f'{stage} worker exit={code}', stage=stage)
             return
+        if stage in PLACE_STAGES and self.held_jobs:
+            self.held_jobs[0]['stage_ok'] = True  # 11-27: for U (_recover_place)
         if self.fleet is not None and stage == 'STAGE3_PLACE':
             self.fleet_placed += 1
+            # 11-27: the item is in the basket; B return no longer counts as holding.
+            if self.held_jobs:
+                self.held_jobs[0]['fleet_released'] = True
         if self.operator_paused:
             print(f'STATE: paused; {stage} finished, next placement stage not started.', flush=True)
             return
@@ -1137,6 +1165,7 @@ class MultiApp(sam.SAMYawApp):
             elif not self.queue and self.motion_child is None and self.active_arm is None:
                 self.queue_started = False
                 self.status = f'ALL {self.queue_total} OBJECTS DONE - R NEW CAPTURE'
+                self.auto_reset_pending = True  # 11-27: back to the first screen by itself
                 print(self.status, flush=True)
             return
         self.active_arm = None
@@ -1156,6 +1185,7 @@ class MultiApp(sam.SAMYawApp):
         else:
             self.queue_started = False
             self.status = f'ALL {self.queue_total} OBJECTS DONE - R NEW CAPTURE'
+            self.auto_reset_pending = True  # 11-27: back to the first screen by itself
             print(self.status, flush=True)
 
     def _record_stationary_plan_wait(self):
@@ -1201,10 +1231,81 @@ class MultiApp(sam.SAMYawApp):
                     self.fleet_goal['canceled'] = True
                     # Same stop as P. TODO(DECIDE-9): a held item stays held (11-26 meeting).
                     self.pause_motion('fleet canceled')
+                    # 11-27 user decision: fleet reset (cancel) = C after the stop.
+                    self.fleet_after_stop = 'reset_return'
+            elif command.get('type') == 'resume':
+                # 11-27 user decision: fleet resume = U.
+                # 11-27 Pode fleet: [복구] = set_pause(false) -> back to see_center (C, or
+                # both arms to see_center + open grippers when C is not possible), then
+                # recapture and fill only the remaining items. (U is Phody's own retry.)
+                goal = self.fleet_goal
+                if goal is not None and goal.get('returned') and not self.operator_paused:
+                    print(f'FLEET: [복구] from arm_{command.get("arm")} -> recapture remaining',
+                          flush=True)
+                    self._fleet_recapture()
+                elif self.operator_paused:
+                    print(f'FLEET: [복구] from arm_{command.get("arm")} -> see_center, then '
+                          'recapture remaining', flush=True)
+                    self.fleet_recover_pending = goal is not None
+                    self.fleet_after_stop = 'recover'
+            elif command.get('type') == 'pause':
+                # 11-27 Pode fleet: set_pause(true) = P.
+                self.pause_motion('fleet set_pause(true)')
+            elif command.get('type') == 'bridge_restart':
+                # 11-27 user decision: a Pi bridge restart is a restart ([초기화]) like an app
+                # restart: new boot_id (fleet_link), stop, and drop the goal (the fleet sends a
+                # new fill_basket for the rest on [복구]; it ignores this late result).
+                print(f'FLEET: {command.get("why")} -> new boot_id; stopping, goal dropped. '
+                      'Check the robot, then C / R before the next goal.', flush=True)
+                if (self.operator_paused or self.motion_child is not None or
+                        self.place_child is not None or self.queue_started):
+                    self.pause_motion(f'fleet: {command.get("why")}')
+                if self.fleet_goal is not None:
+                    goal = self.fleet_goal
+                    self._fleet_end(False, self.fleet_placed - goal['placed_start'], 'CANCELED')
+            elif command.get('type') == 'heartbeat':
+                self.fleet_heartbeat_lost = bool(command.get('lost'))
+                print('FLEET: /fleet/heartbeat ' + ('LOST for 30 s; work continues' if
+                      self.fleet_heartbeat_lost else 'back'), flush=True)
+            elif command.get('type') == 'gate_reset':
+                # 11-27 (가): fleet fault_resolved -> gate reset_execution_fault result.
+                print(f'FLEET: gate reset {"OK" if command.get("ok") else "FAILED"}: '
+                      f'{command.get("message")}', flush=True)
+                if command.get('ok'):
+                    self.fleet_gate_latched = False
+            elif command.get('type') == 'lock_release':
+                # 11-27 meeting: lock release = both arms to see_center + open grippers,
+                # motors stay on (the same worker as the missed-grasp U recovery).
+                print(f'FLEET: lock released on arm_{command.get("arm")} -> see_center + open grippers',
+                      flush=True)
+                # 11-27 fleet note: the goal stays open (PAUSED); items dropped by the gripper
+                # opening are reported as uncertain when the goal ends.
+                self.pause_motion('fleet lock released')
+                self.fleet_after_stop = 'miss_return'
             else:
                 print(f'FLEET: unknown command {command}', flush=True)
         if self.fleet_goal is not None:
             self._fleet_check_goal_end()
+        if (self.fleet_after_stop is not None and self.motion_child is None and
+                not (self.bg and self.bg['child'] is not None)):
+            action, self.fleet_after_stop = self.fleet_after_stop, None
+            if action == 'reset_return':
+                self.start_reset_return()   # same as C while paused
+            elif action == 'recover':
+                self.start_reset_return()   # C
+                if self.motion_child is None:  # C not possible (holding / placing)
+                    self.start_miss_return()
+                if self.motion_child is None:
+                    self.fleet_recover_pending = False
+                    print('STATE: [복구] could not start a see_center return; check the robot.',
+                          flush=True)
+            else:
+                self.start_miss_return()
+        goal = self.fleet_goal
+        if (goal is not None and goal.get('returned') and self.fleet_recover_pending and
+                not self.operator_paused):
+            self.fleet_recover_pending = False
+            self._fleet_recapture()
         self._fleet_write_snapshot()
 
     def _fleet_idle(self):
@@ -1224,6 +1325,7 @@ class MultiApp(sam.SAMYawApp):
                            'found': None, 'placed_start': self.fleet_placed,
                            'captured': False, 'canceled': False, 'error': False}
         self.fleet_spares = []
+        self.fleet_last_error = ''
         print(f'FLEET GOAL {command["order_id"]}: {[(k, n) for k, _, n in items]}', flush=True)
         self._fleet_write_snapshot()  # feedback shows CAPTURING while perception runs
         if self._freeze():
@@ -1251,30 +1353,54 @@ class MultiApp(sam.SAMYawApp):
             self._fleet_end(False, placed, 'RECOGNITION_ERROR')
         elif goal['canceled'] and self.operator_paused:
             self._fleet_end(False, placed, 'CANCELED')
+        elif goal.get('returned'):
+            # 11-27 fleet note: PICK_FAILED / ARM_FAULT are not sent for now; wait for [재개].
+            return
         elif self.operator_paused:
-            reason, stage, fine_paused = self.fleet_last_pause or ('', None, False)
-            if str(reason).startswith('operator pressed') and fine_paused:
-                # 11-26 user decision: P after AUTO FINE PAUSED (bar not found) is a stage A failure.
-                self._fleet_end(False, placed, 'PICK_FAILED')
-            elif str(reason).startswith('operator pressed'):
-                # TODO(미정, 11-26): a person pressed P/S during a fleet goal. Proposed ARM_FAULT.
-                self._fleet_end(False, placed, 'ARM_FAULT')
-            else:
-                # 11-26 user decision (가): a pause ends the goal as failed; the app stays paused.
-                self._fleet_end(False, placed,
-                                'PICK_FAILED' if stage in FLEET_PICK_STAGES else 'ARM_FAULT')
+            # 11-27 user decision (나) + meeting: any pause (P, worker failure, fine failure)
+            # keeps the goal open; the arms report PAUSED until the admin chooses
+            # resume (= U) or reset (= cancel -> C). Old (가) ending: backup 20261127_111434.
+            return
         elif (not self.queue_started and not self.held_jobs and
               self.motion_child is None and self.place_child is None):
-            short = (goal['found'] or 0) < goal['requested']
-            # TODO(DECIDE-3): fewer seen than requested -> OUT_OF_STOCK (11-26 meeting, not final).
-            self._fleet_end(True, placed, 'OUT_OF_STOCK' if short else '')
+            short = (goal['found'] or 0) < goal.get('need', goal['requested'])
+            # 11-27 fleet note: out of stock or not recognised is unknown -> RECOGNITION_ERROR.
+            # 11-27 arm-fleet contract 2nd ed.: success = every item of the goal was handled.
+            self._fleet_end(not short, placed, 'RECOGNITION_ERROR' if short else '')
 
     def _fleet_end(self, success, placed, reason):
         goal, self.fleet_goal = self.fleet_goal, None
         self.fleet_spares = []
         print(f'FLEET GOAL {goal["order_id"]} END: success={success} placed={placed} '
               f'reason={reason or "-"}', flush=True)
-        self.fleet.finish_fill(goal['goal'], success, placed, reason)
+        # 11-27 user decision (a): after every fleet goal end (success or not) -> R by itself,
+        # done only once both arms are idle (see _poll_auto_reset).
+        self.auto_reset_pending = True
+        # PH-09: items still held (or dropped by a see_center return) go to FillBasket.uncertain.
+        held = [job for job in self.held_jobs if not job.get('fleet_released')]
+        self.fleet.finish_fill(goal['goal'], success, placed, reason,
+                               uncertain=len(held) + goal.get('dropped', 0))
+
+    def _fleet_recapture(self):
+        """11-27: [재개] after a see_center return -> capture again for the remaining items."""
+        goal = self.fleet_goal
+        placed = self.fleet_placed - goal['placed_start']
+        goal['need'] = max(0, goal['requested'] - placed - goal.get('dropped', 0))
+        goal.update(returned=False, captured=False, found=None, error=False)
+        self.fleet_spares = []
+        self.fleet_last_error = ''
+        print(f'FLEET GOAL {goal["order_id"]}: recapture for {goal["need"]} remaining', flush=True)
+        self._fleet_write_snapshot()
+        if goal['need'] == 0:
+            goal['captured'], goal['found'] = True, 0
+            return
+        if self._freeze():
+            self.run()
+            failed = goal['found'] is None and 'FAILED' in str(self.status)
+        else:
+            failed = True
+        goal['captured'] = True
+        goal['error'] = failed
 
     def _fleet_replan_with_spare(self, code):
         """11-26 user decision: plan-only failure + spare bar -> plan the spare for the same arm."""
@@ -1293,6 +1419,234 @@ class MultiApp(sam.SAMYawApp):
         super().reset()  # per-object UI state only; queue and work state are kept
         self.start_next_object()
 
+    def _schedule_self_recovery(self, reason, need_reset=False):
+        """11-27 user decision: Phody's own stop -> U by itself up to SELF_RECOVERY_MAX times.
+
+        Not for a person's P / S or fleet commands. Fleet on or off alike.
+        need_reset: the gate probably latched; clear it first (reset_execution_fault).
+        """
+        text = str(reason)
+        if text.startswith(('operator pressed', 'fleet ')):
+            return
+        if self.recovery is not None:
+            key = f'pick/{self.recovery.get("object")}/{self.recovery.get("stage")}'
+            state = 'PICKING'
+        elif self.held_jobs:
+            job = self.held_jobs[0]
+            key, state = f'place/{job["arm"]}/{job.get("stage")}', 'PLACING'
+        else:
+            return
+        used = self.self_recovery_used.get(key, 0)
+        if used >= SELF_RECOVERY_MAX:
+            print(f'STATE: self-recovery {SELF_RECOVERY_MAX}/{SELF_RECOVERY_MAX} used for {key}; '
+                  'waiting for the operator / fleet.', flush=True)
+            return
+        self.self_recovery_used = dict(self.self_recovery_used, **{key: used + 1})
+        self.self_recovery = {'n': used + 1, 'at': time.monotonic() + 1.0, 'state': state,
+                              'key': key, 'reason': text, 'need_reset': bool(need_reset)}
+        print(f'STATE: self-recovery {used + 1}/{SELF_RECOVERY_MAX} (U) for {key}.', flush=True)
+
+    def _poll_self_recovery(self):
+        retry = self.self_recovery
+        if not self.operator_paused:
+            self.self_recovery = None
+            return
+        if (time.monotonic() < retry['at'] or self.motion_child is not None or
+                self.place_child is not None or (self.bg and self.bg['child'] is not None)):
+            return
+        if retry['need_reset'] and not self._self_reset_gate(retry):
+            return                      # waiting for the gate answer (or rescheduled)
+        self.self_recovery = None
+        if (retry['n'] == SELF_RECOVERY_MAX and self.recovery is not None and
+                self.recovery.get('stage') == 'PLAN' and self.active_object is not None):
+            # 11-27 user decision: a plan-only failure (e.g. no IK goal) -> the last try uses
+            # the other arm. Nothing moved; the plan worker reads assigned_arm as required_arm.
+            old = self.active_object.get('assigned_arm') or self.active_arm
+            other = 'right' if old == 'left' else 'left'
+            self.active_object['assigned_arm'] = other
+            print(f'STATE: self-recovery {retry["n"]}/{SELF_RECOVERY_MAX}: plan failed on {old}; '
+                  f'U with the other arm ({other})', flush=True)
+        else:
+            print(f'STATE: self-recovery {retry["n"]}/{SELF_RECOVERY_MAX}: U', flush=True)
+        self.recover_work()
+        if not self.operator_paused:
+            # 11-27: a person's U waits for E (manual_restart); Phody's own retry keeps the
+            # run mode it had, so a new plan executes by itself like the first one.
+            self.manual_restart = False
+            if getattr(self, 'motion_stage', None) == 'PLAN' or self.motion_child is None:
+                self.auto_execute_pending = self.queue_auto_started or MULTI.auto_execute
+        if self.operator_paused and self.motion_child is None and self.self_recovery is None:
+            # U did not resume anything: count it and try again (or report).
+            self._schedule_self_recovery(retry['reason'], need_reset=retry['need_reset'])
+
+    def _self_reset_gate(self, retry):
+        """Clear the gate fault latch for a self-recovery. True when cleared (go on with U).
+
+        The gate itself clears only after fresh, stationary, collision-free joint feedback.
+        """
+        future = retry.get('reset_future')
+        if future is None:
+            from std_srvs.srv import SetBool
+            node = self.live_poses.node
+            client = getattr(self, '_gate_reset_client', None)
+            if client is None:
+                client = self._gate_reset_client = node.create_client(SetBool, GATE_RESET_SERVICE)
+            if not client.service_is_ready():
+                print(f'STATE: self-recovery {retry["n"]}/{SELF_RECOVERY_MAX}: {GATE_RESET_SERVICE} '
+                      'not found; waiting for the operator / fleet.', flush=True)
+                self.self_recovery = None
+                return False
+            print(f'STATE: self-recovery {retry["n"]}/{SELF_RECOVERY_MAX}: clearing the gate fault '
+                  'latch', flush=True)
+            retry['reset_future'] = client.call_async(SetBool.Request(data=True))
+            retry['reset_sent'] = time.monotonic()
+            return False
+        self.live_poses.poll()          # spins the app node that owns the client
+        if not future.done():
+            if time.monotonic() - retry['reset_sent'] > GATE_RESET_WAIT_SEC:
+                print('STATE: gate reset did not answer; waiting for the operator / fleet.', flush=True)
+                self.self_recovery = None
+            return False
+        reply = future.result()
+        print(f'STATE: gate reset {"OK" if reply.success else "FAILED"}: {reply.message}', flush=True)
+        if not reply.success:
+            self.self_recovery = None
+            self._schedule_self_recovery(retry['reason'], need_reset=True)  # counts as a try
+            return False
+        self.fleet_gate_latched = False
+        retry['need_reset'] = False
+        return True
+
+    def pause_auto_fine(self, reason):
+        """11-27: also save the camera frame, and turn Phody's own fine stop into a pause."""
+        first = not getattr(self, 'auto_fine_paused', False)
+        fine_stop = not self.operator_paused   # pause_motion() calls this while already paused
+        super().pause_auto_fine(reason)
+        if first and fine_stop:
+            self._save_fine_frame(reason)
+        if not self.operator_paused and not str(reason).startswith('operator pressed'):
+            # Fine search does not move anything; wait for the other arm to finish its
+            # placement rather than cancel it (same idea as a plan-only failure).
+            self.fine_stop_pending = str(reason)
+
+    def _save_fine_frame(self, reason):
+        """11-27 user request: keep the moving arm's camera image when fine alignment stops."""
+        try:
+            camera = self.cameras[0 if self.args.arm == 'left' else 1]
+            folder = self.preview_file.parent if self.preview_file is not None else self.multi_folder
+            if folder is None or not camera.is_live():
+                return
+            path = Path(folder) / f'auto_fine_paused_{self.args.arm}_{datetime.now():%H%M%S}.jpg'
+            cv2.imwrite(str(path), camera.frame.copy())
+            print(f'STATE: fine stop image saved: {path} ({reason})', flush=True)
+        except Exception as exc:  # noqa: BLE001 (a diagnostic image must not stop the app)
+            print(f'STATE: could not save the fine stop image ({exc}).', flush=True)
+
+    def _poll_auto_reset(self):
+        """11-27 user decision: same as R once everything is idle (fleet on or off)."""
+        if self.operator_paused:
+            self.auto_reset_pending = False   # a stop needs a person; no automatic reset
+            return
+        if (self.queue_started or self.held_jobs or self.motion_child is not None or
+                self.place_child is not None or (self.bg and self.bg['child'] is not None) or
+                self.fleet_goal is not None or
+                any(state != 'idle' for state in self.work.arms.values())):
+            return
+        self.auto_reset_pending = False
+        if self.reset() is not False:
+            for name in (sam.RESULT_WINDOW, sam.TOP_WINDOW, sam.APPROACH_CAMERA_WINDOW):
+                try:
+                    cv2.destroyWindow(name)
+                except cv2.error:
+                    pass
+            print('STATE: done -> reset to the first screen (same as R).', flush=True)
+
+    def _joints_stale(self):
+        try:
+            self.live_poses.snapshot()
+        except RuntimeError as exc:
+            return 'stale' in str(exc) or 'Waiting for' in str(exc)
+        return False
+
+    def _poll_exec_retry(self):
+        """11-27: auto-execute blocked by stale Pi joint state (see poll_motion)."""
+        retry, now = self.exec_retry, time.monotonic()
+        if now < retry['next']:
+            return
+        if not self._joints_stale():
+            self.exec_retry = None
+            print('STATE: joint state fresh again; auto-execute.', flush=True)
+            self.start_motion(execute=True)
+            if self.motion_child is None and self._joints_stale():
+                self.exec_retry = retry          # lost again: keep the same 30 s deadline
+                retry['next'] = now + 1.0
+            return
+        if now >= retry['deadline']:
+            self.exec_retry = None
+            self.pause_motion(f'joint state stale for {EXEC_STALE_WAIT_SEC:.0f} s before execute',
+                              stage='EXECUTE')
+            return
+        retry['next'] = now + 1.0
+
+    WORKER_ERROR_WORDS = ('ERROR', 'Error', 'STOP', 'rejected', 'failed', 'FAILURE', 'BLOCKED')
+
+    def _fleet_worker_error(self):
+        """Last error-like line of the newest worker log under this capture (fleet detail)."""
+        folder = getattr(self, 'multi_folder', None)
+        if folder is None:
+            return ''
+        try:
+            logs = sorted(Path(folder).rglob('*.log'), key=lambda path: path.stat().st_mtime)
+            if not logs:
+                return ''
+            lines = logs[-1].read_text(errors='replace').splitlines()
+        except OSError:
+            return ''
+        for line in reversed(lines):
+            if any(word in line for word in self.WORKER_ERROR_WORDS):
+                return line.strip()[:200]
+        return ''
+
+    def _postpone_failed_plan(self, code):
+        """11-27 user decision: a plan-only failure (nothing moved) does not stop the other arm.
+
+        The failed object goes to the end of the queue for the other arm, and this arm plans
+        another object of the queue. When both arms failed on the object, the normal pause
+        (PAUSED, report) follows without self-recovery. Fleet on or off alike. False = pause.
+        """
+        arm, failed = self.active_arm, self.active_object
+        if failed is None:
+            return False
+        other = 'right' if arm == 'left' else 'left'
+        tried = set(failed.get('plan_failed_arms', ())) | {arm}
+        failed['plan_failed_arms'] = sorted(tried)
+        if other in tried:
+            print(f'STATE: {failed["id"]} could not be planned with either arm; reporting.',
+                  flush=True)
+            key = f'pick/{failed["id"]}/PLAN'
+            self.self_recovery_used = dict(self.self_recovery_used, **{key: SELF_RECOVERY_MAX})
+            return False
+        # Nothing moved: release the pick slot as for a plan-only pause (release_pick).
+        if self.work.pick_owner == arm:
+            self.work.pick_owner = None
+        self.work.arms[arm] = 'idle'
+        failed['assigned_arm'] = other
+        candidates = [obj for obj in self.queue if arm not in obj.get('plan_failed_arms', ())]
+        if candidates:
+            best_id = self._order_by_side(candidates, [arm])[0]['id']
+            best = next(obj for obj in self.queue if obj['id'] == best_id)
+            self.queue.remove(best)
+            best['assigned_arm'] = arm
+            self.queue.insert(0, best)
+        self.queue.append(failed)
+        print(f'STATE: {arm} plan failed (exit={code}) for {failed["id"]}; it moves to {other} '
+              f'at the end of the queue'
+              + (f'; {arm} plans {self.queue[0]["id"]} next.' if candidates else '.'), flush=True)
+        self.active_object = None
+        self.active_arm = None
+        super().reset()  # per-object UI state only; queue and work state are kept
+        return True     # poll_motion starts the next object when its arm is free
+
     def _fleet_write_snapshot(self):
         goal = self.fleet_goal
         self.fleet.snapshot.write({
@@ -1306,12 +1660,22 @@ class MultiApp(sam.SAMYawApp):
             'queue_started': self.queue_started,
             'queue_left': len(self.queue),
             'held': len(self.held_jobs),
-            'paused': self.operator_paused,
+            # 11-27: back at see_center after [복구]/lock release with the goal open = PAUSED.
+            # During Phody's own retry the fleet sees the work state instead (user decision).
+            'paused': self.self_recovery is None and (
+                self.operator_paused or bool(goal and goal.get('returned'))),
+            'self_recovery': None if self.self_recovery is None else {
+                'text': f'self-recovery {self.self_recovery["n"]}/{SELF_RECOVERY_MAX}',
+                'state': self.self_recovery['state']},
             'placed': self.fleet_placed,
             'last_pause': self.fleet_last_pause,
+            'held_arms': [job['arm'] for job in self.held_jobs if not job.get('fleet_released')],
+            'gate_latched': self.fleet_gate_latched,
+            'last_error': self.fleet_last_error if self.operator_paused else '',
             'motion_busy': self.motion_child is not None,
             'place_busy': self.place_child is not None,
             'fleet_goal': None if goal is None else {
+                'order_id': goal['order_id'],
                 'captured': goal['captured'], 'requested': goal['requested'],
                 'found': goal['found'], 'placed': self.fleet_placed - goal['placed_start']},
         })
@@ -1319,6 +1683,20 @@ class MultiApp(sam.SAMYawApp):
     def poll_motion(self):
         if self.fleet is not None:
             self._fleet_tick()
+        if self.self_recovery is not None:
+            self._poll_self_recovery()
+        if self.auto_reset_pending:
+            self._poll_auto_reset()
+        if (self.fine_stop_pending is not None and not self.operator_paused and
+                not self.held_jobs and self.place_child is None):
+            # 11-27 user decision: the other arm finished its placement (no cancel, no gate
+            # latch). Now a real pause: both arms PAUSED, self-recovery (U = fine again from
+            # live video) twice, then the fleet is told.
+            pending, self.fine_stop_pending = self.fine_stop_pending, None
+            if isinstance(pending, tuple):      # ('PLAN', reason): plan failure on both arms
+                self.pause_motion(pending[1], stage=pending[0])
+            else:
+                self.pause_motion(f'auto fine paused: {pending}', stage='FINE', retry_fine=True)
         self._record_stationary_plan_wait()
         self._poll_background()
         if self.place_child is not None:
@@ -1343,12 +1721,21 @@ class MultiApp(sam.SAMYawApp):
                         if self.recovery is not None:
                             self.recovery['resolution'] = 'missed_grasp_returned'
                             self._write_recovery()
+                        if self.fleet_goal is not None:
+                            # 11-27: grippers opened at see_center -> held items are uncertain.
+                            self.fleet_goal['dropped'] = self.fleet_goal.get('dropped', 0) + len(
+                                [job for job in self.held_jobs if not job.get('fleet_released')])
                         self.held_jobs.clear()
                         self.work = WorkState()
                         self.bg = None
                         self.queue_started = False
                         stage = 'RESET_RETURN'
                     if stage == 'RESET_RETURN' and code == 0:
+                        if self.fleet_goal is not None:
+                            # 11-27 fleet note: back at see_center with the queue dropped; the
+                            # goal stays open (PAUSED) until [재개] recaptures the rest.
+                            # (Earlier today: ended PICK_FAILED, user decision (가).)
+                            self.fleet_goal['returned'] = True
                         if self.recovery is not None:
                             self.recovery['resolution'] = 'returned_for_new_capture'
                             self._write_recovery()
@@ -1368,6 +1755,9 @@ class MultiApp(sam.SAMYawApp):
             return
         if self.return_settling is not None:
             self._poll_return_settling()
+            return
+        if self.exec_retry is not None:
+            self._poll_exec_retry()
             return
         if self.queue_started:
             self._watch_pick_height()
@@ -1428,6 +1818,15 @@ class MultiApp(sam.SAMYawApp):
                 and self.fleet_spares):
             self._fleet_replan_with_spare(code)
             return
+        if code != 0 and stage == 'PLAN' and self.active_arm and self._postpone_failed_plan(code):
+            return
+        if code != 0 and stage == 'PLAN' and self.active_arm and (self.held_jobs or self.place_child):
+            # 11-27: a plan failure moved nothing; do not cancel the other arm's placement.
+            # Pause once it has finished (same as a fine stop, see poll_motion).
+            print(f'STATE: {self.active_arm} plan failed; pausing after the other arm finishes '
+                  'its placement.', flush=True)
+            self.fine_stop_pending = ('PLAN', f'PLAN worker exit={code}')
+            return
         if code != 0 and stage in ('PLAN', 'EXECUTE', 'FINE') and self.active_arm:
             retry_fine = stage == 'FINE' and code == FINE_PRE_MOTION_RETRY_EXIT
             reason = ('fine failed before motion; U retries from live video' if retry_fine
@@ -1438,6 +1837,13 @@ class MultiApp(sam.SAMYawApp):
             self.auto_execute_pending = False
             print('STATE: auto-execute next assigned arm approach.', flush=True)
             self.start_motion(execute=True)
+            if self.motion_child is None and self._joints_stale():
+                # 11-27 user decision: Pi joint state gap before execute -> retry every
+                # 1 s; after 30 s pause (U re-plans, nothing was sent).
+                now = time.monotonic()
+                self.exec_retry = {'deadline': now + EXEC_STALE_WAIT_SEC, 'next': now + 1.0}
+                print(f'STATE: joint state stale before execute; retrying every 1 s for '
+                      f'{EXEC_STALE_WAIT_SEC:.0f} s.', flush=True)
         elif (stage == 'PLAN' and code == 0 and self.plan_ready and self.queue_started
               and not self.queue_auto_started and self.args.enable_execute
               and not MULTI.concurrent_pick_place):
@@ -1520,9 +1926,26 @@ class MultiApp(sam.SAMYawApp):
         return super().start_lift()
 
     def pause_motion(self, reason='operator pressed P', *, stage=None, retry_fine=False):
+        worker_error = self._fleet_worker_error()   # newest worker log, last error line
         if self.fleet is not None:
             # Before pause_auto_fine() below, which sets auto_fine_paused on every pause.
             self.fleet_last_pause = (reason, stage, bool(getattr(self, 'auto_fine_paused', False)))
+            # 11-27 user request: the worker's last error line goes to the fleet detail.
+            self.fleet_last_error = worker_error or self.fleet_last_error
+        self.exec_retry = None
+        self.self_recovery = None
+        self.fine_stop_pending = None
+        # 11-27: the gate latches whenever a goal already sent to a Pi is canceled
+        # (execution_gate.py: B, arm lane and gripper alike). A running worker other than
+        # a plan-only one may have sent one. Fleet shows it; self-recovery skips it.
+        running = [run_stage for child, run_stage in ((self.place_child, self.place_stage),
+                                                      (self.motion_child, self.motion_stage))
+                   if child is not None and child.poll() is None and run_stage != 'PLAN']
+        latched_now = bool(running) or any(
+            word in worker_error for word in ('latched', 'physical stop'))
+        if latched_now:
+            self.fleet_gate_latched = True   # fleet shows it until fault_resolved
+        first_pause = not self.operator_paused
         if not self.operator_paused:
             stage = stage or self.motion_stage
             if stage is None and self.return_settling is not None:
@@ -1547,6 +1970,9 @@ class MultiApp(sam.SAMYawApp):
                 self._write_recovery()
             if self.args.auto_fine:
                 self.pause_auto_fine(reason)
+        if first_pause:
+            # 11-27 user decision: a gate latch is cleared by Phody itself before its own U.
+            self._schedule_self_recovery(reason, need_reset=latched_now)
         self.status = ('PAUSED - STOP REQUESTED' if self.motion_child
                        else f'PAUSED - {reason}')
         if self.recovery is not None:
@@ -1625,7 +2051,13 @@ class MultiApp(sam.SAMYawApp):
         print(f'STATE: {self.status}', flush=True)
 
     def recover_work(self):
-        if not self.operator_paused or self.recovery is None:
+        if not self.operator_paused:
+            return
+        if self.recovery is None and self.held_jobs:
+            # 11-27: concurrent mode keeps no pick recovery while an arm is in B / C.
+            self._recover_place()
+            return
+        if self.recovery is None:
             return
         if self.motion_child is not None or (self.bg and self.bg['child'] is not None):
             print('STATE: wait for workers to exit before recovery.', flush=True)
@@ -1689,6 +2121,55 @@ class MultiApp(sam.SAMYawApp):
         self.recovery = None
         super().reset()
         self.start_next_object()
+
+    # 11-27 user decision: U during B / C resumes the placement from the current pose.
+    #   interrupted B enter  -> B enter again -> C -> B return
+    #   interrupted C        -> C again (re-opening an open gripper is fine) -> B return
+    #   interrupted B return -> B return again -> next object
+    #   a stage that finished while paused -> the next stage
+    PLACE_NEXT = {'STAGE2_ENTER': 'STAGE3_PLACE', 'STAGE3_PLACE': 'STAGE2_RETURN',
+                  'STAGE2_RETURN': 'DONE'}
+
+    def _recover_place(self):
+        if (self.place_child is not None or self.motion_child is not None or
+                (self.bg and self.bg['child'] is not None)):
+            print('STATE: wait for workers to exit before recovery.', flush=True)
+            return
+        job = self.held_jobs[0]
+        side, stage, ok = job['arm'], job.get('stage'), job.get('stage_ok', False)
+        if stage is None:
+            step = 'START'          # was waiting for the basket
+        elif ok:
+            step = self.PLACE_NEXT[stage]
+        else:
+            step = stage            # run the interrupted stage again from the current pose
+        print(f'STATE: U resumes {side} placement: {stage or "-"} '
+              f'{"finished" if ok else "interrupted"} -> {step}', flush=True)
+        if self.work.arms.get(side) == 'paused':
+            self.work.arms[side] = 'placing' if self.work.basket_owner == side else 'place_waiting'
+            self.work.reasons.pop(side, None)
+        self.operator_paused = False
+        self.auto_fine_paused = False
+        self.auto_fine_reason = None
+        self.status = f'{side.upper()} PLACEMENT RESUMED - {step}'
+        try:
+            if step in ('START', 'STAGE2_ENTER'):
+                self._start_place(job)
+            elif step == 'DONE':
+                self.work.returned_from_place(side)
+                self.held_jobs.pop(0)
+                if self.held_jobs:
+                    self._start_place(self.held_jobs[0])
+                elif not self.queue and self.motion_child is None and self.active_arm is None:
+                    self.queue_started = False
+                    self.status = f'ALL {self.queue_total} OBJECTS DONE - R NEW CAPTURE'
+                    self.auto_reset_pending = True  # 11-27: back to the first screen by itself
+            else:
+                self._continue_place(job, step)
+        except (RuntimeError, OSError) as exc:
+            self.pause_motion(f'U placement resume failed: {exc}', stage=step)
+            return
+        print(f'STATE: {self.status}', flush=True)
 
     def stop_motion(self):
         super().stop_motion()

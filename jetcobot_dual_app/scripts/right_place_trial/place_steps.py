@@ -46,7 +46,7 @@ def descend(coord, case_xy, rim_z_mm, below_rim_mm, method='moveit'):
     down_mm = tip_z - (rim_z_mm - below_rim_mm)
     print(f'PLACE DESCENT start: measured {ARM} TCP mm='
           f'{[round(before.position.x*1000, 1), round(before.position.y*1000, 1), round(before.position.z*1000, 1)]} '
-          '(case center [-230, 155]).', flush=True)
+          f'(case center {np.round(case_xy*1000, 1).tolist()} mm).', flush=True)
     print(f'PLACE DESCENT: tips {tip_z-rim_z_mm:.1f} mm above rim -> '
           f'{below_rim_mm:.0f} mm below rim = {down_mm:.1f} mm down ({method}).',
           flush=True)
@@ -235,14 +235,10 @@ def solve_small_move(coord, state, target_p, target_R, iterations=15):
     return q
 
 
-def cartesian_move(coord, target, label):
-    """Short straight TCP move to target xyz (m), keeping the measured
-    orientation; joint-space interpolation sent through the combined gate."""
+def cartesian_trajectory(coord, state, target, label):
+    """Plan a short straight TCP move with the measured orientation."""
     from builtin_interfaces.msg import Duration
-    from control_msgs.action import FollowJointTrajectory
-    from rclpy.action import ActionClient
     from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
-    state = coord.state()
     p0, R0 = _fk(coord, state)
     target = np.asarray(target, dtype=float)
     distance = np.linalg.norm(target - p0)
@@ -266,6 +262,14 @@ def cartesian_move(coord, target, label):
             positions=current,
             time_from_start=Duration(sec=ns//1_000_000_000, nanosec=ns % 1_000_000_000)))
         previous = current
+    return trajectory, distance
+
+
+def cartesian_move(coord, target, label):
+    from control_msgs.action import FollowJointTrajectory
+
+    state = coord.state()
+    trajectory, distance = cartesian_trajectory(coord, state, target, label)
     coord.check_trajectory(trajectory, state, group_name='both_arms', geometric_only=True)
     print(f'{label}: {distance*1000:.1f} mm straight move via gate '
           f'({len(trajectory.points)} points).', flush=True)

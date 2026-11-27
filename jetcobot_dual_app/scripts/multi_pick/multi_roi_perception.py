@@ -68,7 +68,8 @@ class MultiROIPerception:
                              'plane_patch':(low,step,z,camera)})
         return tuple(variants)
 
-    def run(self,images,rois,cameras,folder,metadata,forced=None,cancel=None,progress=print):
+    def run(self,images,rois,cameras,folder,metadata,forced=None,cancel=None,progress=print,masks_in=None,classes=None):
+        """masks_in/classes: per-side lists from YOLO-seg (2026-11-24); None = SAM on each ROI."""
         folder=Path(folder);folder.mkdir(parents=True,exist_ok=True)
         rois=[validate_rois(r,im.shape) for r,im in zip(rois,images)]
         if len(images)!=2 or len(rois)!=2:raise ValueError('Two frozen camera images are required')
@@ -92,8 +93,10 @@ class MultiROIPerception:
         masks=[[],[]];features=[[],[]];roi_errors=[]
         for side in range(2):
             for index,roi in enumerate(rois[side]):
-                note(f'SAM {("LEFT","RIGHT")[side]} ROI {index+1}/{len(rois[side])}')
-                try:mask,sam_score=self.sam.segment_with_sam(self.predictor,images[side],roi)
+                note(f'{"YOLO" if masks_in is not None else "SAM"} {("LEFT","RIGHT")[side]} ROI {index+1}/{len(rois[side])}')
+                try:
+                    if masks_in is not None:mask=masks_in[side][index]
+                    else:mask,sam_score=self.sam.segment_with_sam(self.predictor,images[side],roi)
                 except RuntimeError as exc:
                     masks[side].append(np.zeros(images[side].shape[:2],np.uint8));features[side].append([])
                     roi_errors.append({'side':('left','right')[side],'roi':index+1,'error':str(exc)});continue
@@ -119,6 +122,10 @@ class MultiROIPerception:
         for i,left_variants in enumerate(features[0]):
             for j,right_variants in enumerate(features[1]):
                 note(f'MATCH L{i+1} - R{j+1} ({i*len(rois[1])+j+1}/{scores.size})')
+                if classes is not None and classes[0][i]!=classes[1][j]:
+                    pair_reports.append({'left_index':i,'right_index':j,'matches':0,'valid_points':0,
+                        'eligible':False,'reason':f'class mismatch {classes[0][i]} vs {classes[1][j]}'})
+                    continue
                 trials=[]
                 variants=[(l,r) for l in left_variants for r in right_variants]
                 rectified=self.rectified_pair(images,[masks[0][i],masks[1][j]],cameras)
@@ -144,9 +151,17 @@ class MultiROIPerception:
                     epi=epipolar_errors(p0,p1,cameras,self.sam.K,self.sam.DIST)
                     top=self.args.floor_z_m+self.args.object_height_mm/1000.
                     geometric=tri['valid']&(epi<=self.args.epipolar_px)
+                    # 2026-11-24: right-arm return scatters 1-2 deg; the camera pose then
+                    # biases triangulated height by 15-35 mm. Center the height window on
+                    # this pair's measured stereo height when it stays near the prior.
+                    max_offset=getattr(self.args,'max_height_offset_mm',0.)/1000.
+                    if max_offset>0 and geometric.sum()>=self.args.min_valid_points:
+                        measured=float(np.median(tri['xyz_m'][geometric,2]))
+                        if abs(measured-top)<=max_offset:top=measured
                     valid=geometric&(np.abs(tri['xyz_m'][:,2]-top)<=self.args.height_tolerance_mm/1000.)
                     tri['valid']=valid;count=int(valid.sum());ratio=int(geometric.sum())/max(1,len(p0))
                     trial={'left_index':i,'right_index':j,'rotation_deg':right['angle'],'matches':len(p0),
+                           'top_height_used_mm':top*1000,
                            'matching_mode':right.get('mode','image_rotation'),
                            'valid_points':count,'valid_ratio':ratio,'eligible':False,'reason':'too few geometric top-surface matches'}
                     if count>=self.args.min_valid_points and ratio>=self.args.min_valid_ratio:
@@ -191,7 +206,8 @@ class MultiROIPerception:
         check()
         associations=associate(scores,forced,self.args.assignment_margin)
         report={'schema':'jetcobot_multi_roi_v1','frame':'right_base_link','capture':metadata,
-                'rois':{'left':rois[0],'right':rois[1]},'known_priors':{
+                'rois':{'left':rois[0],'right':rois[1]},'segmentation':'yolo' if masks_in is not None else 'sam',
+                'classes':classes,'known_priors':{
                     'object_height_mm':self.args.object_height_mm,
                     'floor_z_m':self.args.floor_z_m,'top_height_tolerance_mm':self.args.height_tolerance_mm},
                 'association':associations,'pair_trials':pair_reports,'roi_errors':roi_errors,'objects':[],
@@ -231,7 +247,9 @@ class MultiROIPerception:
             tri=self.sam.triangulate_matches(p0,p1,cameras[0],cameras[1],
                                              self.args.single_reproj_px,self.args.single_min_angle_deg)
             single,single_msg=self.sam.estimate_grasp_preview([masks[0][i],masks[1][j]],cameras,tri,
-                                                             self.args.single_min_valid_points)
+                                                             self.args.single_min_valid_points,
+                                                             footprint_ranges=(self.args.length_range_m,
+                                                                               self.args.width_range_m))
             yaw_by_side=None;yaw_camera=None
             if single is not None:
                 preview=dict(preview,center_xyz_m=np.asarray(single['center_xyz_m'],float),
@@ -245,7 +263,40 @@ class MultiROIPerception:
                          f'({single["source"]})')
             else:
                 progress(f'#{i+1}: mask footprint unavailable ({single_msg}); using feature rectangle')
+            if getattr(self.args,'center_source','stereo')=='left':
+                # 2026-11-24: the right camera pose drifts with the right-arm return
+                # (1-2 deg, wrong hand-eye) and biases stereo height/XY by 10-20 mm.
+                # Use the LEFT mask on the known top plane for the center; stereo
+                # is kept for association and yaw.
+                top=self.args.floor_z_m+self.args.object_height_mm/1000.
+                contours,_=cv2.findContours(masks[0][i].astype(np.uint8),cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
+                if contours:
+                    pixels=max(contours,key=cv2.contourArea).reshape(-1,2).astype(float)
+                    world,ok=rays_on_plane(pixels,cameras[0],self.sam.K,self.sam.DIST,top)
+                    if int(np.sum(ok))>=20:
+                        (cx,cy),(rw,rh),_=cv2.minAreaRect((world[ok][:,:2]*1000).astype(np.float32))
+                        length_mm, width_mm = max(rw, rh), min(rw, rh)
+                        min_length, max_length = self.args.length_range_m
+                        min_width, max_width = self.args.width_range_m
+                        if (min_length <= length_mm / 1000 <= max_length
+                                and min_width <= width_mm / 1000 <= max_width):
+                            stereo=np.asarray(preview['center_xyz_m'],float)
+                            mono=np.array([cx/1000.,cy/1000.,top])
+                            shift=(mono-stereo)*1000
+                            progress(f'#{i+1}: LEFT-plane center {np.round(mono*1000,1).tolist()} mm '
+                                     f'(stereo {np.round(stereo*1000,1).tolist()}, shift {np.round(shift,1).tolist()}), '
+                                     f'footprint {length_mm:.0f} x {width_mm:.0f} mm')
+                            preview=dict(preview,center_xyz_m=mono,
+                                         warnings=list(preview['warnings'])+[
+                                             f'center from left mask on z={top*1000:.0f} mm plane; '
+                                             f'stereo center differed by {np.round(shift,1).tolist()} mm'])
+                        else:
+                            warning = (f'left mask footprint {length_mm:.0f} x {width_mm:.0f} mm '
+                                       'outside configured dimensions; kept validated center')
+                            progress(f'#{i+1}: {warning}')
+                            preview = dict(preview, warnings=[*preview['warnings'], warning])
             obj={'id':f'object_{i+1}','left_roi':i+1,'right_roi':j+1,
+                 'class_name':classes[0][i] if classes is not None else None,
                  'yaw_by_side':yaw_by_side,'selected_yaw_camera':yaw_camera,
                  'center_xyz_mm':(preview['center_xyz_m']*1000).tolist(),
                  'object_long_yaw_deg':float(preview['object_long_yaw_deg']),

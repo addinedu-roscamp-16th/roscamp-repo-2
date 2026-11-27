@@ -11,6 +11,13 @@ from motion_math import ALL_JOINTS,JOINTS,SIDES,sampled_positions
 from move_right_sam_yaw import closing_axis_to_tcp_orientation, mat_to_quat, r_z
 
 
+# 2026-11-25: NOT USED for the approach any more (user decision). Both arms now
+# aim the gripper straight down (closing_axis_to_tcp_orientation); auto fine
+# levelling (FINE LEVEL) squares it afterwards. Kept for possible later use:
+# right_manual_tcp_orientation() below = manual pose direction (3.2 deg tilt)
+# x RIGHT_ARRIVAL_COMPENSATION (about 5.5 deg in total), see
+# docs/worklog/오른팔_이슈_공유정리_2026-11-17.md.
+#
 # Right gripper direction from the user's manually squared pose (2026-11-17).
 # SDK joints [49.57, -37.44, -69.69, 16.78, -3.25, -35.24] degrees were
 # converted to right_TCP rotation with the captured JetCobot dual URDF.
@@ -47,6 +54,25 @@ def right_manual_tcp_orientation(closing_yaw_deg, closing_axis, yaw_offset_deg):
 class StopRequested(Exception):pass
 
 
+class GoalRejectedNoMotion(RuntimeError):
+    """The gate refused the first phase; no arm command was forwarded."""
+
+
+# Same value as the Pi bridge (hardware_bridge.py max_move_deg default, trajectory_guard.py):
+# the Pi rejects a goal whose point moves a joint more than this from the current pose.
+PI_MAX_MOVE_DEG = 180.0
+
+
+def pi_move_limit_error(trajectory, start):
+    """Name of the first joint the Pi would reject (> PI_MAX_MOVE_DEG from start), else None."""
+    names = list(trajectory.joint_names)
+    for point in trajectory.points:
+        for name, value in zip(names, point.positions):
+            if abs(float(value) - start[name]) > math.radians(PI_MAX_MOVE_DEG):
+                return name
+    return None
+
+
 def load_target(path,above_mm=40.,max_age=180.,yaw_camera='auto'):
     data=json.loads(Path(path).read_text())
     if data.get('frame')!='right_base_link':raise ValueError('Target must use right_base_link')
@@ -74,8 +100,7 @@ class DualArmCoordinator:
         from rclpy.action import ActionClient
         from sensor_msgs.msg import JointState
         from control_msgs.action import FollowJointTrajectory
-        from moveit_msgs.srv import GetMotionPlan,GetStateValidity
-        from tf2_ros import Buffer,TransformListener
+        from moveit_msgs.srv import GetMotionPlan, GetPositionFK, GetStateValidity
         self.ros=rclpy;self.stop=False
         signal.signal(signal.SIGINT,lambda *_:setattr(self,'stop',True))
         signal.signal(signal.SIGTERM,lambda *_:setattr(self,'stop',True))
@@ -84,7 +109,7 @@ class DualArmCoordinator:
         self.measured=None;self.received=0.;self.velocity=velocity;self.acceleration=acceleration
         self.plan_time=plan_time;self.max_plans=max_plans;self.planning_budget=planning_budget
         self.sub=self.node.create_subscription(JointState,'/jetcobot_dual/joint_states',self.receive,10)
-        self.buffer=Buffer();self.listener=TransformListener(self.buffer,self.node)
+        self.fk = self.node.create_client(GetPositionFK, '/jetcobot_dual/compute_fk')
         self.planner=self.node.create_client(GetMotionPlan,'/jetcobot_dual/plan_kinematic_path')
         self.validity=self.node.create_client(GetStateValidity,'/jetcobot_dual/check_state_validity')
         self.clients={s:ActionClient(self.node,FollowJointTrajectory,f'/jetcobot_dual/guarded_{s}_controller/follow_joint_trajectory') for s in SIDES}
@@ -136,15 +161,26 @@ class DualArmCoordinator:
         req=GetStateValidity.Request();req.robot_state=self.robot_state(values)
         return self.wait(self.validity.call_async(req),timeout=5).valid
 
-    def distance(self,side,position):
-        from rclpy.time import Time
-        deadline=time.monotonic()+4
-        while time.monotonic()<deadline:
-            self.spin()
-            if self.buffer.can_transform('right_base_link',f'{side}_TCP',Time()):
-                t=self.buffer.lookup_transform('right_base_link',f'{side}_TCP',Time()).transform.translation
-                return float(np.linalg.norm(position-[t.x,t.y,t.z]))
-        raise RuntimeError(f'Missing {side}_TCP transform')
+    def tcp_distances(self, current, position):
+        from moveit_msgs.msg import MoveItErrorCodes
+        from moveit_msgs.srv import GetPositionFK
+
+        if not self.fk.wait_for_service(timeout_sec=5.0):
+            raise RuntimeError('Missing service /jetcobot_dual/compute_fk')
+        request = GetPositionFK.Request()
+        request.header.frame_id = 'right_base_link'
+        request.fk_link_names = [f'{side}_TCP' for side in SIDES]
+        request.robot_state = self.robot_state(current)
+        result = self.wait(self.fk.call_async(request), timeout=5)
+        poses = dict(zip(result.fk_link_names, result.pose_stamped))
+        if (result.error_code.val != MoveItErrorCodes.SUCCESS
+                or any(link not in poses for link in request.fk_link_names)):
+            raise RuntimeError(f'MoveIt could not compute both TCP poses (code={result.error_code.val})')
+        distances = {}
+        for side in SIDES:
+            p = poses[f'{side}_TCP'].pose.position
+            distances[side] = float(np.linalg.norm(position - np.array([p.x, p.y, p.z])))
+        return distances
 
     def yield_candidates(self,side,current):
         result=[('hold',{n:current[n] for n in JOINTS[side]})]
@@ -175,7 +211,7 @@ class DualArmCoordinator:
         return result
 
     def plan_pose_goal(self,side,current,position,quaternion,
-                       position_tolerance_m=.005,orientation_tolerance_deg=8.):
+                       position_tolerance_m=.005,orientation_tolerance_deg=8., *, plan_time=None):
         from moveit_msgs.srv import GetMotionPlan
         from moveit_msgs.msg import Constraints,PositionConstraint,OrientationConstraint
         from geometry_msgs.msg import Pose,Quaternion
@@ -183,7 +219,8 @@ class DualArmCoordinator:
         req=GetMotionPlan.Request();r=req.motion_plan_request
         r.group_name=f'arm_{side}';r.pipeline_id='ompl';r.planner_id='RRTConnectkConfigDefault'
         r.start_state=self.robot_state(current);r.num_planning_attempts=2
-        r.allowed_planning_time=self.plan_time
+        allowed_time = self.plan_time if plan_time is None else plan_time
+        r.allowed_planning_time = allowed_time
         r.max_velocity_scaling_factor=self.velocity;r.max_acceleration_scaling_factor=self.acceleration
         pc=PositionConstraint();pc.header.frame_id='right_base_link'
         pc.link_name=f'{side}_TCP';pc.weight=1.0
@@ -203,7 +240,7 @@ class DualArmCoordinator:
         oc.weight=1.0
         r.goal_constraints=[Constraints(position_constraints=[pc],orientation_constraints=[oc])]
         started=time.monotonic()
-        result=self.wait(self.planner.call_async(req),timeout=self.plan_time*2+10).motion_plan_response
+        result=self.wait(self.planner.call_async(req),timeout=allowed_time*2+10).motion_plan_response
         print(f'POSE PLAN {side}: code={result.error_code.val}, time={time.monotonic()-started:.1f}s',flush=True)
         if result.error_code.val!=1:return None
         if set(result.trajectory.joint_trajectory.joint_names)!=set(JOINTS[side]):
@@ -228,8 +265,73 @@ class DualArmCoordinator:
             if not self.valid(state):return 'drag'
         return 'endpoint'
 
+    @staticmethod
+    def wrist_travel_deg(side, state, planned):
+        jt = planned.trajectory.joint_trajectory
+        wrist = f'{side}_6_Joint'
+        index = list(jt.joint_names).index(wrist)
+        positions = [state[wrist], *(point.positions[index] for point in jt.points)]
+        return math.degrees(sum(abs(q - p) for p, q in zip(positions, positions[1:])))
+
+    def approach_goals(self, side, state, target, closing_axis, yaw_offset,
+                       allow_gripper_tilt, deadline, *, joint_goal=False):
+        """Keep the object target fixed. Auto fine may start from a nearby TCP pose."""
+        position = target['position']
+        yaw = target['yaw']
+        tolerance = 8.0 if allow_gripper_tilt else 2.0
+        angles = (0.0, 180.0)[:self.max_plans]
+        def solve(point, quaternion, *, plan_time=None):
+            if not joint_goal:
+                return self.plan_pose_goal(side, state, point, quaternion,
+                                           orientation_tolerance_deg=tolerance, plan_time=plan_time)
+            from joint_goal import joint_goal_result, pose_joint_goal
+            goal = pose_joint_goal(self.node, self.wait, state, side, point, quaternion)
+            return joint_goal_result(state, goal) if goal is not None else None
+
+        found_nominal = False
+        for flip in angles:
+            if time.monotonic() >= deadline:
+                return
+            # 2026-11-25: right arm also straight down. Previous right-arm target:
+            #   quaternion = right_manual_tcp_orientation(yaw + flip, closing_axis, yaw_offset)
+            quaternion, _ = closing_axis_to_tcp_orientation(yaw + flip, closing_axis, yaw_offset)
+            result = solve(position, quaternion)
+            if result is not None:
+                found_nominal = True
+                yield result, yaw + flip, [0.0, 0.0]
+
+        # TEMP (2026-11-25, B6): right arm side-approach fallback. 14:27 right target
+        # [-159.6, 80.8, 63.0] mm had no IK at the requested gripper yaw (J1 at +168 deg).
+        # Tries TCP 15/20 mm along the tangent; live fine alignment uses the real object.
+        # Enabled by multi_object.allow_right_approach_fallback (sam_multi_real, auto fine).
+        # Revisit / remove later.
+        job = target.get('data', {}).get('multi_object', {})
+        azimuth = math.degrees(math.atan2(position[1], position[0]))
+        if (found_nominal or side != 'right' or not job.get('allow_right_approach_fallback')
+                or not 145 <= azimuth <= 180):
+            return
+        tangent = np.array([position[1], -position[0], 0.0]) / np.linalg.norm(position[:2])
+        for inset_mm in (15.0, 20.0):
+            offset = tangent * inset_mm / 1000
+            for flip in reversed(angles):
+                if time.monotonic() >= deadline:
+                    return
+                # 2026-11-25: straight down (was right_manual_tcp_orientation).
+                orientation, _ = closing_axis_to_tcp_orientation(yaw + flip, closing_axis, yaw_offset)
+                result = solve(position + offset, orientation, plan_time=1.5)
+                if result is None:
+                    continue
+                travel = self.wrist_travel_deg(side, state, result)
+                offset_mm = (offset[:2] * 1000).tolist()
+                print(f'RIGHT APPROACH CANDIDATE: calibrated TCP, '
+                      f'XY offset {np.round(offset_mm, 1).tolist()} mm, J6 travel {travel:.1f} deg. '
+                      'Live fine alignment uses the original object.', flush=True)
+                yield result, yaw + flip, offset_mm
+                if travel <= 90:
+                    return
+
     def choose(self,target,closing_axis='x',yaw_offset=0.,peer_mode='auto',allow_gripper_tilt=False,
-               required_arm=None,start_override=None):
+               required_arm=None,start_override=None, *, joint_goal=False):
         if required_arm not in (None, 'left', 'right'):
             raise ValueError(f'Invalid required arm: {required_arm}')
         current=self.ready()
@@ -237,11 +339,13 @@ class DualArmCoordinator:
             # Plan from a future state (e.g. the placing arm back at see_center).
             current.update({n:float(v) for n,v in start_override.items()})
         if not self.valid(current):raise RuntimeError('Current dual-arm state is in collision')
-        distances={side:self.distance(side,target['position']) for side in SIDES}
+        distances = self.tcp_distances(current, target['position'])
         deadline=time.monotonic()+self.planning_budget
         strategies=(['hold'] if peer_mode=='hold' else
                     ['small_yield','wide_yield','home_fallback'] if peer_mode=='yield' else
                     ['hold','small_yield','wide_yield','home_fallback'])
+        if joint_goal:
+            strategies = ['hold']
         for strategy in strategies:
             if time.monotonic()>=deadline:break
             candidates=[]
@@ -263,18 +367,9 @@ class DualArmCoordinator:
                     traj=peer_result.trajectory.joint_trajectory
                     phases.append({'side':peer,'result':peer_result,'start':projected.copy(),'route':'auto'})
                     projected.update(zip(traj.joint_names,traj.points[-1].positions))
-                for flip in (0.0,180.0)[:self.max_plans]:
-                    if time.monotonic()>=deadline:break
-                    if side == 'right':
-                        quaternion=right_manual_tcp_orientation(
-                            target['yaw']+flip,closing_axis,yaw_offset)
-                    else:
-                        quaternion,_=closing_axis_to_tcp_orientation(
-                            target['yaw']+flip,closing_axis,yaw_offset)
-                    planned=self.plan_pose_goal(
-                        side,projected,target['position'],quaternion,
-                        orientation_tolerance_deg=8. if allow_gripper_tilt else 2.)
-                    if planned is None:continue
+                for planned, yaw_candidate, inset in self.approach_goals(
+                        side, projected, target, closing_axis, yaw_offset,
+                        allow_gripper_tilt, deadline, joint_goal=joint_goal):
                     sequence=phases+[{'side':side,'result':planned,'start':projected.copy(),'route':'auto'}]
                     cost=0.
                     for phase in sequence:
@@ -284,10 +379,13 @@ class DualArmCoordinator:
                             values=np.array(point.positions)
                             cost+=float(np.sum(np.abs(values-previous)))*(3 if phase['side']==peer else 1)
                             previous=values
+                    wrist_travel = self.wrist_travel_deg(side, projected, planned)
                     candidates.append({'selected_arm':side,'yield_strategy':strategy,'phases':sequence,
                                        'cost_deg':math.degrees(cost),'distance_m':distances[side],
-                                       'yaw_deg':target['yaw']+flip,'start':current.copy()})
-                    print(f'CANDIDATE {side} peer={strategy} cost={math.degrees(cost):.1f} deg',flush=True)
+                                       'yaw_deg':yaw_candidate,'approach_offset_xy_mm':inset,
+                                       'j6_travel_deg':wrist_travel,'start':current.copy()})
+                    print(f'CANDIDATE {side} peer={strategy} cost={math.degrees(cost):.1f} deg, '
+                          f'J6 travel={wrist_travel:.1f} deg', flush=True)
             # Prefer the arm nearer to the object when its plan costs at most
             # 20% more than the cheapest. A slightly cheaper far arm reached
             # across the table, tilted 5.7 deg in fine alignment and could not
@@ -296,19 +394,38 @@ class DualArmCoordinator:
             def preference(item):
                 near_band=item['cost_deg']<=1.2*min_cost
                 return (0,item['distance_m'],item['cost_deg']) if near_band else (1,0.,item['cost_deg'])
-            if candidates:
-                best=min(candidates,key=preference)
-                print(f'ARM CHOICE: {best["selected_arm"]} (distance {best["distance_m"]*1000:.0f} mm, '
-                      f'cost {best["cost_deg"]:.1f} deg; cheapest {min_cost:.1f} deg, '
-                      'nearer arm preferred within +20%)',flush=True)
-            for chosen in sorted(candidates,key=preference):
+            arm_scores = {}
+            for item in candidates:
+                side = item['selected_arm']
+                score = preference(item)
+                arm_scores[side] = min(arm_scores.get(side, score), score)
+            # TEMP (2026-11-25, B7): within the preferred arm, fewer J6 degrees first,
+            # then smaller side offset (B6), then cost. Before: nearer arm + cost only.
+            # Revisit later.
+            def path_preference(item):
+                return (arm_scores[item['selected_arm']], item['j6_travel_deg'],
+                        math.hypot(*item['approach_offset_xy_mm']), item['cost_deg'])
+            for chosen in sorted(candidates, key=path_preference):
+                # 11-27: skip a candidate the Pi would reject (left_3_Joint > 180 deg in one goal
+                # after TEMP B7 preferred less J6 travel over cost). Same limit as the Pi.
+                over = next(filter(None, (pi_move_limit_error(
+                    phase['result'].trajectory.joint_trajectory, phase['start'])
+                    for phase in chosen['phases'])), None)
+                if over is not None:
+                    print(f'REJECT {chosen["selected_arm"]} {strategy}: {over} would move more than '
+                          f'{PI_MAX_MOVE_DEG:g} deg in one goal (Pi limit)', flush=True)
+                    continue
                 try:
                     for phase in chosen['phases']:
                         self.check_trajectory(phase['result'].trajectory.joint_trajectory,phase['start'])
                 except RuntimeError as exc:
                     print(f'REJECT {chosen["selected_arm"]} {strategy}: {exc}',flush=True)
                     continue
+                print(f'ARM CHOICE: {chosen["selected_arm"]} (distance {chosen["distance_m"]*1000:.0f} mm, '
+                      f'cost {chosen["cost_deg"]:.1f} deg; J6 travel {chosen["j6_travel_deg"]:.1f} deg)', flush=True)
                 return chosen
+        if joint_goal:
+            raise RuntimeError(f'No collision-checked direct IK goal at TCP {target["position"] * 1000} mm')
         raise RuntimeError(f'No MoveIt goal for either arm at TCP {np.round(target["position"]*1000,1).tolist()} mm; '
                            f'checked until {self.planning_budget:g}s budget. See POSE PLAN codes and MoveIt log.')
 
@@ -339,28 +456,62 @@ class DualArmCoordinator:
         # same single-arm trajectory to the combined controller (the gate holds
         # the other arm at its measured pose). 2026-11-19.
         coordinated=len(response.values)>2 and response.values[2].bool_value
-        if coordinated and 'both' not in self.clients:
-            from rclpy.action import ActionClient
+        from rclpy.action import ActionClient
+        joint_goal = chosen.get('joint_goal', False)
+        if joint_goal:
+            if not coordinated:
+                raise RuntimeError('Direct joint goals require the coordinated execution gate')
+            from joint_goal import JOINT_GOAL_ACTION, endpoint_request
+            self.clients['joint_goal'] = ActionClient(self.node, FollowJointTrajectory,
+                                                      JOINT_GOAL_ACTION)
+        elif coordinated and 'both' not in self.clients:
             self.clients['both']=ActionClient(self.node,FollowJointTrajectory,
                 '/jetcobot_dual/guarded_both_controller/follow_joint_trajectory')
         for index,phase in enumerate(chosen['phases'],1):
             side=phase['side'];trajectory=phase['result'].trajectory.joint_trajectory
             current=self.state();names=JOINTS[side]
-            drift=max(abs(math.degrees(current[n]-phase['start'][n])) for n in ALL_JOINTS)
+            # Joint goals: own arm only, and the gate checks this arm's path
+            # against the other arm's whole remaining path (it may be moving).
+            checked=JOINTS[side] if joint_goal else ALL_JOINTS
+            drift=max(abs(math.degrees(current[n]-phase['start'][n])) for n in checked)
             if drift>state_tolerance_deg:raise RuntimeError(f'Start state changed {drift:.1f} deg; replan')
-            self.check_trajectory(trajectory,current)
-            actual_route='endpoint or drag (sdk_drag_hybrid selects from live collision scene)'
-            client=self.clients['both' if coordinated else side]
+            if not joint_goal:
+                self.check_trajectory(trajectory,current)
+            if joint_goal:
+                goal = dict(zip(trajectory.joint_names, trajectory.points[-1].positions))
+                request = endpoint_request(goal)
+                actual_route = 'direct joint goal'
+                client = self.clients['joint_goal']
+            else:
+                request = FollowJointTrajectory.Goal(trajectory=trajectory)
+                actual_route = 'endpoint or drag (sdk_drag_hybrid selects from live collision scene)'
+                client = self.clients['both' if coordinated else side]
             if not client.wait_for_server(timeout_sec=8):raise RuntimeError(f'{side} guarded controller unavailable')
             print(f'EXECUTE {index}/{len(chosen["phases"])} {side} {actual_route}',flush=True)
-            if self.stop:raise StopRequested()
-            try:
-                handle=self.wait(client.send_goal_async(FollowJointTrajectory.Goal(trajectory=trajectory)),
-                                 12,stoppable=False)
-            except Exception:
-                print(f'{side}: goal acceptance unknown; check robot and gate.',flush=True)
-                raise
-            if not handle.accepted:raise RuntimeError(f'{side} goal rejected')
+            # 2026-11-24: the gate rejects (without forwarding anything) when a
+            # measured arm is >1.5 s old; the left feedback has ~1.5 s gaps at 2 Hz.
+            # A rejection moved nothing, so wait for fresh joints and resend.
+            for attempt in range(1,6):
+                if self.stop:raise StopRequested()
+                try:
+                    handle=self.wait(client.send_goal_async(request),
+                                     12,stoppable=False)
+                except Exception:
+                    print(f'{side}: goal acceptance unknown; check robot and gate.',flush=True)
+                    raise
+                if handle.accepted:break
+                print(f'{side} goal rejected by the gate (attempt {attempt}/5, nothing sent); '
+                      'waiting for fresh feedback and resending.',flush=True)
+                if attempt==5:
+                    error=GoalRejectedNoMotion if index==1 else RuntimeError
+                    raise error(f'{side} goal rejected 5 times; nothing was sent. Check the gate '
+                                'log (fault latch / stale feedback)')
+                time.sleep(1.0)
+                current=self.state()
+                drift=max(abs(math.degrees(current[n]-phase['start'][n])) for n in checked)
+                if drift>state_tolerance_deg:raise RuntimeError(f'Start state changed {drift:.1f} deg; replan')
+                if not joint_goal:
+                    self.check_trajectory(trajectory,current)
             self.handles[side]=handle
             result=handle.get_result_async()
             try:
@@ -378,8 +529,12 @@ class DualArmCoordinator:
                 raise
             finally:self.handles.pop(side,None)
             if reply.status!=GoalStatus.STATUS_SUCCEEDED or reply.result.error_code!=0:
-                raise RuntimeError(f'{side} failed: status={reply.status}, error={reply.result.error_code}, '
-                                   f'detail={reply.result.error_string}')
+                # 11-27: the gate reports a Pi rejection as '... Pi rejected the joint goal; no
+                # motion sent'. Nothing moved, so on the first phase U may re-plan (as above).
+                error=(GoalRejectedNoMotion if index==1 and
+                       'no motion sent' in str(reply.result.error_string) else RuntimeError)
+                raise error(f'{side} failed: status={reply.status}, error={reply.result.error_code}, '
+                            f'detail={reply.result.error_string}')
             expected=dict(zip(trajectory.joint_names,trajectory.points[-1].positions))
             reached=self.state()
             error=max(abs(math.degrees(reached[n]-expected[n])) for n in expected)
