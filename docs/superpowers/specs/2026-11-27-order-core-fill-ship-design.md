@@ -27,6 +27,7 @@
 **범위 밖 (2차)**
 - 격리 `on_robot_isolated`, 치움 `on_robot_removed`, 다시 투입 `on_robot_reinstated` (지금처럼 빈 함수)
 - 늦은 결과 `ArmLate`의 수량 반영(1차는 알림만, 4.6)
+  - 메모: HELD가 될 때 진행분(`progress`)은 이미 `placed`에 들어 있으니(`ArmFault`가 옮김), 늦은 결과를 더할 때는 그만큼을 빼고 셉니다.
 - 운반 건 명령 `on_trip_command`(`resume_fill` · `force_ship` · `force_partial` · `return_to_shelf` · `resume_held` · `requeue_trip`), `on_force_ship`(지금처럼 `NOT_IMPLEMENTED`)
 - 그래서 1차에서 `FILLING_PAUSE`와 `HELD` 건은 그 상태로 멈춰 있고, Pode도 작업대에 묶여 있습니다.
 
@@ -114,6 +115,7 @@
 - `reason`이 있으면 그 작업대를 막힌 집합에 넣고, 비어 있으면 뺍니다.
 - WORK가 막혀 있으면 열린 호출 맞추기(`_match_calls`)는 대기 주문 수와 상관없이 열린 호출을 0으로 맞춥니다(열린 것은 `CancelDispatchCmd`). 다시 열리면 지금 규칙대로 맞춥니다.
 - 이미 묶인 Pode는 그대로 기다립니다. 담기 목표는 ArmJobs가 막힌 동안 `ArmDeclined`로 돌려줍니다.
+- 막힌 동안 코어는 담기를 묻지 않고(`step`이 건너뜀), `ArmStationBlocked` 풀림 뒤 다음 `step`에서 다시 묻습니다. 묻기 직전에 막혀 거절된 담기도 같습니다.
 - 막힘을 바꿀 때 `EventOut`은 내지 않습니다(ArmJobs가 이미 냄).
 
 ### 4.6 주문판 (`on_order_board`, 2단계의 남은 부분)
