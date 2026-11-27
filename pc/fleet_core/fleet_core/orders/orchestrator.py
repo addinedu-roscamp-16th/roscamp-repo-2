@@ -15,13 +15,23 @@ from dataclasses import dataclass
 from fleet_core.common.commands import (
     FILL,
     FORCE_NOT_IMPLEMENTED,
+    CANCELED,
     NO_ROBOT,
     SWAP,
     TRIP_ASSIGNED,
+    TRIP_FILLING,
+    TRIP_TRANSPORTING,
+    ArmDeclined,
+    ArmFailedCmd,
+    ArmFillCmd,
+    ArmFillProgress,
+    ArmFillResult,
+    ArmResetCmd,
     CancelDispatchCmd,
     DispatchCmd,
     EventOut,
     ReleaseCmd,
+    ReportOrderCmd,
     ReportTripCmd,
 )
 
@@ -92,7 +102,8 @@ class OrderOrchestrator:
         self._robots = {name: _RobotRecord() for name in robots}
         self._final = set()  # 최종 보고(SHIPPED/PARTIAL/CANCELED)를 낸 주문 id
         self._holds = {}  # 보류 주문 id -> (로봇, 사유)
-        # 교환(SWAP) 스테이션. 이 작업에서는 쓰지 않고 출고 이동을 채우는 작업이 쓴다.
+        # 교환(SWAP) 스테이션 = OUTBOUND. 채우기 마무리의 _start_outbound가 DispatchCmd 목적지로 쓰고,
+        # 그 결과 처리와 교환 명령은 Task 3(출고)이 쓴다.
         self._outbound = next((sid for sid, st in stations.items() if st.action == SWAP), "")
         self._out = []
 
@@ -173,6 +184,38 @@ class OrderOrchestrator:
         report: ArmFillResult, ArmSwapResult, ArmDeclined, ArmLost, ArmLate, ArmFault 가운데 하나.
         낼 수 있는 출력: ArmFailedCmd, ArmResetCmd, ReportOrderCmd, ReleaseCmd, EventOut.
         """
+        # 설계 4.4: 모르는 로봇 이름은 무시. 이번 작업은 ArmDeclined · ArmFillResult · ArmFillProgress만
+        # 받고, 나머지 보고(교환 결과, 고장, 재개 등)는 Task 4 몫이라 일부러 아무것도 하지 않는다.
+        rec = self._robots.get(getattr(report, "robot", None))
+        if rec is None:
+            return
+        if isinstance(report, ArmDeclined):
+            # 설계 4.4: 팔이 거절하면 asked만 비워 다음 step이 다시 묻게 한다. 보고는 내지 않는다.
+            if rec.asked in (ASK_FILL, ASK_SWAP):
+                rec.asked = ""
+        elif isinstance(report, ArmFillResult):
+            b = rec.order
+            if b is None:
+                return  # 묶인 주문이 없으면(예: 치운 뒤 늦게 온 결과) 더할 곳이 없다
+            rec.asked = ""
+            # 결과의 placed는 이번 목표 몫 전체라 진행 값을 비워야 같은 상품이 두 번 더해지지 않는다(전역 제약 2).
+            # placed_confirmed는 쓰지 않는다(설계 4.4: Phody는 둘을 같게 보냄).
+            for item, n in report.placed.items():
+                b.placed[item] = b.placed.get(item, 0) + n
+            b.progress = {}
+            if report.success:
+                # pseudocode 4단계: 성공이면 못 담은 것을 확정한다(없으면 빈 dict라 전량 출고).
+                b.missing = self._remaining_of(b.items, b.placed)
+            else:
+                # 재시도 여부는 ArmJobs가 정한다(NOT_READY만). 여기서는 알리기만 하고 missing은 건드리지 않는다.
+                self._out.append(ArmFailedCmd(report.robot))
+        elif isinstance(report, ArmFillProgress):
+            b = rec.order
+            if b is None:
+                return
+            # 설계 4.4: 진행은 지금 목표의 것이라 덮어쓴다. 보고의 missing은 실제로 못 담은 것(order.missing)만.
+            b.progress = dict(report.placed)
+            self._report_trip(report.robot, TRIP_FILLING)
 
     # ---- 운영자 조작 ----
     def on_force_ship(self, order_id) -> tuple[bool, str]:
@@ -212,12 +255,84 @@ class OrderOrchestrator:
         낼 수 있는 출력: ArmFillCmd, ArmSwapCmd, ArmResetCmd, DispatchCmd, ReleaseCmd,
         ReportOrderCmd, RobotFaultCmd, EventOut.
         """
+        rec = self._robots.get(robot)
+        # 설계 4.2: held면 멈춤, asked가 있으면 팔 답을 기다림. 모르는 로봇은 무시.
+        if rec is None or rec.held or rec.asked:
+            return
+        b = rec.order
+        # stage ""(빈 바구니 받으러 가기, OUTBOUND 재시도)와 SWAPPING은 Task 3 몫이라 여기서는 건드리지 않는다.
+        if rec.stage != FILLING or b is None:
+            return
+        remaining = self._remaining(b)
+        if remaining:
+            # pseudocode 4단계: 남은 것을 팔에 요청. FILLING 보고는 주문마다 첫 요청에서 한 번만
+            # (재요청은 ArmDeclined · 실패 재시도 뒤에도 같은 값이라 다시 내지 않음, 전역 제약 3).
+            rec.asked = ASK_FILL
+            if not b.reported_filling:
+                b.reported_filling = True
+                self._report_trip(robot, TRIP_FILLING)
+            self._out.append(ArmFillCmd(robot, self._work, b.order_id, remaining))
+            return
+        self._finish_fill(robot)
 
     # ---- 출력과 조회 ----
     def take_output(self) -> list:
         """쌓아 둔 명령 목록을 주고 비운다. FleetManager가 입력을 넣은 뒤마다 부른다."""
         out, self._out = self._out, []
         return out
+
+    # ---- 채우기 도움 함수 ----
+    @staticmethod
+    def _remaining_of(items, done) -> dict:
+        """items에서 done을 뺀 것. 0 이하 품목은 뺀다."""
+        return {k: n - done.get(k, 0) for k, n in items.items() if n - done.get(k, 0) > 0}
+
+    def _remaining(self, b) -> dict:
+        """아직 팔에 요청할 것 = items - placed - missing(설계 4.2). 0 이하 품목은 뺀다."""
+        done = dict(b.placed)
+        for k, n in b.missing.items():
+            done[k] = done.get(k, 0) + n
+        return self._remaining_of(b.items, done)
+
+    def _report_trip(self, robot, status, reason="") -> None:
+        """ReportTripCmd를 낸다. placed는 확정된 담은 수에 진행 중인 수를 더한 누적, missing은 order.missing."""
+        b = self._robots[robot].order
+        placed = dict(b.placed)
+        for k, n in b.progress.items():
+            placed[k] = placed.get(k, 0) + n
+        self._out.append(ReportTripCmd(b.order_id, robot, status, placed, dict(b.missing), reason))
+
+    def _finish_fill(self, robot) -> None:
+        """남은 것이 없을 때의 마무리(pseudocode 4단계, 설계 4.2). 출력 순서는 ArmResetCmd가 먼저(설계 7절)."""
+        rec = self._robots[robot]
+        b = rec.order
+        self._out.append(ArmResetCmd(robot))
+        b.missing = self._remaining_of(b.items, b.placed)
+        if not b.placed:
+            # 하나도 못 담음: CANCELED는 최종 보고(7단계)라 최종 집합에 넣고 보류 목록에서 빼며
+            # 로봇의 주문과 held를 비운다. shipped는 올리지 않는다(내보낸 주문이 아님).
+            self._out.append(ReportOrderCmd(
+                b.order_id, robot, CANCELED, {}, dict(b.missing),
+                f"nothing could be placed, missing {b.missing}"))
+            self._final.add(b.order_id)
+            self._holds.pop(b.order_id, None)
+            rec.order = None
+            rec.held = ""
+            rec.stage = ""
+            self._out.append(ReleaseCmd(robot))
+            return
+        # 다 담았거나 일부만 담았거나 늘 내보낸다(v2.4에는 ship_partial 없음). 주문은 출고 보고까지 묶어 둔다.
+        rec.basket = FULL
+        rec.stage = ""
+        self._start_outbound(robot)
+        self._report_trip(robot, TRIP_TRANSPORTING)
+
+    def _start_outbound(self, robot) -> None:
+        """OUTBOUND 호출을 새 id로 내고 outbound_goal에 둔다(pseudocode 5단계). 결과 처리는 Task 3."""
+        goal = self._next_call
+        self._next_call += 1
+        self._robots[robot].outbound_goal = goal
+        self._out.append(DispatchCmd(goal, self._outbound, robot))
 
     # ---- 대기 주문과 열린 호출 ----
     def _can_bind(self, rec) -> bool:
