@@ -147,3 +147,11 @@ def test_snapshot_excludes_old_finished(conn, seeded):
     assert ids(customer_snapshot(conn, seeded["accounts"]["tester"], "NORMAL")) == [recent.order_id]
     assert ids(admin_snapshot(conn, "NORMAL", [])) == [recent.order_id]
     assert all(t["order_id"] != old.order_id for t in admin_snapshot(conn, "NORMAL", [])["trips"])
+
+
+def test_route_command_result_admin_only():
+    """관리 명령 결과 사건은 관리자 화면에만 가고 고객에게는 새지 않는다."""
+    d = {"request_id": "R-1", "command": "LOCK_RELEASE", "target": "pode1",
+         "result": "ACCEPTED", "reason": "", "detail": ""}
+    assert route("command_result", 3, d, "T") == [
+        Outgoing("admin", None, {"type": "command_result", "seq": 3, "ts": "T", "data": d})]

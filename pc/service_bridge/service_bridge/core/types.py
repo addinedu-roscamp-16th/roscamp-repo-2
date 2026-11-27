@@ -23,6 +23,25 @@ class ReportOut:
     reason: str = ""  # LATE_REPORT 까닭 또는 DB_ERROR
 
 
+# ---- ReportCommand ----
+@dataclass(frozen=True)
+class CommandIn:
+    request_id: str
+    command: str
+    target: str
+    result: str   # ACCEPTED · REJECTED · UNCONFIRMED · TIMEOUT (밖의 값은 알림)
+    reason: str
+    detail: str
+    stamp: str = ""  # fleet이 결과를 만든 시각(ISO, UTC). 늦은 결과 알림에 남김
+
+
+@dataclass(frozen=True)
+class CommandOut:
+    accepted: bool    # false는 DB 오류뿐. fleet은 다시 보낸다
+    result: str = ""  # APPLIED · DUPLICATE · LATE
+    reason: str = ""  # LATE 까닭 또는 DB_ERROR
+
+
 # ---- Hello ----
 @dataclass(frozen=True)
 class HelloIn:

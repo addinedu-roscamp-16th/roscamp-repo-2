@@ -33,6 +33,7 @@ def route(event_type: str, seq: int, data: dict, ts: str) -> list[Outgoing]:
         cust = {"order_id": data["order_id"], "status_text": status_text(data["status"])}
         return [Outgoing("admin", None, envelope(event_type, admin, ts, seq)),
                 Outgoing("customer", data["account_id"], envelope(event_type, cust, ts, seq))]
-    if event_type == "trip_changed":
+    # command_result는 관리자 화면 전용: 로봇 · 명령 정보라 고객에게 보내지 않는다
+    if event_type in ("trip_changed", "command_result"):
         return [Outgoing("admin", None, envelope(event_type, data, ts, seq))]
     return []
