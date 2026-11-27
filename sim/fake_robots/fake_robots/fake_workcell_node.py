@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import math
 import random
 import threading
 import time
@@ -16,7 +17,7 @@ import rclpy
 from fleet_core.common.contract import to_ros_qos
 from fleet_interfaces.action import FillBasket
 from fleet_interfaces.msg import ArmState, OrderItem
-from fleet_interfaces.srv import SetMode
+from fleet_interfaces.srv import RobotCommand, SetMode
 from pode_fsm.admin import MODE_MISMATCH, AdminState
 from rclpy.action import ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -91,6 +92,7 @@ class FakeWorkcellNode(Node):
         self._state_lock = threading.Lock()
         self._state = dict.fromkeys(self._arms, STATE_IDLE)
         self._error_until = dict.fromkeys(self._arms, 0.0)
+        self._resolved_n = dict.fromkeys(self._arms, 0)  # fault_resolved로 ERROR를 푼 횟수
         self._cancel_at: float | None = None
         self._boot_id = str(uuid.uuid4())
         self._order_id = ""
@@ -101,6 +103,9 @@ class FakeWorkcellNode(Node):
         for arm in self._arms:
             self.create_service(SetMode, contract.name("robot_set_mode", robot=arm),
                                 lambda req, res, a=arm: self._on_set_mode(a, req, res))
+            # [장애 처리 완료]: ERROR를 푼다
+            self.create_service(RobotCommand, contract.name("arm_fault_resolved", arm=arm),
+                                lambda req, res, a=arm: self._on_fault_resolved(a, req, res))
         self._state_pubs = {
             arm: self.create_publisher(ArmState, contract.name("arm_state", arm=arm),
                                        to_ros_qos(contract.qos("arm_state")))
@@ -158,10 +163,25 @@ class FakeWorkcellNode(Node):
             modes = {self._admin[arm].mode for arm in self._arms}
         return len(modes) == 1 and "UNKNOWN" not in modes
 
-    def _show_errors(self, arms: list[str]) -> None:
+    def _show_errors(self, arms: list[str], resolved: dict | None = None) -> None:
+        # error_until_resolved면 실물처럼 fault_resolved까지 ERROR
+        hold = math.inf if self._cfg.error_until_resolved else ERROR_HOLD_S
         for arm in arms:
-            self._error_until[arm] = self._sc.now() + ERROR_HOLD_S
-            self._set_state(arm, STATE_ERROR)
+            with self._state_lock:
+                if resolved is not None and self._resolved_n[arm] != resolved[arm]:
+                    continue  # 고장 뒤 보이기 전에 fault_resolved가 왔다
+                self._error_until[arm] = self._sc.now() + hold
+                self._state[arm] = STATE_ERROR
+
+    def _on_fault_resolved(self, arm, request, response):
+        with self._state_lock:
+            self._resolved_n[arm] += 1
+            self._error_until[arm] = 0.0
+            if self._state[arm] == STATE_ERROR:
+                self._state[arm] = STATE_IDLE
+        response.accepted = True
+        response.request_id = request.request_id
+        return response
 
     def _publish_states(self) -> None:
         # 두 팔 모두 락 잠김, 모드는 set_mode 전까지 UNKNOWN(IR-72). 놓는 동안 상품을 쥐고 있다
@@ -289,7 +309,8 @@ class FakeWorkcellNode(Node):
             abort_at_shutdown(handle)
         if run.errored:
             # 재시도할 고장으로 받도록 결과가 나간 뒤 ERROR를 보인다
-            timer = threading.Timer(RESULT_FIRST_S, self._show_errors, (run.errored,))
+            timer = threading.Timer(RESULT_FIRST_S, self._show_errors,
+                                    (run.errored, dict(self._resolved_n)))
             timer.daemon = True
             timer.start()
         return result
