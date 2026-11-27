@@ -18,7 +18,7 @@ from nav_msgs.msg import Odometry
 
 # Camera settings (same raw orientation as calibration)
 CAMERA_MATRIX_PATH = "/home/ane/pinky_pro/aruco_calibration/camera_params.npz"
-MARKER_ID = 2
+MARKER_IDS = (1, 2)
 MARKER_LENGTH = 0.03
 CAMERA_PORT = 4000
 SHOW_VIDEO = True
@@ -54,6 +54,7 @@ class CameraWorker(threading.Thread):
         self.stop_event = threading.Event()
         self.results = queue.Queue(maxsize=1)
         self.error = None
+        self.selected_id = None
 
     def run(self):
         cap = None
@@ -81,7 +82,7 @@ class CameraWorker(threading.Thread):
                 if ids is not None:
                     cv2.aruco.drawDetectedMarkers(frame, corners, ids)
                     for i, marker_id in enumerate(ids.flatten()):
-                        if marker_id != MARKER_ID:
+                        if marker_id not in MARKER_IDS or (self.selected_id is not None and marker_id != self.selected_id):
                             continue
                         success, rvec, tvec = cv2.solvePnP(obj, corners[i].reshape(4,2), matrix, dist, flags=cv2.SOLVEPNP_IPPE_SQUARE)
                         if not success:
@@ -91,7 +92,7 @@ class CameraWorker(threading.Thread):
                         normal = rotation[:,2]
                         if not np.isfinite([x,y,z,*rotation.ravel()]).all() or z <= 0 or normal[2] >= 0:
                             continue
-                        pose = (x,y,z,*rotation_to_quaternion(rotation))
+                        pose = (int(marker_id),x,y,z,*rotation_to_quaternion(rotation))
                         heading = np.degrees(np.arctan2(normal[0], -normal[2]))
                         bearing = np.degrees(np.arctan2(-x,z))
                         labels = [f'ID: {marker_id}', f'Forward: {z:.3f}m', f'Lateral: {-x:+.3f}m', f'Heading: {heading:+.1f}deg', f'Bearing: {bearing:+.1f}deg']
@@ -112,6 +113,199 @@ class CameraWorker(threading.Thread):
             if cap is not None:
                 cap.release()
 
+
+class ID1Controller:
+    def __init__(self, parent):
+        self.parent = parent
+        self.cmd_pub = parent.cmd_pub
+        self.camera = parent.camera
+        self.TARGET_FORWARD = 0.10
+        self.WALL_GAP = 0.05
+        self.ODOM_TIMEOUT = 0.5
+        self.ROTATE_TOL = math.radians(1.0)
+        self.MOVE_TOL = 0.002
+        self.phase = "APPROACH"
+        self.odom = None
+        self.odom_stamp = 0.0
+        self.phase_start = 0.0
+        self.settle = None
+        self.FORWARD_TOL = 0.005
+        self.LATERAL_TOL = 0.005
+        self.MAX_LINEAR = 0.03
+        self.MAX_ANGULAR = 0.15
+        self.MARKER_TIMEOUT = 0.3
+        self.SEARCH_SPEED = 0.10
+        self.SEARCH_FIRST_TIME = 3.0
+        self.SEARCH_REVERSE_TIME = 6.0
+        self.FRAME_TIMEOUT = 0.3
+        self.last_direction = 1.0
+        self.seen_marker = False
+        self.last_forward = None
+        self.search_start = None
+        self.search_failed = False
+        self.pose = None
+        self.stamp = 0.0
+        self.stable_since = None
+        self.done = False
+
+    def get_logger(self):
+        return self.parent.get_logger()
+
+    def stop_robot(self):
+        self.cmd_pub.publish(Twist())
+
+    @staticmethod
+    def wrap(a):
+        return math.atan2(math.sin(a), math.cos(a))
+
+    def abort(self, reason):
+        self.done = True
+        self.parent.change_state("ABORTED")
+        self.stop_robot()
+        self.get_logger().warn(reason)
+
+    def enter(self, phase, now):
+        self.phase = phase
+        self.phase_start = now
+        self.settle = None
+        self.stop_robot()
+        self.get_logger().info(phase)
+
+    def begin_side(self, now):
+        if self.odom is None or now-self.odom_stamp > self.ODOM_TIMEOUT:
+            self.abort('ODOM UNAVAILABLE | STOP')
+            return
+        _,x,_,f,qx,qy,qz,qw = self.pose
+        h = math.atan2(2*(qx*qz+qw*qy), -(1-2*(qx*qx+qy*qy)))
+        self.saved_forward = f
+        self.saved_heading = h
+        self.wall_move = f*math.cos(h)-self.WALL_GAP
+        self.side_move = abs(f*math.sin(h)) + 0.03
+        if self.wall_move < 0:
+            self.abort('WALL DISTANCE TOO SMALL | NO REVERSE')
+            return
+        # Positive heading means clockwise alignment; marker then lies left.
+        self.side_sign = 1.0 if h >= 0 else -1.0
+        self.wall_yaw = self.wrap(self.odom[2]-h)
+        self.side_yaw = self.wrap(self.wall_yaw+self.side_sign*math.pi/2)
+        self.get_logger().info(f'F={f:.3f} H={math.degrees(h):+.2f} WALL MOVE={self.wall_move:.3f} SIDE MOVE={self.side_move:.3f}')
+        self.enter('ALIGN_WALL', now)
+
+    def side_control(self, now):
+        if self.odom is None or now-self.odom_stamp > self.ODOM_TIMEOUT:
+            self.abort('ODOM UNAVAILABLE | STOP')
+            return
+        if now-self.phase_start > 40:
+            self.abort('SIDE PARKING TIMEOUT | STOP')
+            return
+        x,y,yaw = self.odom
+        cmd = Twist()
+        if self.phase in ('ALIGN_WALL','TURN_SIDE'):
+            target = self.wall_yaw if self.phase == 'ALIGN_WALL' else self.side_yaw
+            error = self.wrap(target-yaw)
+            if abs(error) <= self.ROTATE_TOL:
+                if self.settle is None:
+                    self.settle = now
+                if now-self.settle >= 0.3:
+                    self.move_start = (x,y)
+                    self.enter('MOVE_WALL' if self.phase == 'ALIGN_WALL' else 'MOVE_SIDE',now)
+                    return
+            else:
+                self.settle = None
+                cmd.angular.z = math.copysign(min(0.15,max(0.04,abs(error)*0.8)),error)
+        elif self.phase in ('MOVE_WALL','MOVE_SIDE'):
+            wall = self.phase == 'MOVE_WALL'
+            target = self.wall_yaw if wall else self.side_yaw
+            distance = self.wall_move if wall else self.side_move
+            dx,dy = x-self.move_start[0],y-self.move_start[1]
+            remaining = distance-dx*math.cos(target)-dy*math.sin(target)
+            error = self.wrap(target-yaw)
+            if abs(error)>math.radians(10):
+                self.abort('MOVE HEADING ERROR | STOP')
+                return
+            if remaining <= self.MOVE_TOL:
+                if wall:
+                    self.enter('TURN_SIDE',now)
+                else:
+                    self.done = True
+                    self.stop_robot()
+                    self.get_logger().info('SIDE PARKING COMPLETE')
+                return
+            cmd.linear.x = min(0.03,max(0.008,remaining*0.7))
+            cmd.angular.z = max(-0.10,min(0.10,error))
+        self.cmd_pub.publish(cmd)
+
+    def control(self):
+        now = time.monotonic()
+        if self.done:
+            self.stop_robot()
+            return
+        if self.phase != 'APPROACH':
+            self.side_control(now)
+            return
+        if now - self.stamp > self.FRAME_TIMEOUT:
+            self.stable_since = None
+            self.stop_robot()
+            # Never search blindly if the video stream itself is stale.
+            if self.search_start is not None:
+                self.search_failed = True
+            return
+        if self.pose is None:
+            self.stable_since = None
+            if not self.seen_marker or self.search_failed or self.last_forward is None or self.last_forward <= self.TARGET_FORWARD + self.FORWARD_TOL:
+                self.stop_robot()
+                return
+            if self.search_start is None:
+                self.search_start = now
+                self.stop_robot()
+                return
+            elapsed = now - self.search_start
+            cmd = Twist()
+            if elapsed < self.SEARCH_FIRST_TIME:
+                cmd.angular.z = self.last_direction * self.SEARCH_SPEED
+            elif elapsed < self.SEARCH_FIRST_TIME + self.SEARCH_REVERSE_TIME:
+                cmd.angular.z = -self.last_direction * self.SEARCH_SPEED
+            else:
+                self.search_failed = True
+                self.get_logger().warn('SEARCH TIMEOUT | STOP')
+            self.cmd_pub.publish(cmd)
+            return
+        if self.search_start is not None:
+            self.get_logger().info('ID 1 REACQUIRED | RESUME')
+        self.search_start = None
+        self.search_failed = False
+        self.seen_marker = True
+        marker_id, x, y, z, *_ = self.pose
+        if self.camera.selected_id is None:
+            self.camera.selected_id = marker_id
+        if marker_id != self.camera.selected_id:
+            self.stop_robot()
+            return
+        self.last_forward = z
+        lateral = -x
+        error = z - self.TARGET_FORWARD
+        bearing = math.atan2(lateral, z)
+        if abs(bearing) > math.radians(1):
+            self.last_direction = -1.0 if bearing > 0 else 1.0
+        cmd = Twist()
+        if abs(error) <= self.FORWARD_TOL and abs(lateral) <= self.LATERAL_TOL:
+            if self.stable_since is None:
+                self.stable_since = now
+            if now - self.stable_since >= 0.5:
+                self.begin_side(now)
+                return
+        else:
+            self.stable_since = None
+            if abs(lateral) > self.LATERAL_TOL:
+                cmd.angular.z = max(-self.MAX_ANGULAR, min(self.MAX_ANGULAR, -1.0 * bearing))
+            if abs(bearing) < math.radians(12) and error > self.FORWARD_TOL:
+                cmd.linear.x = min(self.MAX_LINEAR, 0.7 * error)
+            elif error < -self.FORWARD_TOL:
+                # No automatic reverse: rear clearance is not verified.
+                cmd = Twist()
+                self.get_logger().warn('TOO CLOSE | reposition manually', throttle_duration_sec=1.0)
+        self.cmd_pub.publish(cmd)
+        self.get_logger().info(f'ID {marker_id} | Forward: {z:.3f} | Lateral: {lateral:+.3f} | V: {cmd.linear.x:.3f} | W: {cmd.angular.z:+.3f}', throttle_duration_sec=0.5)
 
 class ArucoParking(Node):
 
@@ -211,7 +405,7 @@ class ArucoParking(Node):
         self.FINAL_ROTATE_TOLERANCE = 1.0
 
         # 후진 주차
-        self.REVERSE_DISTANCE = 0.05
+        self.REVERSE_DISTANCE = 0.08
         self.REVERSE_SPEED = 0.03
         self.REVERSE_TIMEOUT = 40.0
 
@@ -254,6 +448,22 @@ class ArucoParking(Node):
         # =========================
 
         self.state = "WAIT_MARKER"
+        self.active_marker_id = None
+        self.initial_search_start = None
+        self.INITIAL_SEARCH_SPEED = 0.10
+        self.INITIAL_SEARCH_FIRST_TIME = 10.0
+        self.INITIAL_SEARCH_TOTAL_TIME = 30.0
+        self.last_frame_time = None
+        self.search_start = None
+        self.search_sign = 1.0
+        self.seen_marker = False
+        self.SEARCH_SPEED = 0.10
+        self.SEARCH_FIRST_TIME = 3.0
+        self.SEARCH_TOTAL_TIME = 9.0
+        self.APPROACH_TIMEOUT = 60.0
+        self.approach_start = None
+        self.side_distance = 0.0
+        self.wall_yaw = None
 
         self.timer = self.create_timer(
             0.05,
@@ -262,6 +472,7 @@ class ArucoParking(Node):
 
         self.camera = CameraWorker()
         self.camera_timer = self.create_timer(0.03, self.process_camera_result)
+        self.id1 = ID1Controller(self)
         self.camera.start()
         self.get_logger().info("Integrated ArUco parking started")
 
@@ -276,8 +487,16 @@ class ArucoParking(Node):
             captured, frame, pose = self.camera.results.get_nowait()
         except queue.Empty:
             return
+        self.last_frame_time = captured
+        self.id1.stamp = captured
+        self.id1.pose = pose if pose is not None and pose[0] == 1 else None
         if pose is not None and time.monotonic() - captured <= self.MARKER_TIMEOUT:
-            x, y, z, qx, qy, qz, qw = pose
+            marker_id, x, y, z, qx, qy, qz, qw = pose
+            if self.active_marker_id is None:
+                self.active_marker_id = marker_id
+                self.camera.selected_id = marker_id
+            if marker_id != self.active_marker_id:
+                return
             msg = PoseStamped()
             msg.header.stamp = self.get_clock().now().to_msg()
             msg.header.frame_id = "camera_optical_frame"
@@ -289,9 +508,9 @@ class ArucoParking(Node):
             if self.last_marker_time is not None:
                 self.last_marker_time = captured
             self.pose_pub.publish(msg)
-            self.id_pub.publish(Int32(data=MARKER_ID))
+            self.id_pub.publish(Int32(data=marker_id))
         if SHOW_VIDEO:
-            cv2.putText(frame, self.state, (20, 185), cv2.FONT_HERSHEY_SIMPLEX,
+            cv2.putText(frame, self.id1.phase if self.active_marker_id == 1 and self.state not in ("HOLDING", "ABORTED") else self.state, (20, 185), cv2.FONT_HERSHEY_SIMPLEX,
                         0.6, (0, 255, 255), 2)
             cv2.imshow("ArUco Parking", frame)
             if cv2.waitKey(1) & 0xff == ord('q'):
@@ -506,6 +725,9 @@ class ArucoParking(Node):
     # 메인 제어 루프
     # =========================
 
+    def begin_final_approach(self):
+        self.change_state("FINAL_HEADING_ALIGN")
+
     def control_loop(self):
 
         cmd = Twist()
@@ -523,6 +745,20 @@ class ArucoParking(Node):
             self.cmd_pub.publish(cmd)
             return
 
+        if self.active_marker_id is not None and self.initial_search_start is not None:
+            self.initial_search_start = None
+            self.get_logger().info(f"INITIAL SEARCH COMPLETE | ID {self.active_marker_id}")
+            self.cmd_pub.publish(cmd)
+            return
+
+        if self.active_marker_id == 1:
+            self.id1.odom = (self.current_x, self.current_y, self.current_yaw) if self.last_odom_time is not None else None
+            self.id1.odom_stamp = self.last_odom_time or 0.0
+            self.id1.control()
+            if self.id1.done and self.state != "ABORTED":
+                self.change_state("HOLDING")
+            return
+
         # =========================
         # Odom 유효성 확인
         # =========================
@@ -533,7 +769,8 @@ class ArucoParking(Node):
             > self.ODOM_TIMEOUT
         ):
 
-            if self.state in (
+            if self.initial_search_start is not None or self.state in (
+                "APPROACH",
                 "ROTATE_90",
                 "MOVE_LATERAL",
                 "RETURN_ROTATE",
@@ -554,6 +791,89 @@ class ArucoParking(Node):
                 throttle_duration_sec=1.0
             )
 
+            return
+
+        # Initial search before either marker ID has been selected.
+        if self.active_marker_id is None:
+            if self.last_frame_time is None or now - self.last_frame_time > self.MARKER_TIMEOUT:
+                if self.initial_search_start is not None:
+                    self.change_state("ABORTED")
+                    self.get_logger().warning("INITIAL SEARCH: CAMERA LOST | STOP")
+                self.cmd_pub.publish(cmd)
+                return
+            if self.initial_search_start is None:
+                self.initial_search_start = now
+                self.get_logger().info("INITIAL SEARCH | ID 1 OR ID 2")
+            elapsed = now - self.initial_search_start
+            if elapsed >= self.INITIAL_SEARCH_TOTAL_TIME:
+                self.change_state("ABORTED")
+                self.get_logger().warning("INITIAL SEARCH TIMEOUT | STOP")
+            else:
+                cmd.angular.z = self.INITIAL_SEARCH_SPEED * (1.0 if elapsed < self.INITIAL_SEARCH_FIRST_TIME else -1.0)
+            self.cmd_pub.publish(cmd)
+            return
+
+        # Initial visual approach and bounded reacquisition.
+        if self.active_marker_id == 2 and self.state in ("WAIT_MARKER", "APPROACH"):
+            fresh = (self.last_marker_time is not None and
+                     now - self.last_marker_time <= self.MARKER_TIMEOUT)
+            if self.approach_start is not None and now - self.approach_start > self.APPROACH_TIMEOUT:
+                self.change_state("ABORTED")
+            elif not fresh:
+                self.align_start_time = None
+                if self.seen_marker:
+                    if self.search_start is None:
+                        self.search_start = now
+                    elapsed = now - self.search_start
+                    if elapsed >= self.SEARCH_TOTAL_TIME:
+                        self.change_state("ABORTED")
+                    elif (self.last_frame_time is not None and
+                          now - self.last_frame_time <= self.MARKER_TIMEOUT and
+                          self.forward > self.TARGET_FORWARD + self.FORWARD_TOLERANCE):
+                        cmd.angular.z = self.SEARCH_SPEED * self.search_sign * (1 if elapsed < self.SEARCH_FIRST_TIME else -1)
+            else:
+                self.seen_marker = True
+                self.search_start = None
+                if self.approach_start is None:
+                    self.approach_start = now
+                self.change_state("APPROACH")
+                f, l = self.filtered_forward, self.filtered_lateral
+                bearing = math.atan2(l, f)
+                if abs(l) > 0.001:
+                    self.search_sign = -math.copysign(1.0, l)
+                if f < self.TARGET_FORWARD - self.FORWARD_TOLERANCE or self.forward < self.TARGET_FORWARD - self.FORWARD_TOLERANCE:
+                    self.change_state("ABORTED")
+                    self.get_logger().warning("TOO CLOSE | STOP")
+                elif (abs(f-self.TARGET_FORWARD) <= self.FORWARD_TOLERANCE and
+                      abs(l) <= self.LATERAL_TOLERANCE and
+                      abs(self.forward-self.TARGET_FORWARD) <= self.FORWARD_TOLERANCE and
+                      abs(self.lateral) <= self.LATERAL_TOLERANCE):
+                    if self.align_start_time is None:
+                        self.align_start_time = now
+                    elif now-self.align_start_time >= self.ALIGN_TIME:
+                        h = math.radians(self.filtered_heading)
+                        # Right-positive camera convention; ROS yaw is left-positive.
+                        self.wall_yaw = self.normalize_angle(self.current_yaw-h)
+                        side = -f*math.sin(h)
+                        self.side_distance = abs(side) + 0.01
+                        self.rotate_start_yaw = self.current_yaw
+                        self.target_yaw = self.normalize_angle(self.wall_yaw-math.copysign(math.pi/2, side if abs(side)>1e-6 else 1.0))
+                        self.rotate_start_time = now
+                        self.rotate_settle_start = None
+                        self.get_logger().info(f"APPROACH COMPLETE | F={f:.3f} | H={math.degrees(h):+.2f} | Side={self.side_distance:.3f}")
+                        if self.side_distance <= self.MOVE_TOLERANCE:
+                            self.final_align_start_time = now
+                            self.align_start_time = None
+                            self.change_state("FINAL_HEADING_ALIGN")
+                        else:
+                            self.change_state("ROTATE_90")
+                else:
+                    self.align_start_time = None
+                    if abs(l) > self.LATERAL_TOLERANCE or abs(self.lateral) > self.LATERAL_TOLERANCE:
+                        cmd.angular.z = max(-0.15, min(0.15, -1.5*bearing))
+                    if abs(bearing) < math.radians(12) and f > self.TARGET_FORWARD+self.FORWARD_TOLERANCE and self.forward > self.TARGET_FORWARD+self.FORWARD_TOLERANCE:
+                        cmd.linear.x = min(self.LINEAR_SPEED, max(0.005, f-self.TARGET_FORWARD))
+            self.cmd_pub.publish(cmd)
             return
 
         # =========================
@@ -703,7 +1023,7 @@ class ArucoParking(Node):
                 self.final_align_start_time = now
                 self.align_start_time = None
 
-                self.change_state("FINAL_HEADING_ALIGN")
+                self.begin_final_approach()
 
                 self.get_logger().info(
                     "LATERAL ALREADY CENTERED"
@@ -771,7 +1091,7 @@ class ArucoParking(Node):
 
                     # 이동할 거리 저장
                     self.move_target_distance = abs(
-                        abs(self.saved_lateral) + self.MOVE_OFFSET
+                        self.side_distance
                     ) 
 
                     self.move_start_time = now
@@ -866,7 +1186,7 @@ class ArucoParking(Node):
                 cmd.angular.z = 0.0
 
                 # 처음 Heading 정렬을 마쳤던 방향으로 복귀
-                self.target_yaw = self.rotate_start_yaw
+                self.target_yaw = self.wall_yaw
 
                 # 회전 시간 초기화
                 self.rotate_start_time = now
@@ -968,9 +1288,7 @@ class ArucoParking(Node):
                     self.align_start_time = None
                     self.final_align_start_time = now
 
-                    self.change_state(
-                        "FINAL_HEADING_ALIGN"
-                    )
+                    self.begin_final_approach()
 
                     self.get_logger().info(
                         "RETURN ROTATION COMPLETE "

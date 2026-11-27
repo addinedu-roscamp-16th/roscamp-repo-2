@@ -14,6 +14,7 @@ from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.commands import (
     CANCELED,
     NO_ANSWER,
+    RESUME_SET_PAUSE_OFF,
     CancelCmd,
     CheckClearCmd,
     DockCmd,
@@ -53,6 +54,7 @@ from fleet_interfaces.srv import (
     RobotCommand,
     SetLock,
     SetMode,
+    SetPause,
     TripCommand,
 )
 from rcl_interfaces.msg import ParameterDescriptor
@@ -80,7 +82,14 @@ from fleet_manager.inbox import Inbox
 from fleet_manager.mode_sync import ModeSync
 from fleet_manager.order_goals import apply_overrides
 from fleet_manager.report_queue import HELLO, ORDER, TRIP, ReportQueue, Send
-from fleet_manager.robot_calls import CallParams, RobotCalls
+from fleet_manager.robot_calls import (
+    ACCEPTED,
+    REJECTED,
+    TIMEOUT,
+    UNCONFIRMED,
+    CallParams,
+    RobotCalls,
+)
 
 
 SLOW_TICK_WARN_S = 5.0  # 느린 틱 경고 사이 최소 간격
@@ -165,6 +174,8 @@ class FleetManagerNode(Node):
         self._pode_states = {}
         self._arm_states = {}
         self._arm_fed = {}
+        self._arm_lost = set()  # 상태가 끊겨 코어에 알린 팔
+        self._started_at = time.monotonic()  # 한 번도 상태가 없는 팔은 이때부터 센다
         self._setup_admin(robots)
         # IR-30: 코어 그룹만 코어와 노드 상태를 바꾸고, 받은 편지함 그룹은 큐에 넣기만 한다
         self._core_group = MutuallyExclusiveCallbackGroup()
@@ -231,7 +242,7 @@ class FleetManagerNode(Node):
                 CheckClear, name("check_clear", pode=robot), callback_group=inbox)
         for arm in self.contract.placeholders.get("arm", []):
             self.create_subscription(
-                ArmState, name("arm_state", arm=arm), partial(self._post, self._on_arm_state, arm),
+                ArmState, name("arm_state", arm=arm), partial(self._post_arm_state, arm),
                 self._qos("arm_state"), callback_group=inbox)
         self._fill = {}
         self._swap = {}
@@ -290,6 +301,7 @@ class FleetManagerNode(Node):
             fault_resolved=within("arm_fault_resolved", "arm", arms),
             charge_end=within("pode_charge_end", "pode", pods),
             force_input=within("robot_force", "robot", pods + arms))
+        self._pause_arms = within("arm_set_pause", "arm", arms)
         self._released = {}  # 락이 풀린 로봇 -> 풀 때 본 boot_id
 
     def _instances(self, key, field) -> list:
@@ -311,6 +323,9 @@ class FleetManagerNode(Node):
         self._force_clients = {r: self.create_client(ForceInput, name("robot_force", robot=r),
                                                      callback_group=inbox)
                                for r in sorted(t.force_input)}
+        self._pause_clients = {a: self.create_client(
+            SetPause, name("arm_set_pause", arm=a), callback_group=inbox)
+            for a in sorted(self._pause_arms)}
         self.create_service(SetLock, name("set_lock"), self._on_set_lock, callback_group=core)
         self.create_service(RobotCommand, name("fault_resolved"), self._on_fault_resolved,
                             callback_group=core)
@@ -318,11 +333,12 @@ class FleetManagerNode(Node):
                             callback_group=core)
         self.create_service(ForceInput, name("force_input"), self._on_force_input,
                             callback_group=core)
-        # TODO(Q-05): resume_arm은 팔 쪽 전달 방법이 정해지면 연다
+        self.create_service(RobotCommand, name("resume_arm"), self._on_resume_arm,
+                            callback_group=core)
 
-    def _command(self, key) -> str:
+    def _command(self, key, **fields) -> str:
         """ReportCommand의 command: 계약 서비스 이름의 끝 (예: set_lock)."""
-        return self.contract.name(key).rsplit("/", 1)[-1]
+        return self.contract.name(key, **fields).rsplit("/", 1)[-1]
 
     def _command_event(self, level, code, detail, source) -> None:
         self._dispatch(EventOut(level, code, detail, source), self._now())
@@ -346,15 +362,45 @@ class FleetManagerNode(Node):
                                      *adapters.robot_obstacle(msg),
                                      adapters.robot_local_yield(msg))
 
-    def _on_arm_state(self, arm, msg: ArmState) -> None:
-        self._arm_states[arm] = (msg, time.monotonic())
-        self._mode_sync.on_state(arm, msg.mode, msg.boot_id, time.monotonic())
+    def _post_arm_state(self, arm, msg: ArmState) -> None:
+        # 끊김은 도착 시각으로 센다(코어가 늦게 꺼내도)
+        self._post(self._on_arm_state, arm, msg, time.monotonic())
+
+    def _on_arm_state(self, arm, msg: ArmState, at: float | None = None) -> None:
+        now = time.monotonic() if at is None else at
+        before = self._arm_heard_at(arm)
+        self._arm_states[arm] = (msg, now)
+        self._mode_sync.on_state(arm, msg.mode, msg.boot_id, now)
         self._observe_lock(arm, msg)
+        if self.silent():
+            return
+        # 틱 검사 전에 한도를 넘겨 들어온 상태도 끊김을 먼저 알린다
+        if (before is not None and arm not in self._arm_lost
+                and now - before > self.core.params.comm_timeout_s):
+            self._tell_arm_lost(arm)
         # 5 Hz 상태 가운데 바뀐 것만 코어에 넣는다(기록이 부풀지 않게)
-        seen = (msg.state, msg.detail, msg.holding)
-        if not self.silent() and self._arm_fed.get(arm) != seen:
+        seen = (msg.state, msg.detail, msg.holding, msg.boot_id, msg.lock)
+        if self._arm_fed.get(arm) != seen:
             self._arm_fed[arm] = seen
+            self._arm_lost.discard(arm)
             self.core.on_arm_state(arm, *seen)
+
+    def _arm_heard_at(self, arm) -> float | None:
+        # 작업대 팔은 한 번도 보내지 않았어도 시작 시각부터 센다
+        start = self._started_at if arm in self._pause_arms else None
+        return self._arm_states.get(arm, (None, start))[1]
+
+    def _tell_arm_lost(self, arm) -> None:
+        self._arm_lost.add(arm)
+        self._arm_fed.pop(arm, None)
+        self.core.on_arm_state_lost(arm)
+
+    def _check_arms_lost(self) -> None:
+        """comm_timeout_s 동안 상태가 없으면 한 번 알린다. 다음 상태는 바뀐 것으로 다시 넣는다."""
+        limit = self.core.params.comm_timeout_s
+        for arm in sorted(set(self._arm_states) | self._pause_arms):
+            if arm not in self._arm_lost and time.monotonic() - self._arm_heard_at(arm) > limit:
+                self._tell_arm_lost(arm)
 
     def _on_system_mode(self, msg: SystemMode) -> None:
         if self._mode_sync.on_system_mode(msg.mode):
@@ -365,7 +411,7 @@ class FleetManagerNode(Node):
         for arm in self.contract.placeholders.get("arm", []):
             msg, at = self._arm_states.get(arm, (None, None))
             fresh = at is not None and time.monotonic() - at <= self.core.params.comm_timeout_s
-            rows.append((arm, msg, fresh))
+            rows.append((arm, msg, fresh, *self.core.arm_task(arm)))
         return rows
 
     def _reachable(self, robot) -> bool:
@@ -428,7 +474,8 @@ class FleetManagerNode(Node):
         send = lambda: self._call_robot(  # noqa: E731
             rid, "fault_resolved", robot, self._fault_clients,
             RobotCommand.Request(request_id=rid, robot_id=robot),
-            observe=self._left_error if self._in_error(robot) else None)
+            # 보낼 때 ERROR였던 팔은 받았다는 답도 ERROR를 벗어나야 확정 (첫 요청부터 30 s)
+            observe=self._left_error if self._in_error(robot) else None, confirm_accepted=True)
         return _answer(response, rid, self._admin.robot(
             self._command("fault_resolved"), rid, robot, judge, send))
 
@@ -460,10 +507,61 @@ class FleetManagerNode(Node):
         return _answer(response, rid, self._admin.robot(
             self._command("force_input"), rid, robot, judge, send))
 
+    @_core_callback
+    def _on_resume_arm(self, request, response):
+        """관리자 [복구]: 코어가 두 팔 set_pause(false) · 새 담기 목표 · 거절을 정한다."""
+        self._drain()
+        rid, target = _request_id(request), request.robot_id
+        command, how = self._command("resume_arm"), []
+
+        def judge():
+            # 앞 [복구]의 set_pause가 끝나야 다음을 받는다
+            for arm in sorted(self._pause_clients):
+                busy = self._robot_calls.pending(self._command("arm_set_pause", arm=arm), arm)
+                if busy is not None:
+                    return Reply(False, self._admin.codes.NOT_READY,
+                                 f"set_pause {busy} on {arm} still pending")
+            answer, reason = self.core.on_resume_arm(target)
+            if not answer:
+                return Reply(False, reason, f"resume_arm refused on {target!r}")
+            how.append(answer)
+            return Reply(True)
+
+        def send():
+            if how[0] == RESUME_SET_PAUSE_OFF:
+                self._send_set_pause_off(rid, target)
+            else:
+                # 남은 상품의 새 담기 목표는 코어가 이미 냈다
+                self.report_command(rid, command, target, ACCEPTED, "", f"{how[0]} queued")
+        return _answer(response, rid, self._admin.robot(command, rid, target, judge, send))
+
+    def _send_set_pause_off(self, rid, target) -> None:
+        """두 팔에 set_pause(false). 같은 번호의 끝 상태는 한 번이라 두 결과를 모아 알린다."""
+        command, arms = self._command("resume_arm"), sorted(self._pause_clients)
+        ends, unsure = {}, []
+
+        def report(arm, _rid, _command, _target, result, reason="", detail=""):
+            if result == UNCONFIRMED:
+                if not unsure:
+                    unsure.append(arm)
+                    self.report_command(rid, command, target, result, reason, f"{arm}: {detail}")
+                return
+            ends[arm] = (result, reason, detail)
+            if len(ends) == len(arms):
+                self.report_command(rid, command, target, *_joined(ends))
+        for arm in arms:
+            self._robot_calls.add(
+                rid, self._command("arm_set_pause", arm=arm), arm, self._pause_clients[arm],
+                SetPause.Request(request_id=rid, paused=False), time.monotonic(),
+                observe=self._left_paused if self._paused(arm) else None,
+                key=(rid, arm), report=partial(report, arm))
+
     # ---- 로봇 부르기와 락 상태 ----
-    def _call_robot(self, rid, key, robot, clients, request, observe=None, then=None) -> None:
+    def _call_robot(self, rid, key, robot, clients, request, observe=None, then=None,
+                    confirm_accepted=False) -> None:
         self._robot_calls.add(rid, self._command(key), robot, clients[robot], request,
-                              time.monotonic(), observe, then)
+                              time.monotonic(), observe, then,
+                              confirm_accepted=confirm_accepted)
 
     def _send_set_lock(self, rid, robot, locked, confirm_drop) -> None:
         was = robot in self._released
@@ -496,11 +594,20 @@ class FleetManagerNode(Node):
             self._released.pop(robot, None)
         if robot in self.core.traffic.robots:
             self.core.set_lock_released(robot, released, detail)
-        # TODO(Q-06): 팔 하나만 락이 풀렸을 때 FillBasket을 어떻게 할지 미정
+        # 양팔 묶음. 쥔 채 락 해제는 PAUSED로 이어 가고 목표 끝에 보류
 
     def _in_error(self, arm) -> bool:
         msg = self._arm_states.get(arm, (None,))[0]
         return msg is not None and msg.state == ArmState.STATE_ERROR
+
+    def _paused(self, arm) -> bool:
+        msg = self._arm_states.get(arm, (None,))[0]
+        return msg is not None and msg.state == ArmState.STATE_PAUSED
+
+    @staticmethod
+    def _left_paused(state) -> bool:
+        # 결과 모름은 PAUSED였던 팔이 PAUSED를 벗어나면 확정한다
+        return state.state != ArmState.STATE_PAUSED
 
     @staticmethod
     def _left_error(state) -> bool:
@@ -542,21 +649,24 @@ class FleetManagerNode(Node):
         step = self._robot_calls.step(time.monotonic(), lambda client: client.service_is_ready())
         for client, future in step.drop:
             client.remove_pending_request(future)
-        for rid, client, request in step.send:
+        for key, client, request in step.send:
             future = client.call_async(request)
-            self._robot_calls.track(rid, future)
-            future.add_done_callback(partial(self._post, self._robot_answered, rid))
+            self._robot_calls.track(key, future)
+            future.add_done_callback(partial(self._post, self._robot_answered, key))
 
-    def _robot_answered(self, rid, future) -> None:
+    def _robot_answered(self, key, future) -> None:
         try:
             reply = future.result()
         except Exception as exc:  # noqa: BLE001
-            self.get_logger().warning(f"command {rid} got no reply: {exc}")
-            self._robot_calls.on_failed(rid, future)
+            self.get_logger().warning(f"command {key} got no reply: {exc}")
+            self._robot_calls.on_failed(key, future)
             return
-        for client, old in self._robot_calls.on_answer(rid, future, reply.accepted,
+        # 답을 받을 때의 마지막 상태로도 확정한다(상태가 답보다 먼저 바뀐 경우)
+        target = self._robot_calls.target(key)
+        view = self._arm_states.get(target, (None,))[0] if target else None
+        for client, old in self._robot_calls.on_answer(key, future, reply.accepted,
                                                        reply.reason, reply.detail,
-                                                       time.monotonic()):
+                                                       time.monotonic(), view):
             client.remove_pending_request(old)
 
     @_core_callback
@@ -585,6 +695,7 @@ class FleetManagerNode(Node):
         now = self._now()
         if now > 0.0 and not self.silent():
             self._sync_modes(time.monotonic())
+            self._check_arms_lost()
             for command in self.core.tick():
                 self._dispatch(command, now)
             # 코어가 낸 취소 · 타임아웃을 먼저 처리한 뒤 보낸다
@@ -779,8 +890,10 @@ class FleetManagerNode(Node):
 
     def _send_fill(self, command) -> None:
         server = self.site.stations[command.station_id].server
-        self._send(self._fill[command.station_id], adapters.fill_goal(command),
-                   (server, command.goal_id), self._fill_done, self._fill_rejected)
+        key = (server, command.goal_id)
+        self._send(self._fill[command.station_id], adapters.fill_goal(command), key,
+                   self._fill_done, self._fill_rejected,
+                   feedback=partial(self._post, self._on_fill_feedback, key))
 
     def _drop_held_fill(self, command) -> bool:
         """보내기 전에 취소된 담기 목표는 버리고 취소된 결과로 끝낸다."""
@@ -833,6 +946,10 @@ class FleetManagerNode(Node):
     # ---- 액션 goal 보내기와 feedback, 수락, 결과 받기 ----
     def _on_move_feedback(self, key, msg) -> None:
         self.core.on_move_feedback(key[0], key[1], *adapters.move_feedback(msg.feedback))
+
+    def _on_fill_feedback(self, key, msg) -> None:
+        fb = msg.feedback
+        self.core.on_fill_feedback(key[1], fb.arm_id, fb.phase, int(fb.placed_total))
 
     def _send(self, client, goal, key, on_result, on_rejected, feedback=None) -> None:
         if not client.server_is_ready():
@@ -916,6 +1033,15 @@ class FleetManagerNode(Node):
 def _request_id(request) -> str:
     """IR-20: 번호가 없는 요청은 새 번호를 붙여 따로 다룬다 (응답에 실어 돌려준다)."""
     return request.request_id or str(uuid.uuid4())
+
+
+def _joined(ends) -> tuple[str, str, str]:
+    """팔마다 끝 상태를 하나로: 거절 > 시간 초과 > 받음."""
+    for result in (REJECTED, TIMEOUT):
+        bad = [(arm, end) for arm, end in sorted(ends.items()) if end[0] == result]
+        if bad:
+            return result, bad[0][1][1], "; ".join(f"{arm}: {end[2]}" for arm, end in bad)
+    return ACCEPTED, "", ""
 
 
 def _answer(response, request_id, reply):

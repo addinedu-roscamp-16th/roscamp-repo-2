@@ -273,7 +273,8 @@ def test_an_arm_state_input_is_recorded():
     core = FleetManager(SITE, load_params(), ["r1"], lambda: 0.0)
     core.record_to(lines.append)
     core.on_arm_state("arm_left", "ERROR", "X", True)
-    assert '"in": "on_arm_state"' in lines[-1]
+    # 입력 줄 뒤에 작업대 막힘 같은 내부 줄이 이어질 수 있다
+    assert any('"in": "on_arm_state"' in line for line in lines[1:])
 
 
 def call(core, goal_id, station="", robot=""):
