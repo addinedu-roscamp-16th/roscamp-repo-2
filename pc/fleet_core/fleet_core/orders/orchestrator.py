@@ -245,7 +245,7 @@ class OrderOrchestrator:
                 if rec.order is not None:
                     b = rec.order
                     self._report_final(report.robot, PARTIAL if b.missing else SHIPPED)
-            # 격리 로봇의 되돌리기(pseudocode 6단계)는 격리 처리(Task 5) 몫이라 여기서 하지 않는다.
+            # 격리 로봇의 되돌리기(pseudocode 6단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")이므로 여기서 하지 않는다.
             if report.put_empty_done and rec.basket == NONE:
                 rec.basket = EMPTY
                 rec.stage = ""
@@ -352,7 +352,7 @@ class OrderOrchestrator:
             return
         # pseudocode 1단계: 주문도 호출도 없이 바구니만 없으면 빈 바구니를 받으러 간다(5단계와 같은 길).
         # 다른 쉬는 로봇은 아무것도 하지 않는다(다음 일은 열린 호출에 교통 층이 고를 때 온다).
-        # 격리 로봇 제외(pseudocode 1단계)는 격리 처리(Task 5) 몫이라 아직 검사하지 않는다.
+        # 격리 로봇 제외(pseudocode 1단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")이므로 검사하지 않는다.
         if rec.order is None and rec.basket == NONE and rec.dispatch_failures == 0:
             self._start_outbound(robot)
 
