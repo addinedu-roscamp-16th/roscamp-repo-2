@@ -490,3 +490,60 @@ def test_orders_and_arm_run_one_order_to_shipped():
     swap = next(c for c in core.take_output() if type(c).__name__ == "SwapCmd")
     core.on_swap_result(swap.goal_id, True, True, True)
     assert ReportOrderCmd("T-1", "r1", "SHIPPED", {"A": 1}, {}, "") in core.take_output()
+
+
+# ---- Task 5: 서비스 정지(설계 4.8, 팔 관제 합의 ⑦, 회의 정리 8번) ----
+def test_service_paused_follows_the_run_mode():
+    """service_paused가 마지막 run_mode가 PAUSE일 때만 True인지 지킨다(STOP은 False)."""
+    o = make()
+    assert o.service_paused is False
+    o.on_order_board("PAUSE", [])
+    assert o.service_paused is True
+    o.on_order_board("RUN", [])
+    assert o.service_paused is False
+    o.on_order_board("STOP", [])
+    assert o.service_paused is False
+
+
+def test_a_pause_cancels_open_work_calls_and_run_reopens_them():
+    """PAUSE가 열린 WORK 호출을 거두고 RUN이 대기 주문 수만큼 새 호출로 다시 여는지 지킨다."""
+    o = make()
+    o.on_order_board("RUN", [T1])
+    assert o.take_output() == [DispatchCmd(1, "WORK")]
+    o.on_order_board("PAUSE", [T1])
+    assert o.take_output() == [CancelDispatchCmd(1)]
+    o.on_order_board("RUN", [T1])
+    assert o.take_output() == [DispatchCmd(2, "WORK")]
+
+
+def test_a_robot_reaching_work_during_a_pause_is_released_unbound():
+    """정지 중에 작업대에 닿은 로봇을 묶지 않고 놓아 주는지 지킨다(설계 4.8)."""
+    o = make()
+    o.on_order_board("RUN", [T1])
+    o.take_output()
+    o._run_mode = "PAUSE"  # 호출을 거두기 전(같은 tick)에 정지가 와서 열린 호출 1이 남은 순간을 만든다
+    o.on_dispatch_result(1, True, "r1")
+    assert o.take_output() == [ReleaseCmd("r1")]
+    assert o.order_of("r1") == ""
+
+
+def test_a_bound_order_finishes_during_a_pause():
+    """이미 묶인 주문은 정지 중에도 step이 채우기를 이어 가는지 지킨다(회의 정리 8번)."""
+    o = bound(make())
+    o.on_order_board("PAUSE", [T1])
+    o.take_output()
+    o.step("r1")
+    assert o.take_output() == [ReportTripCmd("T-1", "r1", "FILLING", {}, {}),
+                               ArmFillCmd("r1", "WORK", "T-1", {"A": 1})]
+
+
+def test_no_empty_basket_is_fetched_during_a_pause():
+    """정지 중에는 바구니 없는 쉬는 로봇이 빈 바구니를 받으러 가지 않고 RUN이면 간다는 것을 지킨다(설계 4.8)."""
+    o, _ = make_clocked()
+    o._robots["r1"].basket = "NONE"
+    o.on_order_board("PAUSE", [])
+    o.step("r1")
+    assert o.take_output() == []
+    o.on_order_board("RUN", [])
+    o.step("r1")
+    assert o.take_output() == [DispatchCmd(o._robots["r1"].outbound_goal, "OUTBOUND", "r1")]

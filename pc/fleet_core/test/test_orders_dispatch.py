@@ -40,10 +40,11 @@ def test_a_shorter_board_cancels_the_newest_call_first():
     assert o.take_output() == [CancelDispatchCmd(2)]
 
 
-def test_the_run_mode_does_not_hold_calls_back():
+def test_a_service_pause_opens_no_work_call():
+    """서비스 정지(PAUSE)에서는 대기 주문이 있어도 작업대 호출을 열지 않는지 지킨다(설계 4.8)."""
     o = make()
     o.on_order_board("PAUSE", [T1])
-    assert o.take_output() == [DispatchCmd(1, "WORK")]
+    assert o.take_output() == []
 
 
 def test_four_items_fit_the_basket():

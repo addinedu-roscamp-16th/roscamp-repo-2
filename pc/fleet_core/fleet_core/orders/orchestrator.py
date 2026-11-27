@@ -3,6 +3,8 @@
 일시 중지 · 재시작 · 팔 고장 · 작업대 막힘), 조회(`order_of` · `robot_view`)가 채워져 있다.
 치움 · 복귀 · 격리 · 강제 출고(`on_robot_removed` · `on_robot_reinstated` · `on_robot_isolated` ·
 `on_force_ship`)는 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")라 몸통이 비어 있다.
+서비스 정지(`run_mode == "PAUSE"`, 설계 4.8)에서는 이미 묶인 주문만 끝까지 진행하고 새 일(작업대 호출 ·
+묶기 · 빈 바구니 받으러 가기)은 막는다(`service_paused`).
 흐름은 같은 폴더의 pseudocode.md에 있다.
 
 FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르고, `take_output()`으로 명령을
@@ -123,6 +125,11 @@ class OrderOrchestrator:
         self._blocked = set()  # 막힌 스테이션 id(설계 4.5). ArmStationBlocked가 넣고 뺀다
         self._out = []
 
+    @property
+    def service_paused(self) -> bool:
+        """마지막 주문판의 run_mode가 PAUSE인지(설계 4.8). manager.py:347이 이 값이 있어야 정지 중에도 step을 부른다."""
+        return self._run_mode == "PAUSE"
+
     # ---- 주문판, 배차, 팔 보고 입력 ----
     def on_order_board(self, run_mode, orders) -> None:
         """central의 주문판이 올 때마다 불린다. 검사를 통과한 주문판만 온다.
@@ -200,7 +207,8 @@ class OrderOrchestrator:
         rec = self._robots.get(robot_id)
         if success and rec is not None and self._can_bind(rec):
             waiting = self._waiting_orders()
-            if waiting:
+            # 설계 4.8: 정지 중에 닿은 로봇은 새 일이므로 묶지 않고 놓아 준다(거두기 전에 닿은 답이 늦게 오는 경우).
+            if waiting and not self.service_paused:
                 self._bind(robot_id, waiting[0])
             else:
                 # pseudocode 2단계: 묶을 주문이 그새 사라졌으면 놓아 준다. 안 놓으면 작업대 구역을 잡은 채 남음.
@@ -426,7 +434,10 @@ class OrderOrchestrator:
         # pseudocode 1단계: 주문도 호출도 없이 바구니만 없으면 빈 바구니를 받으러 간다(5단계와 같은 길).
         # 다른 쉬는 로봇은 아무것도 하지 않는다(다음 일은 열린 호출에 교통 층이 고를 때 온다).
         # 격리 로봇 제외(pseudocode 1단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")이므로 검사하지 않는다.
-        if rec.order is None and rec.basket == NONE and rec.dispatch_failures == 0:
+        # 설계 4.8: 정지 중에는 이것도 새 일이라 하지 않는다(RUN으로 돌아오면 다음 step이 부른다).
+        # 위 OUTBOUND 재시도는 이미 시작한 일이라 정지 중에도 한다.
+        if (rec.order is None and rec.basket == NONE and rec.dispatch_failures == 0
+                and not self.service_paused):
             self._start_outbound(robot)
 
     # ---- 출력과 조회 ----
@@ -525,9 +536,10 @@ class OrderOrchestrator:
 
     def _match_calls(self) -> None:
         """열린 WORK 호출 수를 대기 주문 수에 맞춘다. 넘치면 나중에 연 것부터 거둔다."""
+        # 설계 4.8: 서비스 정지 중에도 0으로 맞춘다. 작업대로 오던 빈 Pode는 교통 층이 대기 자리로 보낸다(manager.py 주석).
         # 설계 4.5: 작업대가 막혀 있으면 대기 주문 수와 상관없이 0으로 맞춘다(열린 호출은 거둠).
         # OUTBOUND가 막힌 경우는 따로 하지 않는다: ArmJobs가 교환 목표를 ArmDeclined로 돌려 step이 다시 묻는다.
-        want = 0 if self._work in self._blocked else len(self._waiting_orders())
+        want = 0 if (self.service_paused or self._work in self._blocked) else len(self._waiting_orders())
         while len(self._open_calls) < want:
             self._open_calls.append(self._next_call)
             self._out.append(DispatchCmd(self._next_call, self._work))

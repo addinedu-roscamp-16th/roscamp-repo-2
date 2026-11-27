@@ -10,7 +10,8 @@ HELD는 끝이 아니다. 보류된 주문은 주문판에 남아 있는 동안 
 - `ROBOT_FAULT` 보류: 주문은 로봇에서 이미 떨어졌고 강제 출고도 거절한다. 주문판에서 그 id가 빠질 때까지 보류로 남는다.
 - 주문판에서 빠졌다가 같은 id로 다시 들어오면 보류 기록이 지워진 뒤라 새 주문처럼 배정될 수 있다.
 
-이 문서는 v2.4의 목표 동작이다. 2 · 3장 가운데 주문판 처리 · 작업대 호출 · 배정 응답은 구현됐고(최종 보고 · 보류 · 놓아 주기 · bound 번호와 빈 바구니 받으러 가기는 아직), 4장 채우기부터와 5장 고장 처리 · 강제 출고는 아직 뼈대다.
+이 문서는 v2.4의 목표 동작이다. 1차는 주문판 처리, 작업대 호출 · 배정, 채우기, 출고 이동, 교환, 끝 상태 · 진행 보고, contract 1.0 팔 보고(일시 중지 · 재시작 · 작업대 막힘 · 늦은 결과 무시), ArmFault 보류(HELD), 서비스 정지를 구현한다.
+2차(이번 계획 밖)는 격리, 치움, 복귀, 늦은 결과의 수량 반영, 이동 명령(trip command), 강제 출고(`force_ship`)로 5장의 해당 부분은 아직 뼈대다.
 - `on_force_ship`은 늘 `(False, NOT_IMPLEMENTED)`를 돌려주고, manager는 그 답을 그대로 넘긴다.
 - `/fleet/force_ship` 서버는 `ForceShip.srv`와 contract의 `force_ship` 항목이 둘 다 있어야 열린다. 지금은 둘 다 없다(주문 담당 몫).
 
@@ -21,6 +22,7 @@ HELD는 끝이 아니다. 보류된 주문은 주문판에 남아 있는 동안 
 | 생성 | `OrderOrchestrator(stations, params, robots, clock)`. stations에서 action이 FILL인 곳이 WORK, SWAP인 곳이 OUTBOUND |
 | 입력 | `on_order_board(run_mode, orders)`, `on_dispatch_feedback(goal_id, robot_id, phase)`, `on_dispatch_result(goal_id, success, robot_id, reason="")`, `on_arm_report(report)`, `on_robot_removed(robot)`, `on_robot_reinstated(robot, basket)`, `on_robot_isolated(robot, reason)`, `on_force_ship(order_id) -> (accepted, reason)`, `step(robot)` |
 | 출력 | `take_output()`: 쌓인 명령 목록을 주고 비운다 |
+| 읽기 속성 | `service_paused`: 마지막 `run_mode`가 `PAUSE`이면 True, `RUN` · `STOP`이면 False |
 | 조회 | `order_of(robot)`: 묶인 주문 id, 없으면 `""`. `robot_view(robot)`: `stage`, `basket`, `order`, `placed`. 모르는 로봇이면 `{}`. `shipped`: 내보낸 주문 수 |
 | 내는 명령 | DispatchCmd, CancelDispatchCmd, ReleaseCmd, ArmFillCmd, ArmSwapCmd, ArmResetCmd, ReportOrderCmd(HELD일 때 `hold_reason`), RobotFaultCmd(출고 배차 재시도 한도 초과만), EventOut, 그리고 고장 처리용 ArmFailedCmd, ArmStopCmd, ArmDropCmd |
 | 받는 팔 보고 | ArmDeclined, ArmFillResult, ArmSwapResult, ArmLost, ArmLate, ArmFault |
@@ -80,6 +82,8 @@ HELD는 끝이 아니다. 보류된 주문은 주문판에 남아 있는 동안 
 4. 채우기 (`step`, stage `FILLING`)
    - asked가 있으면 기다린다.
    - 남은 것 = items에서 placed와 missing을 뺀 것. 남은 것이 있으면 asked=`fill`, `ArmFillCmd(robot, WORK, 주문 id, 남은 것)`.
+   - 진행 보고: 주문마다 첫 `ArmFillCmd`에서 `ReportTripCmd(FILLING)`을 한 번만 낸다(재요청에서는 다시 내지 않음). 담기 일시 중지는 `FILLING_PAUSE`, 찬 바구니를 싣고 출고로 갈 때는 `TRANSPORTING`을 낸다.
+     `missing`은 실제로 못 담은 것(`order.missing`)만 싣고, 남은 상품을 `missing`으로 싣지 않는다.
    - 남은 것이 없으면 마무리: `ArmResetCmd(robot)`, missing = items - placed, 그다음
      - 하나도 못 담았으면 CANCELED 보고("nothing could be placed, missing ..."), stage `""`, `ReleaseCmd`.
      - 그 밖(다 담았거나 일부만 담았거나)이면 basket `FULL`, stage `""`, 5단계로 간다. 모자라도 늘 내보낸다.
@@ -115,9 +119,11 @@ HELD는 끝이 아니다. 보류된 주문은 주문판에 남아 있는 동안 
 
 ## 4. 운행 모드
 
-- 주문 코어는 run_mode를 저장만 하고 `RUN`, `PAUSE`, `STOP`을 가리지 않는다. 호출 열기와 묶기는 모드와 상관없다.
+- 서비스 정지(`PAUSE`, 설계 4.8, 회의 정리 2026-11-27 8번): 이미 묶인 주문은 채우기, 출고 이동, 교환, 끝 상태 보고까지 그대로 진행한다. OUTBOUND 재시도도 한다.
+  새 일은 막는다. 열린 WORK 호출은 0으로 맞추고(열린 것은 `CancelDispatchCmd`), 그 사이 성공한 WORK 호출 결과가 와도 묶지 않고 `ReleaseCmd`를 낸다.
+  바구니 없는 쉬는 로봇이 빈 바구니를 받으러 가는 것도 하지 않는다. `RUN`으로 돌아오면 열린 호출을 다시 맞춘다.
 - 모드의 효과는 바깥에서 난다. FleetManager는 교통 층이 `RUN`이고 모든 로봇이 지도 위 위치를 보고했을 때만, 일할 수 있는 로봇마다
-  `step` → 교통 `step` → `step` 순서로 부른다. `PAUSE`와 `STOP`에서는 `step`이 불리지 않는다.
+  `step` → 교통 `step` → `step` 순서로 부른다. `STOP`에서는 `step`이 불리지 않고, `PAUSE`에서는 주문 코어에 `service_paused`가 있어 불린다(`manager.py` 347행 부근).
 - `STOP`으로 바뀌면 ArmJobs가 진행 중인 팔 goal을 취소한다. 이렇게 취소된 결과는 시도로 세지 않고, `RUN`이 오면 다시 묻는다.
 - 주문판 검사는 FleetManager가 한다. 모드가 틀리면 주문판 전체를 버리고, 주문이 틀리면 모드만 받고 주문은 앞의 것을 쓴다.
 
