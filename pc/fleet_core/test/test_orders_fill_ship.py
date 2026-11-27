@@ -445,6 +445,30 @@ def test_an_arm_fault_holds_the_order_on_the_robot():
     assert o.take_output() == []
 
 
+def test_held_report_keeps_the_progress_placed_before_an_arm_fault():
+    """진행 보고로 받은 수가 팔 고장 HELD 보고의 placed에서 빠지지 않는지 지킨다(설계 4.4)."""
+    o = filling(OrderRecord("T-1", {"A": 3}))
+    o.on_arm_report(ArmFillProgress("r1", {"A": 2}))
+    o.take_output()
+    o.on_arm_report(ArmFault("r1", "fill", "workcell", "boom"))
+    assert o.take_output() == [ReportOrderCmd("T-1", "r1", "HELD", {"A": 2}, {"A": 1}, "boom",
+                                              "ARM_FAULT")]
+    order = o._robots["r1"].order
+    assert order.placed == {"A": 2} and order.progress == {}
+
+
+def test_held_report_keeps_the_progress_placed_when_the_arm_was_lost():
+    """답이 없어 ArmLost 뒤 ArmFault로 보류돼도 진행분이 placed에 남고 두 번 세지 않는지 지킨다."""
+    o = filling(OrderRecord("T-1", {"A": 3}))
+    o.on_arm_report(ArmFillProgress("r1", {"A": 2}))
+    o.take_output()
+    o.on_arm_report(ArmLost("r1", 5, "workcell", "fill"))
+    o.on_arm_report(ArmFault("r1", "fill", "workcell", "no answer"))
+    assert o.take_output() == [ReportOrderCmd("T-1", "r1", "HELD", {"A": 2}, {"A": 1},
+                                              "no answer", "ARM_FAULT")]
+    assert o.robot_view("r1")["placed"] == {"A": 2}
+
+
 def test_a_lost_arm_job_only_clears_what_was_asked():
     """ArmLost가 asked만 비우고 아무것도 내지 않는지(이어지는 ArmFault가 보류함) 지킨다."""
     o = filling()

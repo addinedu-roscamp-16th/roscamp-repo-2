@@ -306,6 +306,12 @@ class OrderOrchestrator:
             rec.held = HOLD_ARM_FAULT
             b = rec.order
             if b is not None:
+                # 담는 중에 받은 진행분(progress)은 결과(ArmFillResult)가 오지 않을 것이라 여기서 placed로
+                # 옮긴다. 안 옮기면 직전 FILLING 보고가 2개였는데 HELD 보고는 0개가 된다. 옮기고 비우므로
+                # 이미 결과로 옮겨 비워진 경우(progress가 {})와 겹쳐 두 번 세지 않는다.
+                for item, n in b.progress.items():
+                    b.placed[item] = b.placed.get(item, 0) + n
+                b.progress = {}
                 self._holds[b.order_id] = (report.robot, HOLD_ARM_FAULT)
                 # 못 담은 것은 items - placed(확정 전이라 order.missing이 아님). 강제 출고(2차)가 이 값으로 끝낸다.
                 self._out.append(ReportOrderCmd(
