@@ -10,14 +10,18 @@ FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from fleet_core.common.commands import (
     FILL,
     FORCE_NOT_IMPLEMENTED,
     NO_ROBOT,
+    SWAP,
     TRIP_ASSIGNED,
     CancelDispatchCmd,
     DispatchCmd,
     EventOut,
+    ReleaseCmd,
     ReportTripCmd,
 )
 
@@ -27,6 +31,39 @@ SWAPPING = "SWAPPING"
 EMPTY = "EMPTY"
 FULL = "FULL"
 NONE = "NONE"
+
+# ---- 로봇이 답을 기다리는 팔 작업 종류(`_RobotRecord.asked`, 설계 4.1) ----
+ASK_FILL = "fill"
+ASK_SWAP = "swap"
+ASK_PAUSED = "paused"  # 서비스 정지로 보류한 작업(설계 4.4)
+ASK_RESUME = "resume_wait"  # 재개 뒤 다시 보내기를 기다리는 중(설계 4.4)
+
+
+@dataclass
+class _Bound:
+    """로봇에 묶인 주문 한 건의 진행(설계 4.1). 채우기 이후 단계가 placed 등을 채운다."""
+    order_id: str
+    items: dict[str, int]
+    placed: dict[str, int]  # 품목별로 담긴 수
+    missing: dict[str, int]  # 품목별로 못 담은 수
+    progress: dict[str, int]  # 품목별로 이미 요청한 수
+    reported_filling: bool  # FILLING 보고를 이미 냈는지
+
+
+@dataclass
+class _RobotRecord:
+    """로봇 한 대의 주문 쪽 기록(설계 4.1, pseudocode.md 2장)."""
+    stage: str = ""
+    basket: str = EMPTY
+    order: _Bound | None = None
+    last_order_id: str = ""
+    outbound_goal: int | None = None
+    dispatch_failures: int = 0
+    dispatch_retry_at: float | None = None
+    dispatch_reason: str = ""
+    asked: str = ""
+    bound: int = 0  # 묶을 때마다 +1. 늦은 팔 결과가 같은 묶음인지 가리는 번호
+    held: str = ""  # 팔 고장으로 붙잡혔으면 "ARM_FAULT"
 
 
 class OrderOrchestrator:
@@ -51,7 +88,12 @@ class OrderOrchestrator:
         self._over_capacity = set()  # 용량 초과를 이미 알린 주문 id
         self._open_calls = []  # 열어 둔 WORK 호출 id, 연 순서
         self._next_call = 1
-        self._bound = {name: None for name in robots}  # 로봇 -> 묶인 OrderRecord
+        # 설계 4.1: 로봇별 기록. 예전 `_bound`(로봇 -> OrderRecord)는 `_robots[...].order`로 옮겼다.
+        self._robots = {name: _RobotRecord() for name in robots}
+        self._final = set()  # 최종 보고(SHIPPED/PARTIAL/CANCELED)를 낸 주문 id
+        self._holds = {}  # 보류 주문 id -> (로봇, 사유)
+        # 교환(SWAP) 스테이션. 이 작업에서는 쓰지 않고 출고 이동을 채우는 작업이 쓴다.
+        self._outbound = next((sid for sid, st in stations.items() if st.action == SWAP), "")
         self._out = []
 
     # ---- 주문판, 배차, 팔 보고 입력 ----
@@ -64,6 +106,16 @@ class OrderOrchestrator:
         """
         self._run_mode = run_mode
         self._board = list(orders)
+        # ---- 설계 4.6 / pseudocode 2단계: 새 주문판에 없는 id는 최종 보고 집합 · 보류 목록에서 지움 ----
+        # (안 지우면 같은 id가 다시 올 때 이미 끝난 주문으로 오해하고, 집합도 끝없이 커짐)
+        on_board = {o.order_id for o in self._board}
+        self._final &= on_board
+        self._holds = {k: v for k, v in self._holds.items() if k in on_board}
+        # ---- 설계 4.6: held 로봇의 주문이 빠지면 로봇의 주문만 비움 ----
+        # 로봇은 붙잡은 채 둔다. 풀기는 2차의 치움 몫이라 여기서 하지 않는다.
+        for rec in self._robots.values():
+            if rec.held and rec.order is not None and rec.order.order_id not in on_board:
+                rec.order = None
         # ---- 용량 초과 기록: 새 주문판에 남아 있고 여전히 넘는 id만 ----
         capacity = self.params.basket_capacity
         over = {o.order_id for o in self._board if sum(o.items.values()) > capacity}
@@ -101,14 +153,17 @@ class OrderOrchestrator:
         if goal_id not in self._open_calls:
             return
         self._open_calls.remove(goal_id)
-        # ---- 아는 빈 Pode가 닿았으면 맨 앞 대기 주문을 묶음 ----
-        if success and self._bound.get(robot_id, True) is None:
+        # ---- 설계 4.3: 묶을 자격이 있는 로봇이 닿았을 때만 묶거나 놓아 줌 ----
+        # 모르는 로봇의 답은 자격이 없어 아래를 건너뛰고, 호출만 아래 _match_calls에서 다시 열린다.
+        rec = self._robots.get(robot_id)
+        if success and rec is not None and self._can_bind(rec):
             waiting = self._waiting_orders()
             if waiting:
-                order = waiting[0]
-                self._bound[robot_id] = order
-                self._out.append(EventOut("INFO", "ORDER_BOUND", order.order_id, robot_id))
-                self._out.append(ReportTripCmd(order.order_id, robot_id, TRIP_ASSIGNED, {}, {}))
+                self._bind(robot_id, waiting[0])
+            else:
+                # pseudocode 2단계: 묶을 주문이 그새 사라졌으면 놓아 준다. 안 놓으면 작업대 구역을 잡은 채 남음.
+                self._out.append(ReleaseCmd(robot_id))
+        # 자격 없음(예: held 로봇)이면 묶지도 놓지도 않는다. 놓으면 붙잡아 둔 뜻이 사라진다(설계 4.3).
         # ---- 실패한 호출은 새 id로 다시 열림 ----
         self._match_calls()
 
@@ -165,11 +220,27 @@ class OrderOrchestrator:
         return out
 
     # ---- 대기 주문과 열린 호출 ----
+    def _can_bind(self, rec) -> bool:
+        """묶을 자격(설계 4.3): 주문이 없고, held가 아니고, 쉬는 중(stage "")이고, 바구니가 비어 있다."""
+        return (rec.order is None and rec.held == "" and rec.stage == ""
+                and rec.basket == EMPTY)
+
+    def _bind(self, robot, order) -> None:
+        """대기 주문 하나를 로봇에 묶고 알린다(설계 4.3, pseudocode 2단계)."""
+        rec = self._robots[robot]
+        rec.order = _Bound(order.order_id, dict(order.items), {}, {}, {}, False)
+        rec.last_order_id = order.order_id
+        rec.bound += 1
+        rec.stage = FILLING
+        self._out.append(EventOut("INFO", "ORDER_BOUND", order.order_id, robot))
+        self._out.append(ReportTripCmd(order.order_id, robot, TRIP_ASSIGNED, {}, {}))
+
     def _waiting_orders(self) -> list:
-        """주문판 순서대로, 로봇에 묶이지 않았고 용량 안인 주문."""
-        bound = {o.order_id for o in self._bound.values() if o is not None}
+        """주문판 순서대로, 묶이지 않았고 최종 보고도 보류도 아니며 용량 안인 주문(설계 4.6)."""
+        bound = {r.order.order_id for r in self._robots.values() if r.order is not None}
         return [o for o in self._board
-                if o.order_id not in bound and o.order_id not in self._over_capacity]
+                if o.order_id not in bound and o.order_id not in self._final
+                and o.order_id not in self._holds and o.order_id not in self._over_capacity]
 
     def _match_calls(self) -> None:
         """열린 WORK 호출 수를 대기 주문 수에 맞춘다. 넘치면 나중에 연 것부터 거둔다."""
@@ -183,8 +254,8 @@ class OrderOrchestrator:
 
     def order_of(self, robot) -> str:
         """로봇에 묶인 주문 id. 없거나 모르는 로봇이면 ""."""
-        order = self._bound.get(robot)
-        return order.order_id if order else ""
+        rec = self._robots.get(robot)
+        return rec.order.order_id if rec and rec.order else ""
 
     def robot_view(self, robot) -> dict:
         """로봇 한 대의 주문 쪽 상태. 모르는 로봇이면 {}.
@@ -194,7 +265,8 @@ class OrderOrchestrator:
         """
         if robot not in self._names:
             return {}
-        order = self._bound[robot]
-        if order is None:
-            return {"stage": "", "basket": EMPTY, "order": None, "placed": {}}
-        return {"stage": FILLING, "basket": EMPTY, "order": order.order_id, "placed": {}}
+        rec = self._robots[robot]
+        order = rec.order
+        return {"stage": rec.stage, "basket": rec.basket,
+                "order": order.order_id if order else None,
+                "placed": dict(order.placed) if order else {}}
