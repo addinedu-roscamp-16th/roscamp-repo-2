@@ -103,7 +103,7 @@
 | `ArmSwapResult(robot, took_full, put_empty_done)` | `pseudocode.md` 6단계: `asked` 비움 → took_full이고 basket `FULL`이면 basket `NONE` + 끝 상태 보고(4.7) → put_empty_done이고 basket `NONE`이면 basket `EMPTY`, `ArmResetCmd`, stage `""`, `ReleaseCmd` → 그 밖에는 `ArmFailedCmd(robot)` |
 | `ArmFault(robot, kind, server, reason)` | `asked` 비움, `held = ARM_FAULT`. 주문이 있으면 `ReportOrderCmd(HELD, placed, items - placed, reason, ARM_FAULT)`, 보류 목록에 넣음. 주문은 로봇에 묶인 채 둡니다 |
 | `ArmLost(robot, …)` | 1차는 `asked`만 비움(바로 뒤 `ArmFault`가 옴) |
-| `ArmLate(goal_id, kind, …)` | 1차는 `EventOut(WARN, ARM_LATE_RESULT, …)`만. 수량은 고치지 않음(2차) |
+| `ArmLate(goal_id, kind, …)` | 1차는 아무것도 내지 않음(잃은 작업 기록이 없어 pseudocode 5장의 '맞는 잃은 작업 없음 → 무시'에 해당). 수량 반영과 알림은 2차 |
 
 - **진행 보고의 `missing`**: 담는 중에는 실제로 못 담은 것(`order.missing`)만 싣습니다. 남은 상품을 `missing`으로 싣지 않습니다(브리지가 `qty_missing`=못 담은 수로 씀). (내 판단, 다음 주 논의 1번을 이것으로 맞춤)
 - **`placed`는 `placed`를 씁니다**(`placed_confirmed`가 아님). 1.0 계약에서 Phody는 둘을 같게 보냅니다. (내 판단)

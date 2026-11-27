@@ -374,8 +374,7 @@ def test_stale_or_unknown_goal_ids_are_ignored_quietly():
     core.on_fill_result(999, True, {"A": 1}, {})
     core.on_swap_result(999, True, True, True)
     assert {r: core.robot_view(r) for r in SPOTS} == before
-    # 교통 쪽 늦은 답은 조용하고, 팔 쪽 모르는 goal id의 결과는 설계 4.4대로 ARM_LATE_RESULT 경고 둘만 남긴다.
-    assert [e.code for e in cmds(core.tick(), "EventOut")] == ["ARM_LATE_RESULT"] * 2
+    assert not cmds(core.tick(), "EventOut")
 
 
 def test_views_of_an_unknown_robot_do_not_raise():

@@ -228,11 +228,9 @@ class OrderOrchestrator:
             self._match_calls()
             return
         if isinstance(report, ArmLate):
-            # 설계 4.4: 늦게 온 결과(이미 끝났거나 버린 목표)는 경고만. 수량은 고치지 않는다(2차).
-            # 로봇 이름이 없어 어느 주문 것인지도 알 수 없다.
-            self._out.append(EventOut(
-                "WARN", "ARM_LATE_RESULT",
-                f"late {report.kind} result for goal {report.goal_id} ignored (counts unchanged)"))
+            # 1차는 아무것도 내지 않는다(설계 4.4). 잃은 작업 기록을 두지 않아 모든 ArmLate가 pseudocode 5장의
+            # "맞는 잃은 작업이 없으면 무시"에 해당한다. test_input_reject의 "모르는 goal id는 조용히"와도 맞다.
+            # 수량 반영과 알림은 2차 범위다.
             return
         # 설계 4.4: 모르는 로봇 이름은 무시.
         rec = self._robots.get(getattr(report, "robot", None))

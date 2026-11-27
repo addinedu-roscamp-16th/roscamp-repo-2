@@ -466,12 +466,11 @@ def test_a_blocked_workcell_cancels_and_reopens_its_calls():
     assert o.take_output() == [DispatchCmd(2, "WORK")]
 
 
-def test_a_late_arm_result_only_warns():
-    """늦은 팔 결과(ArmLate)가 경고만 내고 수량을 고치지 않는지 지킨다."""
+def test_a_late_arm_result_is_ignored_silently():
+    """늦은 팔 결과(ArmLate)가 출력도 수량 변화도 내지 않는지 지킨다(1차는 잃은 작업 기록이 없음)."""
     o = filling()
     o.on_arm_report(ArmLate(9, "fill", {"A": 1}))
-    out = o.take_output()
-    assert len(out) == 1 and out[0].level == "WARN" and out[0].code == "ARM_LATE_RESULT"
+    assert o.take_output() == []
     assert o._robots["r1"].order.placed == {}
 
 
