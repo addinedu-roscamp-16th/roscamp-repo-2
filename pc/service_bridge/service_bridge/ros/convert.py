@@ -3,10 +3,10 @@ from datetime import datetime, timezone
 
 from builtin_interfaces.msg import Time
 from fleet_interfaces.msg import OrderItem, RobotStatusArray
-from fleet_interfaces.srv import Hello, ReportTrip, SubmitTrip
+from fleet_interfaces.srv import Hello, ReportCommand, ReportTrip, SubmitTrip
 
 from service_bridge.core.dispatch import DispatchItem
-from service_bridge.core.types import HelloIn, ReportIn
+from service_bridge.core.types import CommandIn, HelloIn, ReportIn
 
 
 def items(items: list[OrderItem]) -> dict[str, int]:
@@ -27,6 +27,20 @@ def report_in(req: ReportTrip.Request) -> ReportIn:
         robot_id=req.robot_id,
         placed=items(req.placed),
         missing=items(req.missing),
+        stamp=iso(req.stamp),
+    )
+
+
+def command_in(req: ReportCommand.Request) -> CommandIn:
+    # 칸 이름과 값을 그대로 옮긴다. 값 검사는 하지 않음: ReportCommand 값은 DB final_result와
+    # 같은 집합이고(ReportCommand.srv), 낯선 값은 core.commands가 판정한다
+    return CommandIn(
+        request_id=req.request_id,
+        command=req.command,
+        target=req.target,
+        result=req.result,
+        reason=req.reason,
+        detail=req.detail,
         stamp=iso(req.stamp),
     )
 

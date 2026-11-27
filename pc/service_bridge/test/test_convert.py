@@ -5,7 +5,7 @@ pytest.importorskip("fleet_interfaces")
 
 from builtin_interfaces.msg import Time  # noqa: E402
 from fleet_interfaces.msg import OrderItem, RobotStatus, RobotStatusArray  # noqa: E402
-from fleet_interfaces.srv import ReportTrip  # noqa: E402
+from fleet_interfaces.srv import ReportCommand, ReportTrip  # noqa: E402
 from service_bridge.ros import convert  # noqa: E402
 
 
@@ -29,3 +29,14 @@ def test_report_in_carries_stamp():
     assert convert.report_in(req).stamp == "2025-11-24T16:00:00.500000+00:00"
     assert convert.report_in(ReportTrip.Request(stamp=Time(sec=1764000000))).stamp == \
         "2025-11-24T16:00:00+00:00"
+
+
+def test_command_in_copies_fields():
+    """여섯 칸이 이름 그대로 옮겨지고 stamp만 ISO 문자열로 바뀐다 (칸이 빠지면 DB에 빈 값이 들어감)."""
+    req = ReportCommand.Request(
+        request_id="R-1", command="set_lock", target="pode1", result="ACCEPTED",
+        reason="NONE", detail="d", stamp=Time(sec=1764000000, nanosec=500_000_000))
+    got = convert.command_in(req)
+    assert (got.request_id, got.command, got.target, got.result, got.reason, got.detail) == \
+        ("R-1", "set_lock", "pode1", "ACCEPTED", "NONE", "d")
+    assert got.stamp == "2025-11-24T16:00:00.500000+00:00"

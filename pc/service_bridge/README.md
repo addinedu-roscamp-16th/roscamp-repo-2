@@ -1,6 +1,6 @@
 # service_bridge
 
-주문 흐름의 서비스 브리지. fleet의 `Hello`와 `ReportTrip` 서버(보고를 DB 주문 상태에 반영)이고 `/system/mode`를 발행합니다. 2단계부터 같은 프로세스에서 주문 접수 웹(`POST /api/orders`, `GET /api/snapshot`, `/ws/customer` · `/ws/admin`)을 열고, 접수한 운반 건을 브리지가 직접 central에 `SubmitTrip`으로 넘깁니다.
+주문 흐름의 서비스 브리지. fleet의 `Hello` · `ReportTrip` · `ReportCommand` 서버(보고를 DB 주문 상태에, 관리 명령 결과를 `admin_action`에 반영)이고 `/system/mode`를 발행합니다. 2단계부터 같은 프로세스에서 주문 접수 웹(`POST /api/orders`, `GET /api/snapshot`, `/ws/customer` · `/ws/admin`)을 열고, 접수한 운반 건을 브리지가 직접 central에 `SubmitTrip`으로 넘깁니다.
 
 - `service_bridge/core/`: ROS 없는 판단 코드(DB 트랜잭션, 상태 전이, 재시도). `pytest`만으로 시험합니다.
 - `service_bridge/ros/`: rclpy 노드와 어댑터.

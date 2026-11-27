@@ -8,7 +8,7 @@ rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("fleet_interfaces")
 
 from fleet_interfaces.msg import SystemMode  # noqa: E402
-from fleet_interfaces.srv import Hello, ReportTrip  # noqa: E402
+from fleet_interfaces.srv import Hello, ReportCommand, ReportTrip  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
@@ -89,6 +89,23 @@ def test_report_trip_round_trip(spin, pool, conn, seeded):
     assert (res.accepted, res.result) == (True, "DUPLICATE")
 
 
+def test_report_command_round_trip(spin, pool, conn, seeded):
+    """/bridge/report_command가 열려 있고 응답 전에 final_result가 커밋된다 (IR-12)."""
+    conn.execute(
+        "INSERT INTO admin_action (account_id, action, robot_id, request_id, result) "
+        "VALUES (%s, 'LOCK_RELEASE', 'pode1', 'R-1', 'SENT')", (seeded["account_id"],))
+    bridge = BridgeNode(pool, parameter_overrides=_mode("TEST"))
+    peer = rclpy.create_node("bridge_test_peer")
+    spin(bridge, peer)
+    client = peer.create_client(ReportCommand, "/bridge/report_command")
+
+    res = _call(client, ReportCommand.Request(
+        request_id="R-1", command="set_lock", target="pode1", result="ACCEPTED"))
+    assert res.accepted is True
+    assert conn.execute("select final_result from admin_action where request_id='R-1'"
+                        ).fetchone()[0] == "ACCEPTED"
+
+
 def test_no_servers_until_db_ready(spin):
     dead = make_pool("postgresql://postgres:x@127.0.0.1:1/none", open=False)
     dead.open(wait=False)
@@ -108,6 +125,7 @@ def test_no_servers_until_db_ready(spin):
         assert [m.mode for m in modes] == ["TEST"]
         services = {name for name, _ in peer.get_service_names_and_types()}
         assert "/bridge/report_trip" not in services
+        assert "/bridge/report_command" not in services
         assert "/bridge/hello" not in services
     finally:
         dead.close(timeout=1.0)

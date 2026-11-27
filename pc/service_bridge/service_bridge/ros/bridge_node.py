@@ -1,4 +1,4 @@
-# ---- 브리지 노드: /system/mode 발행, DB 준비 뒤 Hello · ReportTrip 서버 ----
+# ---- 브리지 노드: /system/mode 발행, DB 준비 뒤 Hello · ReportTrip · ReportCommand 서버 ----
 from __future__ import annotations
 
 import time
@@ -8,7 +8,7 @@ from collections.abc import Callable
 from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.contract import load_contract, to_ros_qos
 from fleet_interfaces.msg import RobotStatusArray, SystemMode
-from fleet_interfaces.srv import Hello, ReportTrip
+from fleet_interfaces.srv import Hello, ReportCommand, ReportTrip
 from psycopg_pool import ConnectionPool
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -16,6 +16,7 @@ from rclpy.exceptions import ParameterException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
+from service_bridge.core.commands import apply_command
 from service_bridge.core.hello import apply_hello
 from service_bridge.core.reports import apply_report
 from service_bridge.ros import convert
@@ -97,6 +98,9 @@ class BridgeNode(Node):
             self.create_service(
                 ReportTrip, self._contract.name("report_trip"), self._on_report,
                 callback_group=MutuallyExclusiveCallbackGroup()),
+            self.create_service(
+                ReportCommand, self._contract.name("report_command"), self._on_command,
+                callback_group=MutuallyExclusiveCallbackGroup()),
         ]
         # 5. 운반 건 넘기기 시작: 켜질 때 남은 줄도 다시 보낸다
         self._dispatcher = Dispatcher(self, self._pool, self._contract)
@@ -104,7 +108,7 @@ class BridgeNode(Node):
         self._probe_timer.cancel()
         self.destroy_timer(self._probe_timer)
         self._probe_timer = None
-        self.get_logger().info("DB 연결됨, Hello · ReportTrip 서버 열림")
+        self.get_logger().info("DB 연결됨, Hello · ReportTrip · ReportCommand 서버 열림")
 
     @property
     def mode(self) -> str:
@@ -156,4 +160,21 @@ class BridgeNode(Node):
                 f"ReportTrip 처리 중 예외: trip_id={request.trip_id} "
                 f"({request.report_epoch}, {request.report_n})\n{traceback.format_exc()}")
             response.accepted, response.result, response.reason = False, "", "DB_ERROR"
+        return response
+
+    def _on_command(self, request, response):
+        deadline = time.monotonic() + REQUEST_BUDGET_SEC
+        try:
+            out = apply_command(self._pool, convert.command_in(request), deadline)
+            response.accepted = out.accepted
+            # 응답에 result 칸이 없어 판정(APPLIED · DUPLICATE · LATE)은 로그에만 남긴다 (설계 4.4).
+            # 로봇 쪽은 accepted만 보면 되고, 늦은 결과의 경보는 core.commands가 DB에 쓴다
+            self.get_logger().info(
+                f"ReportCommand {out.result or out.reason}: request_id={request.request_id} "
+                f"result={request.result}")
+        except Exception:
+            self.get_logger().error(
+                f"ReportCommand 처리 중 예외: request_id={request.request_id}\n"
+                f"{traceback.format_exc()}")
+            response.accepted = False
         return response
