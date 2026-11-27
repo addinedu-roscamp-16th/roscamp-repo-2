@@ -123,7 +123,7 @@ HELD는 끝이 아니다. 보류된 주문은 주문판에 남아 있는 동안 
   새 일은 막는다. 열린 WORK 호출은 0으로 맞추고(열린 것은 `CancelDispatchCmd`), 그 사이 성공한 WORK 호출 결과가 와도 묶지 않고 `ReleaseCmd`를 낸다.
   바구니 없는 쉬는 로봇이 빈 바구니를 받으러 가는 것도 하지 않는다. `RUN`으로 돌아오면 열린 호출을 다시 맞춘다.
 - 모드의 효과는 바깥에서 난다. FleetManager는 교통 층이 `RUN`이고 모든 로봇이 지도 위 위치를 보고했을 때만, 일할 수 있는 로봇마다
-  `step` → 교통 `step` → `step` 순서로 부른다. `STOP`에서는 `step`이 불리지 않고, `PAUSE`에서는 주문 코어에 `service_paused`가 있어 불린다(`manager.py` 347행 부근).
+  `step` → 교통 `step` → `step` 순서로 부른다. `STOP`에서는 `step`이 불리지 않고, `PAUSE`에서는 주문 코어에 `service_paused`가 있어 불린다(`FleetManager.tick`).
 - `STOP`으로 바뀌면 ArmJobs가 진행 중인 팔 goal을 취소한다. 이렇게 취소된 결과는 시도로 세지 않고, `RUN`이 오면 다시 묻는다.
 - 주문판 검사는 FleetManager가 한다. 모드가 틀리면 주문판 전체를 버리고, 주문이 틀리면 모드만 받고 주문은 앞의 것을 쓴다.
 

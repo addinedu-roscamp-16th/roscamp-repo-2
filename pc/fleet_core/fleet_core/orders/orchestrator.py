@@ -1,10 +1,10 @@
 # ---- OrderOrchestrator: 주문판을 받아 로봇에 주문을 묶고 진행하는 자리 ----
-"""주문 처리. 주문판 처리, 배정 응답, 채우기 · 출고 · 교환 step, 팔 보고(`on_arm_report`: 결과 · 진행 ·
-일시 중지 · 재시작 · 팔 고장 · 작업대 막힘), 조회(`order_of` · `robot_view`)가 채워져 있다.
-치움 · 복귀 · 격리 · 강제 출고(`on_robot_removed` · `on_robot_reinstated` · `on_robot_isolated` ·
-`on_force_ship`)는 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")라 몸통이 비어 있다.
-서비스 정지(`run_mode == "PAUSE"`, 설계 4.8)에서는 이미 묶인 주문만 끝까지 진행하고 새 일(작업대 호출 ·
-묶기 · 빈 바구니 받으러 가기)은 막는다(`service_paused`).
+"""주문 처리. 주문판 처리, 배정 응답, 채우기 · 출고 · 교환 step, 팔 보고(`on_arm_report`: 결과 ·
+진행 · 일시 중지 · 재시작 · 팔 고장 · 작업대 막힘), 조회(`order_of` · `robot_view`)가 채워져 있다.
+치움 · 복귀 · 격리 · 강제 출고(`on_robot_removed` · `on_robot_reinstated` ·
+`on_robot_isolated` · `on_force_ship`)는 2차 범위(설계 2절 "범위 밖")라 몸통이 비어 있다.
+서비스 정지(`run_mode == "PAUSE"`, 설계 4.8)에서는 이미 묶인 주문만 끝까지 진행하고
+새 일(작업대 호출 · 묶기 · 빈 바구니 받으러 가기)은 막는다(`service_paused`).
 흐름은 같은 폴더의 pseudocode.md에 있다.
 
 FleetManager가 이 클래스를 하나 만들어 아래 입력 함수를 부르고, `take_output()`으로 명령을
@@ -16,12 +16,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from fleet_core.common.commands import (
+    CANCELED,
     FILL,
     FORCE_NOT_IMPLEMENTED,
-    CANCELED,
     HELD,
     HOLD_ARM_FAULT,
     NO_ROBOT,
+    PARTIAL,
+    SHIPPED,
     SWAP,
     TRIP_ASSIGNED,
     TRIP_FILLING,
@@ -38,8 +40,8 @@ from fleet_core.common.commands import (
     ArmFillResumed,
     ArmLate,
     ArmLost,
-    ArmStationBlocked,
     ArmResetCmd,
+    ArmStationBlocked,
     ArmSwapCmd,
     ArmSwapResult,
     CancelDispatchCmd,
@@ -49,8 +51,6 @@ from fleet_core.common.commands import (
     ReportOrderCmd,
     ReportTripCmd,
     RobotFaultCmd,
-    SHIPPED,
-    PARTIAL,
 )
 
 # ---- 다른 모듈이 가져다 쓰는 상태 이름 ----
@@ -63,19 +63,27 @@ NONE = "NONE"
 # ---- 로봇이 답을 기다리는 팔 작업 종류(`_RobotRecord.asked`, 설계 4.1) ----
 ASK_FILL = "fill"
 ASK_SWAP = "swap"
-ASK_PAUSED = "paused"  # 서비스 정지로 보류한 작업(설계 4.4)
-ASK_RESUME = "resume_wait"  # 재개 뒤 다시 보내기를 기다리는 중(설계 4.4)
+# 담기 일시 중지(팔의 FILLING_PAUSE) 중. ArmFillPaused가 두고, 관리자가 풀 때까지 step이 다시 묻지
+# 않는다.
+# 서비스 정지(run_mode PAUSE)와는 무관하다(설계 4.4).
+ASK_PAUSED = "paused"
+# 팔 재시작(ArmFillPlaced)으로 목표가 사라진 뒤 관리자 [복구](ArmFillResumed)를 기다리는 중.
+# 그동안 step이 남은 상품을 다시 묻지 않는다(설계 4.4, 팔 관제 합의 ⑪).
+ASK_RESUME = "resume_wait"
 
 
 @dataclass
 class _Bound:
-    """로봇에 묶인 주문 한 건의 진행(설계 4.1). 채우기 이후 단계가 placed 등을 채운다."""
+    """로봇에 묶인 주문 한 건의 진행(설계 4.1). 묶을 때 만들고 담기 결과 · 보고가 칸을 채운다."""
     order_id: str
-    items: dict[str, int]
-    placed: dict[str, int]  # 품목별로 담긴 수
-    missing: dict[str, int]  # 품목별로 못 담은 수
-    progress: dict[str, int]  # 품목별로 이미 요청한 수
-    reported_filling: bool  # FILLING 보고를 이미 냈는지
+    items: dict[str, int]  # 주문한 품목별 수(묶을 때 복사, 바뀌지 않음)
+    placed: dict[str, int]  # 확정된 품목별 담은 수. 결과 · 재시작 보고 · HELD 때 더해진다
+    missing: dict[str, int]  # 확정된 품목별 못 담은 수. 담기 성공 결과 또는 마무리에서 정해진다
+    # 지금 목표의 진행 보고(ArmFillProgress)로 받은 품목별 수. placed에는 아직 안 들어 있다.
+    # 결과(ArmFillResult) · 재시작(ArmFillPlaced)이 오면 placed로 더하고 비우며, 결과 없이 HELD가
+    # 되면(ArmFault) 그때 placed로 옮긴다. 옮긴 뒤 비우므로 같은 상품이 두 번 세어지지 않는다.
+    progress: dict[str, int]
+    reported_filling: bool  # 이 주문의 FILLING 보고를 이미 냈는지(주문당 첫 담기 요청에서 한 번만)
 
 
 @dataclass
@@ -86,6 +94,9 @@ class _RobotRecord:
     order: _Bound | None = None
     last_order_id: str = ""
     outbound_goal: int | None = None
+    # 출고대(OUTBOUND) 호출이 연달아 실패한 횟수. 성공하면 0. 한도(dispatch_retry_limit)를 넘으면
+    # RobotFaultCmd를 내고 값을 남겨 두어, 빈 바구니 받기가 같은 로봇에 곧바로 호출을 다시 내지
+    # 못하게 한다.
     dispatch_failures: int = 0
     dispatch_retry_at: float | None = None
     dispatch_reason: str = ""
@@ -120,14 +131,19 @@ class OrderOrchestrator:
         self._robots = {name: _RobotRecord() for name in robots}
         self._final = set()  # 최종 보고(SHIPPED/PARTIAL/CANCELED)를 낸 주문 id
         self._holds = {}  # 보류 주문 id -> (로봇, 사유)
-        # 교환(SWAP) 스테이션 = OUTBOUND. _start_outbound의 DispatchCmd 목적지이자 ArmSwapCmd 스테이션.
+        # 교환(SWAP) 스테이션 = OUTBOUND. _start_outbound의 DispatchCmd 목적지이자 ArmSwapCmd
+        # 스테이션.
         self._outbound = next((sid for sid, st in stations.items() if st.action == SWAP), "")
         self._blocked = set()  # 막힌 스테이션 id(설계 4.5). ArmStationBlocked가 넣고 뺀다
         self._out = []
 
     @property
     def service_paused(self) -> bool:
-        """마지막 주문판의 run_mode가 PAUSE인지(설계 4.8). manager.py:347이 이 값이 있어야 정지 중에도 step을 부른다."""
+        """마지막 주문판의 run_mode가 PAUSE인지(설계 4.8).
+
+        FleetManager.tick이 이 값을 읽어, 정지 중에도 로봇별 step을 불러
+        이미 묶인 주문을 끝까지 진행시킨다.
+        """
         return self._run_mode == "PAUSE"
 
     # ---- 주문판, 배차, 팔 보고 입력 ----
@@ -140,7 +156,8 @@ class OrderOrchestrator:
         """
         self._run_mode = run_mode
         self._board = list(orders)
-        # ---- 설계 4.6 / pseudocode 2단계: 새 주문판에 없는 id는 최종 보고 집합 · 보류 목록에서 지움 ----
+        # ---- 설계 4.6 / pseudocode 2단계: 새 주문판에 없는 id는 최종 보고 집합 · 보류 목록에서
+        # 지움 ----
         # (안 지우면 같은 id가 다시 올 때 이미 끝난 주문으로 오해하고, 집합도 끝없이 커짐)
         on_board = {o.order_id for o in self._board}
         self._final &= on_board
@@ -183,9 +200,11 @@ class OrderOrchestrator:
         낼 수 있는 출력: EventOut(ORDER_BOUND), ReportTripCmd(ASSIGNED), DispatchCmd,
         CancelDispatchCmd.
         """
-        # ---- 설계 4.3 / pseudocode 5단계: 어느 로봇의 outbound_goal이면 그 로봇의 OUTBOUND 결과 ----
-        # outbound_goal은 로봇마다 새 id라 겹치지 않고, WORK 열린 호출 id와도 같은 번호표에서 나와 겹치지 않는다.
-        for name, orec in self._robots.items():
+        # ---- 설계 4.3 / pseudocode 5단계: 어느 로봇의 outbound_goal이면 그 로봇의 OUTBOUND 결과
+        # ----
+        # outbound_goal은 로봇마다 새 id라 겹치지 않고, WORK 열린 호출 id와도 같은 번호표에서 나와
+        # 겹치지 않는다.
+        for orec in self._robots.values():
             if orec.outbound_goal == goal_id:
                 orec.outbound_goal = None
                 if success:
@@ -193,7 +212,8 @@ class OrderOrchestrator:
                     orec.dispatch_failures = 0
                     orec.dispatch_retry_at = None
                 else:
-                    # 바로 다시 부르지 않고 dispatch_retry_wait_s(2.0 s) 뒤 step이 다시 부른다(고장 폭주 방지).
+                    # 바로 다시 부르지 않고 dispatch_retry_wait_s(2.0 s) 뒤 step이 다시 부른다(고장
+                    # 폭주 방지).
                     orec.dispatch_failures += 1
                     orec.dispatch_retry_at = self._clock() + self.params.dispatch_retry_wait_s
                     orec.dispatch_reason = reason
@@ -207,13 +227,17 @@ class OrderOrchestrator:
         rec = self._robots.get(robot_id)
         if success and rec is not None and self._can_bind(rec):
             waiting = self._waiting_orders()
-            # 설계 4.8: 정지 중에 닿은 로봇은 새 일이므로 묶지 않고 놓아 준다(거두기 전에 닿은 답이 늦게 오는 경우).
+            # 설계 4.8 방어 코드: 정지가 되면 _match_calls가 열린 호출을 모두 거두므로 정상
+            # 흐름에서는 여기 안 온다.
+            # 거두기 전에 닿은 답이 같은 틱에 늦게 오는 경우만 막으려고 묶지 않고 놓아 준다.
             if waiting and not self.service_paused:
                 self._bind(robot_id, waiting[0])
             else:
-                # pseudocode 2단계: 묶을 주문이 그새 사라졌으면 놓아 준다. 안 놓으면 작업대 구역을 잡은 채 남음.
+                # pseudocode 2단계: 묶을 주문이 그새 사라졌으면 놓아 준다. 안 놓으면 작업대 구역을
+                # 잡은 채 남음.
                 self._out.append(ReleaseCmd(robot_id))
-        # 자격 없음(예: held 로봇)이면 묶지도 놓지도 않는다. 놓으면 붙잡아 둔 뜻이 사라진다(설계 4.3).
+        # 자격 없음(예: held 로봇)이면 묶지도 놓지도 않는다. 놓으면 붙잡아 둔 뜻이 사라진다(설계
+        # 4.3).
         # ---- 실패한 호출은 새 id로 다시 열림 ----
         self._match_calls()
 
@@ -228,7 +252,8 @@ class OrderOrchestrator:
         # ---- 로봇 기록이 필요 없는 보고(설계 4.4 ArmLate, 4.5 ArmStationBlocked) ----
         if isinstance(report, ArmStationBlocked):
             # 설계 4.5: reason이 있으면 막힘, 비면 풀림. EventOut은 내지 않는다(ArmJobs가 이미 냄).
-            # 막힘이 바뀌면 열린 호출 수를 바로 다시 맞춘다(막히면 0으로 거두고, 풀리면 대기 주문 수로 다시 연다).
+            # 막힘이 바뀌면 열린 호출 수를 바로 다시 맞춘다(막히면 0으로 거두고, 풀리면 대기 주문
+            # 수로 다시 연다).
             if report.reason:
                 self._blocked.add(report.station_id)
             else:
@@ -236,8 +261,10 @@ class OrderOrchestrator:
             self._match_calls()
             return
         if isinstance(report, ArmLate):
-            # 1차는 아무것도 내지 않는다(설계 4.4). 잃은 작업 기록을 두지 않아 모든 ArmLate가 pseudocode 5장의
-            # "맞는 잃은 작업이 없으면 무시"에 해당한다. test_input_reject의 "모르는 goal id는 조용히"와도 맞다.
+            # 1차는 아무것도 내지 않는다(설계 4.4). 잃은 작업 기록을 두지 않아 모든 ArmLate가
+            # pseudocode 5장의
+            # "맞는 잃은 작업이 없으면 무시"에 해당한다. test_input_reject의 "모르는 goal id는
+            # 조용히"와도 맞다.
             # 수량 반영과 알림은 2차 범위다.
             return
         # 설계 4.4: 모르는 로봇 이름은 무시.
@@ -250,12 +277,14 @@ class OrderOrchestrator:
                 rec.asked = ""
         elif isinstance(report, ArmFillResult):
             b = rec.order
-            # 담기를 물어 둔 상태(asked fill)의 결과만 받는다. 묻지 않았거나 일시 중지 · 재개 대기 중에 온 결과는
-            # 이미 ArmJobs가 버린 목표의 것이라 수량에 더하면 두 번 센다(Task 2 리뷰 이월).
+            # 담기를 물어 둔 상태(asked fill)의 결과만 받는다. 묻지 않았거나 일시 중지 · 재개 대기
+            # 중에 온 결과는
+            # 이미 ArmJobs가 버린 목표의 것이라 수량에 더하면 두 번 센다(설계 4.4).
             if b is None or rec.asked != ASK_FILL:
                 return
             rec.asked = ""
-            # 결과의 placed는 이번 목표 몫 전체라 진행 값을 비워야 같은 상품이 두 번 더해지지 않는다(전역 제약 2).
+            # 결과의 placed는 이번 목표 몫 전체라 진행 값을 비워야 같은 상품이 두 번 더해지지
+            # 않는다(설계 4.4).
             # placed_confirmed는 쓰지 않는다(설계 4.4: Phody는 둘을 같게 보냄).
             for item, n in report.placed.items():
                 b.placed[item] = b.placed.get(item, 0) + n
@@ -264,61 +293,77 @@ class OrderOrchestrator:
                 # pseudocode 4단계: 성공이면 못 담은 것을 확정한다(없으면 빈 dict라 전량 출고).
                 b.missing = self._remaining_of(b.items, b.placed)
             else:
-                # 재시도 여부는 ArmJobs가 정한다(NOT_READY만). 여기서는 알리기만 하고 missing은 건드리지 않는다.
+                # 재시도 여부는 ArmJobs가 정한다(NOT_READY만). 여기서는 알리기만 하고 missing은
+                # 건드리지 않는다.
                 self._out.append(ArmFailedCmd(report.robot))
         elif isinstance(report, ArmFillProgress):
             b = rec.order
-            # asked fill일 때만: 결과로 progress를 비운 뒤 늦게 온 진행이 되살아나 placed를 두 번 세게 하지 않는다
-            # (전역 제약 2). 일시 중지 · 재개 대기 중에는 목표가 없어 진행이 올 수 없다.
+            # asked fill일 때만: 결과로 progress를 비운 뒤 늦게 온 진행이 되살아나 placed를 두 번
+            # 세게 하지 않는다
+            # (설계 4.4). 일시 중지 · 재개 대기 중에는 목표가 없어 진행이 올 수 없다.
             if b is None or rec.asked != ASK_FILL:
                 return
-            # 설계 4.4: 진행은 지금 목표의 것이라 덮어쓴다. 보고의 missing은 실제로 못 담은 것(order.missing)만.
+            # 설계 4.4: 진행은 지금 목표의 것이라 덮어쓴다. 보고의 missing은 실제로 못 담은
+            # 것(order.missing)만.
             b.progress = dict(report.placed)
             self._report_trip(report.robot, TRIP_FILLING)
         elif isinstance(report, ArmFillPaused):
-            # 설계 4.4 / 팔 관제 합의 ①: 결과로 끝난 담기 실패(NOT_READY 외)는 관제가 다시 보내지 않고 관리자를 기다린다.
-            # ArmFillResult(asked 비움) 바로 뒤에 오므로 asked를 paused로 두어 step이 다시 묻지 않게 한다.
-            # missing은 order.missing만 싣는다(팔 결과의 missing 확정은 [보충 불가]라 2차). 풀 길이는 1차에 없다.
+            # 설계 4.4 / 팔 관제 합의 ①: 결과로 끝난 담기 실패(NOT_READY 외)는 관제가 다시 보내지
+            # 않고 관리자를 기다린다.
+            # ArmFillResult(asked 비움) 바로 뒤에 오므로 asked를 paused로 두어 step이 다시 묻지 않게
+            # 한다.
+            # missing은 order.missing만 싣는다(팔 결과의 missing 확정은 [보충 불가]라 2차). 풀
+            # 길이는 1차에 없다.
             rec.asked = ASK_PAUSED
             if rec.order is not None:
                 self._report_trip(report.robot, TRIP_FILLING_PAUSE, report.reason)
         elif isinstance(report, ArmFillPlaced):
-            # 팔 관제 합의 ⑪: 팔 재시작으로 목표가 사라졌다. 담은 수는 바로 더해 이후 고장 · 보류에도 빠지지 않게 한다.
-            # 담기를 묻고 있거나(fill) 일시 중지(paused)였던 로봇만: 그 밖에는 ArmJobs가 보낼 수 없는 보고다.
+            # 팔 관제 합의 ⑪: 팔 재시작으로 목표가 사라졌다. 담은 수는 바로 더해 이후 고장 ·
+            # 보류에도 빠지지 않게 한다.
+            # 담기를 묻고 있거나(fill) 일시 중지(paused)였던 로봇만: 그 밖에는 ArmJobs가 보낼 수
+            # 없는 보고다.
             b = rec.order
             if b is None or rec.asked not in (ASK_FILL, ASK_PAUSED):
                 return
             for item, n in report.placed.items():
                 b.placed[item] = b.placed.get(item, 0) + n
             b.progress = {}
-            # 운반 건 보고는 내지 않는다: [복구]를 기다리는 동안 FILLING 그대로고 관리자는 ARM_RESTARTED(WARN)로
-            # 안다(설계 4.4). held(쥔 상품의 행방을 모름)여도 여기서는 같다. 바로 뒤 ArmFault가 asked를 비우고 보류한다.
+            # 운반 건 보고는 내지 않는다: [복구]를 기다리는 동안 FILLING 그대로고 관리자는
+            # ARM_RESTARTED(WARN)로
+            # 안다(설계 4.4). held(쥔 상품의 행방을 모름)여도 여기서는 같다. 바로 뒤 ArmFault가
+            # asked를 비우고 보류한다.
             rec.asked = ASK_RESUME
         elif isinstance(report, ArmFillResumed):
-            # 팔 관제 합의 ⑪: 관리자 [복구]. resume_wait일 때만 비워 다음 step이 남은 상품으로 새 목표를 낸다.
+            # 팔 관제 합의 ⑪: 관리자 [복구]. resume_wait일 때만 비워 다음 step이 남은 상품으로 새
+            # 목표를 낸다.
             # 그 밖의 상태(예: 이미 ArmFault로 비워졌거나 담기 중)에서는 asked를 건드리지 않는다.
             if rec.asked == ASK_RESUME:
                 rec.asked = ""
         elif isinstance(report, ArmFault):
-            # 설계 4.4: 재시도 한도 초과나 무응답으로 팔 작업을 포기했다. 로봇을 붙잡고 주문은 로봇에 묶어 둔다.
+            # 설계 4.4: 재시도 한도 초과나 무응답으로 팔 작업을 포기했다. 로봇을 붙잡고 주문은
+            # 로봇에 묶어 둔다.
             # 주문이 없으면(이미 끝난 뒤의 고장) 보고할 곳이 없어 붙잡기만 한다.
             rec.asked = ""
             rec.held = HOLD_ARM_FAULT
             b = rec.order
             if b is not None:
-                # 담는 중에 받은 진행분(progress)은 결과(ArmFillResult)가 오지 않을 것이라 여기서 placed로
-                # 옮긴다. 안 옮기면 직전 FILLING 보고가 2개였는데 HELD 보고는 0개가 된다. 옮기고 비우므로
+                # 담는 중에 받은 진행분(progress)은 결과(ArmFillResult)가 오지 않을 것이라 여기서
+                # placed로
+                # 옮긴다. 안 옮기면 직전 FILLING 보고가 2개였는데 HELD 보고는 0개가 된다. 옮기고
+                # 비우므로
                 # 이미 결과로 옮겨 비워진 경우(progress가 {})와 겹쳐 두 번 세지 않는다.
                 for item, n in b.progress.items():
                     b.placed[item] = b.placed.get(item, 0) + n
                 b.progress = {}
                 self._holds[b.order_id] = (report.robot, HOLD_ARM_FAULT)
-                # 못 담은 것은 items - placed(확정 전이라 order.missing이 아님). 강제 출고(2차)가 이 값으로 끝낸다.
+                # 못 담은 것은 items - placed(확정 전이라 order.missing이 아님). 강제 출고(2차)가 이
+                # 값으로 끝낸다.
                 self._out.append(ReportOrderCmd(
                     b.order_id, report.robot, HELD, dict(b.placed),
                     self._remaining_of(b.items, b.placed), report.reason, HOLD_ARM_FAULT))
         elif isinstance(report, ArmLost):
-            # 설계 4.4: 1차는 asked만 비운다. 바로 뒤 ArmFault가 보류하고, 치움 · 격리로 버린 목표(cleared)는 2차 범위다.
+            # 설계 4.4: 1차는 asked만 비운다. 바로 뒤 ArmFault가 보류하고, 치움 · 격리로 버린
+            # 목표(cleared)는 2차 범위다.
             # paused · resume_wait는 목표가 이미 없는 상태라 건드리지 않는다.
             if rec.asked in (ASK_FILL, ASK_SWAP):
                 rec.asked = ""
@@ -332,7 +377,8 @@ class OrderOrchestrator:
                 if rec.order is not None:
                     b = rec.order
                     self._report_final(report.robot, PARTIAL if b.missing else SHIPPED)
-            # 격리 로봇의 되돌리기(pseudocode 6단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")이므로 여기서 하지 않는다.
+            # 격리 로봇의 되돌리기(pseudocode 6단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절
+            # "범위 밖")이므로 여기서 하지 않는다.
             if report.put_empty_done and rec.basket == NONE:
                 rec.basket = EMPTY
                 rec.stage = ""
@@ -340,7 +386,8 @@ class OrderOrchestrator:
                 self._out.append(ReleaseCmd(report.robot))
             else:
                 # 빈 바구니를 못 놓았거나 찬 바구니를 못 뺐다. 다음 step이 남은 일만 다시 묻는다
-                # (이미 뺐으면 basket NONE이라 take_full=False). 재시도 한도는 ArmJobs가 ArmFault로 끝낸다.
+                # (이미 뺐으면 basket NONE이라 take_full=False). 재시도 한도는 ArmJobs가 ArmFault로
+                # 끝낸다.
                 self._out.append(ArmFailedCmd(report.robot))
 
     # ---- 운영자 조작 ----
@@ -404,8 +451,14 @@ class OrderOrchestrator:
             return
         remaining = self._remaining(b)
         if remaining:
+            # 설계 4.5: 작업대가 막혀 있으면 묻지 않는다. 물으면 ArmJobs가 ArmDeclined로 돌려주고
+            # 다음 틱에
+            # 같은 요청 · 거절이 되풀이된다. 풀림(ArmStationBlocked reason "")이 오면 다음 step이
+            # 다시 묻는다.
+            if self._work in self._blocked:
+                return
             # pseudocode 4단계: 남은 것을 팔에 요청. FILLING 보고는 주문마다 첫 요청에서 한 번만
-            # (재요청은 ArmDeclined · 실패 재시도 뒤에도 같은 값이라 다시 내지 않음, 전역 제약 3).
+            # (재요청은 ArmDeclined · 실패 재시도 뒤에도 같은 값이라 다시 내지 않음. 설계 4.4).
             rec.asked = ASK_FILL
             if not b.reported_filling:
                 b.reported_filling = True
@@ -423,23 +476,29 @@ class OrderOrchestrator:
                 return
             rec.dispatch_retry_at = None
             if rec.dispatch_failures > self.params.dispatch_retry_limit:
-                # 실패가 한도(3)를 넘는 4번째: 이 로봇은 코어가 더 못 한다. 고장으로 넘기고 재시도 기록만 지운다.
-                # dispatch_failures는 일부러 남겨 둔다. 지우면 아래 빈 바구니 받기가 바로 다시 호출을 낸다.
+                # 실패가 한도(3)를 넘는 4번째: 이 로봇은 코어가 더 못 한다. 고장으로 넘기고 재시도
+                # 기록만 지운다.
+                # dispatch_failures는 일부러 남겨 둔다. 지우면 아래 빈 바구니 받기가 바로 다시
+                # 호출을 낸다.
                 self._out.append(RobotFaultCmd(robot, rec.dispatch_reason))
                 self._out.append(EventOut(
                     "ERROR", "DISPATCH_FAILED",
-                    f"{robot}: outbound call failed {rec.dispatch_failures} times ({rec.dispatch_reason})",
+                    f"{robot}: outbound call failed {rec.dispatch_failures} times "
+                    f"({rec.dispatch_reason})",
                     robot))
                 return
             self._out.append(EventOut(
                 "WARN", "DISPATCH_RETRY",
-                f"{robot}: outbound call failed ({rec.dispatch_reason}), retry {rec.dispatch_failures}",
+                f"{robot}: outbound call failed ({rec.dispatch_reason}), "
+                f"retry {rec.dispatch_failures}",
                 robot))
             self._start_outbound(robot)
             return
-        # pseudocode 1단계: 주문도 호출도 없이 바구니만 없으면 빈 바구니를 받으러 간다(5단계와 같은 길).
+        # pseudocode 1단계: 주문도 호출도 없이 바구니만 없으면 빈 바구니를 받으러 간다(5단계와 같은
+        # 길).
         # 다른 쉬는 로봇은 아무것도 하지 않는다(다음 일은 열린 호출에 교통 층이 고를 때 온다).
-        # 격리 로봇 제외(pseudocode 1단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절 "범위 밖")이므로 검사하지 않는다.
+        # 격리 로봇 제외(pseudocode 1단계)는 격리 처리라 2차 범위(이번 계획 밖, 설계 2절 "범위
+        # 밖")이므로 검사하지 않는다.
         # 설계 4.8: 정지 중에는 이것도 새 일이라 하지 않는다(RUN으로 돌아오면 다음 step이 부른다).
         # 위 OUTBOUND 재시도는 이미 시작한 일이라 정지 중에도 한다.
         if (rec.order is None and rec.basket == NONE and rec.dispatch_failures == 0
@@ -466,7 +525,8 @@ class OrderOrchestrator:
         return self._remaining_of(b.items, done)
 
     def _report_trip(self, robot, status, reason="") -> None:
-        """ReportTripCmd를 낸다. placed는 확정된 담은 수에 진행 중인 수를 더한 누적, missing은 order.missing."""
+        """ReportTripCmd를 낸다. placed는 확정된 담은 수에 진행 중인 수를 더한 누적, missing은
+        order.missing."""
         b = self._robots[robot].order
         placed = dict(b.placed)
         for k, n in b.progress.items():
@@ -474,19 +534,22 @@ class OrderOrchestrator:
         self._out.append(ReportTripCmd(b.order_id, robot, status, placed, dict(b.missing), reason))
 
     def _finish_fill(self, robot) -> None:
-        """남은 것이 없을 때의 마무리(pseudocode 4단계, 설계 4.2). 출력 순서는 ArmResetCmd가 먼저(설계 7절)."""
+        """남은 것이 없을 때의 마무리(pseudocode 4단계, 설계 4.2). 출력 순서는 ArmResetCmd가
+        먼저(설계 7절)."""
         rec = self._robots[robot]
         b = rec.order
         self._out.append(ArmResetCmd(robot))
         b.missing = self._remaining_of(b.items, b.placed)
-        if not b.placed:
-            # 하나도 못 담음: CANCELED는 최종 보고(7단계)라 최종 집합에 넣고 보류 목록에서 빼며
+        if sum(b.placed.values()) == 0:
+            # 하나도 못 담음(담은 합계 0. {"A": 0}처럼 0으로 실려 온 품목이 있어도 빈 바구니로
+            # 판정): CANCELED는 최종 보고(7단계)라 최종 집합에 넣고 보류 목록에서 빼며
             # 로봇의 주문과 held를 비운다. shipped는 올리지 않는다(내보낸 주문이 아님).
             self._report_final(robot, CANCELED, f"nothing could be placed, missing {b.missing}")
             rec.stage = ""
             self._out.append(ReleaseCmd(robot))
             return
-        # 다 담았거나 일부만 담았거나 늘 내보낸다(v2.4에는 ship_partial 없음). 주문은 출고 보고까지 묶어 둔다.
+        # 다 담았거나 일부만 담았거나 늘 내보낸다(v2.4에는 ship_partial 없음). 주문은 출고 보고까지
+        # 묶어 둔다.
         rec.basket = FULL
         rec.stage = ""
         self._start_outbound(robot)
@@ -495,7 +558,8 @@ class OrderOrchestrator:
     def _report_final(self, robot, status, detail="") -> None:
         """끝 상태 보고(SHIPPED · PARTIAL · CANCELED) 한 곳(pseudocode 7단계, 설계 4.7).
 
-        ReportOrderCmd를 내고, 주문 id를 최종 보고 집합에 넣고 보류 목록에서 빼며, 로봇의 주문과 held를 비운다.
+        ReportOrderCmd를 내고, 주문 id를 최종 보고 집합에 넣고 보류 목록에서 빼며,
+        로봇의 주문과 held를 비운다.
         shipped는 SHIPPED · PARTIAL일 때만 올린다(CANCELED는 내보낸 주문이 아니다).
         stage와 basket은 호출한 쪽이 정한다(CANCELED는 쉼, 출고는 교환 흐름이 이어 감).
         """
@@ -511,7 +575,8 @@ class OrderOrchestrator:
             self.shipped += 1
 
     def _start_outbound(self, robot) -> None:
-        """OUTBOUND 호출을 새 id로 내고 outbound_goal에 둔다(pseudocode 5단계). 결과는 on_dispatch_result가 받는다."""
+        """OUTBOUND 호출을 새 id로 내고 outbound_goal에 둔다(pseudocode 5단계). 결과는
+        on_dispatch_result가 받는다."""
         goal = self._next_call
         self._next_call += 1
         self._robots[robot].outbound_goal = goal
@@ -519,7 +584,8 @@ class OrderOrchestrator:
 
     # ---- 대기 주문과 열린 호출 ----
     def _can_bind(self, rec) -> bool:
-        """묶을 자격(설계 4.3): 주문이 없고, held가 아니고, 쉬는 중(stage "")이고, 바구니가 비어 있다."""
+        """묶을 자격(설계 4.3): 주문이 없고, held가 아니고, 쉬는 중(stage "")이고, 바구니가 비어
+        있다."""
         return (rec.order is None and rec.held == "" and rec.stage == ""
                 and rec.basket == EMPTY)
 
@@ -542,10 +608,15 @@ class OrderOrchestrator:
 
     def _match_calls(self) -> None:
         """열린 WORK 호출 수를 대기 주문 수에 맞춘다. 넘치면 나중에 연 것부터 거둔다."""
-        # 설계 4.8: 서비스 정지 중에도 0으로 맞춘다. 작업대로 오던 빈 Pode는 교통 층이 대기 자리로 보낸다(manager.py 주석).
+        # 설계 4.8: 서비스 정지 중에도 0으로 맞춘다. 작업대로 오던 빈 Pode는 교통 층이 대기 자리로
+        # 보낸다
+        # (FleetManager.tick의 정지 처리).
         # 설계 4.5: 작업대가 막혀 있으면 대기 주문 수와 상관없이 0으로 맞춘다(열린 호출은 거둠).
-        # OUTBOUND가 막힌 경우는 따로 하지 않는다: ArmJobs가 교환 목표를 ArmDeclined로 돌려 step이 다시 묻는다.
-        want = 0 if (self.service_paused or self._work in self._blocked) else len(self._waiting_orders())
+        # 출고대(OUTBOUND)가 막힌 경우는 호출을 거두지 않는다. 이미 묶인 로봇의 교환 요청을
+        # ArmJobs가
+        # ArmDeclined로 돌려주고 step이 다시 묻는다. 새 대기 주문의 WORK 호출과는 무관하기 때문이다.
+        closed = self.service_paused or self._work in self._blocked
+        want = 0 if closed else len(self._waiting_orders())
         while len(self._open_calls) < want:
             self._open_calls.append(self._next_call)
             self._out.append(DispatchCmd(self._next_call, self._work))

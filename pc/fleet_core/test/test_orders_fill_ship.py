@@ -12,8 +12,8 @@ from fleet_core.common.commands import (
     ArmLate,
     ArmLost,
     ArmResetCmd,
-    ArmSwapCmd,
     ArmStationBlocked,
+    ArmSwapCmd,
     ArmSwapResult,
     CancelDispatchCmd,
     DispatchCmd,
@@ -53,7 +53,8 @@ def test_a_robot_reaching_work_with_nothing_waiting_is_released():
     o = make()
     o.on_order_board("RUN", [T1])
     o.take_output()
-    o._final = {"T-1"}  # 호출은 열린 채 주문만 대기에서 빠진 상태(주문판을 비우면 호출도 거둬져 이 분기에 못 옴)
+    # 호출은 열린 채 주문만 대기에서 빠진 상태(주문판을 비우면 호출도 거둬져 이 분기에 못 옴)
+    o._final = {"T-1"}
     o.on_dispatch_result(1, True, "r1")
     assert ReleaseCmd("r1") in o.take_output()
     assert o.order_of("r1") == ""
@@ -129,7 +130,7 @@ def test_step_waits_while_a_fill_is_asked():
 
 
 def test_filling_is_reported_once_per_order():
-    """ArmDeclined 뒤 재요청에서 FILLING 보고를 다시 내지 않는지 지킨다(전역 제약 3)."""
+    """ArmDeclined 뒤 재요청에서 FILLING 보고를 다시 내지 않는지 지킨다(설계 4.4)."""
     o = bound(make())
     o.step("r1")
     o.take_output()
@@ -148,7 +149,7 @@ def test_progress_reports_placed_so_far_and_only_real_missing():
 
 
 def test_progress_is_not_counted_twice_when_the_result_comes():
-    """진행 보고 뒤 결과가 오면 placed를 두 번 더하지 않고 progress를 비우는지 지킨다(전역 제약 2)."""
+    """진행 보고 뒤 결과가 오면 placed를 두 번 더하지 않고 progress를 비우는지 지킨다(설계 4.4)."""
     o = bound(make(), OrderRecord("T-1", {"A": 2, "B": 1}))
     o.step("r1")
     o.on_arm_report(ArmFillProgress("r1", {"A": 1}))
@@ -169,7 +170,8 @@ def test_a_failed_fill_adds_what_was_placed_and_reports_the_failure():
 
 
 def test_a_full_fill_goes_to_outbound_and_reports_transporting():
-    """다 담으면 ArmResetCmd, OUTBOUND 호출, TRANSPORTING 보고 순으로 나가고 basket이 FULL이 되는지 지킨다."""
+    """다 담으면 ArmResetCmd, OUTBOUND 호출, TRANSPORTING 보고 순으로 나가고 basket이 FULL이 되는지
+    지킨다."""
     o = bound(make())
     o.step("r1")
     o.on_arm_report(ArmFillResult("r1", True, {"A": 1}))
@@ -208,7 +210,7 @@ def test_nothing_placed_is_canceled_and_released():
     assert "T-1" in o._final and o.robot_view("r1")["stage"] == ""
 
 
-# ---- Task 3: 출고 이동 · 교환 · 끝 상태 보고 · 빈 바구니 ----
+# ---- 출고 이동 · 교환 · 끝 상태 보고 · 빈 바구니 ----
 def make_clocked(robots=("r1", "r2")):
     """시각을 바꿀 수 있는 시계로 코어를 만든다. (코어, 시각 목록)을 돌려준다(시험 도움 함수)."""
     now = [0.0]
@@ -228,7 +230,8 @@ def at_outbound(order=T1, placed=None):
 
 
 def test_reaching_outbound_starts_the_swap():
-    """OUTBOUND에 닿으면 SWAPPING이 되고 step이 찬 바구니를 빼고 빈 바구니를 놓는 교환을 묻는지 지킨다."""
+    """OUTBOUND에 닿으면 SWAPPING이 되고 step이 찬 바구니를 빼고 빈 바구니를 놓는 교환을 묻는지
+    지킨다."""
     o, _ = at_outbound()
     o.step("r1")
     assert o.take_output() == [ArmSwapCmd("r1", "OUTBOUND", "T-1", True, True)]
@@ -236,7 +239,8 @@ def test_reaching_outbound_starts_the_swap():
 
 
 def test_taking_the_full_basket_reports_shipped():
-    """찬 바구니를 뺀 순간 SHIPPED를 보고하고 shipped를 올리며, 빈 바구니를 못 놓았으면 ArmFailedCmd를 내는지 지킨다."""
+    """찬 바구니를 뺀 순간 SHIPPED를 보고하고 shipped를 올리며, 빈 바구니를 못 놓았으면
+    ArmFailedCmd를 내는지 지킨다."""
     o, _ = at_outbound()
     o.step("r1")
     o.take_output()
@@ -311,13 +315,14 @@ def test_a_failed_outbound_call_is_retried_after_the_wait():
 
 
 def test_too_many_outbound_failures_fault_the_robot():
-    """실패가 한도(3)를 넘는 4번째면 RobotFaultCmd와 DISPATCH_FAILED만 내고 더 부르지 않는지 지킨다."""
+    """실패가 한도(3)를 넘는 4번째면 RobotFaultCmd와 DISPATCH_FAILED만 내고 더 부르지 않는지 지킨다.
+    """
     o, now = make_clocked()
     bound(o)
     o.step("r1")
     o.on_arm_report(ArmFillResult("r1", True, {"A": 1}))
     o.step("r1")
-    for n in range(4):
+    for _ in range(4):
         o.on_dispatch_result(o._robots["r1"].outbound_goal, False, "r1", "no path")
         now[0] += 2.0
         o.take_output()
@@ -332,7 +337,8 @@ def test_too_many_outbound_failures_fault_the_robot():
 
 
 def test_a_robot_without_a_basket_fetches_an_empty_one():
-    """바구니 없는(NONE) 쉬는 로봇이 빈 바구니를 받으러 OUTBOUND 호출을 내고, 기다리는 동안 또 내지 않는지 지킨다."""
+    """바구니 없는(NONE) 쉬는 로봇이 빈 바구니를 받으러 OUTBOUND 호출을 내고, 기다리는 동안 또 내지
+    않는지 지킨다."""
     o, _ = make_clocked()
     o._robots["r1"].basket = "NONE"
     o.step("r1")
@@ -343,7 +349,7 @@ def test_a_robot_without_a_basket_fetches_an_empty_one():
 
 
 def test_a_shipped_order_left_on_the_board_is_not_bound_again():
-    """출고를 보고한 주문이 주문판에 남아 있어도 WORK 호출을 다시 열지 않는지 지킨다(전역 제약 4)."""
+    """출고를 보고한 주문이 주문판에 남아 있어도 WORK 호출을 다시 열지 않는지 지킨다(설계 4.6)."""
     o, _ = at_outbound()
     o.step("r1")
     o.on_arm_report(ArmSwapResult("r1", True, True))
@@ -352,7 +358,7 @@ def test_a_shipped_order_left_on_the_board_is_not_bound_again():
     assert not any(isinstance(c, DispatchCmd) for c in o.take_output())
 
 
-# ---- 팔 관제 합의 보고와 팔 고장(설계 4.4 · 4.5, Task 4) ----
+# ---- 팔 관제 합의 보고와 팔 고장(설계 4.4 · 4.5) ----
 def filling(order=T1):
     """주문을 묶고 첫 step으로 담기를 묻고 출력을 비운 코어(시험 도움 함수)."""
     o = bound(make(), order)
@@ -362,7 +368,8 @@ def filling(order=T1):
 
 
 def test_a_paused_fill_reports_filling_pause_and_is_not_asked_again():
-    """담기 일시 중지가 FILLING_PAUSE로 보고되고 관리자가 풀 때까지 step이 다시 묻지 않는지 지킨다."""
+    """담기 일시 중지가 FILLING_PAUSE로 보고되고 관리자가 풀 때까지 step이 다시 묻지 않는지 지킨다.
+    """
     o = filling()
     o.on_arm_report(ArmFillPaused("r1", "workcell", "RECOGNITION_ERROR", "workcell: x"))
     assert o.take_output() == [ReportTripCmd("T-1", "r1", "FILLING_PAUSE", {}, {},
@@ -383,7 +390,8 @@ def test_a_failed_result_then_pause_keeps_the_placed_count():
 
 
 def test_no_fill_is_asked_while_waiting_for_resume():
-    """재시작(ArmFillPlaced) 뒤 [복구] 전에는 수량만 더하고 남은 상품을 다시 묻지 않는지 지킨다(전역 제약 1)."""
+    """재시작(ArmFillPlaced) 뒤 [복구] 전에는 수량만 더하고 남은 상품을 다시 묻지 않는지 지킨다(설계
+    4.4)."""
     o = filling(OrderRecord("T-1", {"A": 2}))
     o.on_arm_report(ArmFillPlaced("r1", {"A": 1}))
     assert o.take_output() == []
@@ -403,7 +411,8 @@ def test_resume_asks_only_for_the_rest():
 
 
 def test_placed_and_resumed_only_act_in_their_asked_state():
-    """묻지 않은 상태의 Placed와 resume_wait 아닌 상태의 Resumed가 수량이나 asked를 건드리지 않는지 지킨다."""
+    """묻지 않은 상태의 Placed와 resume_wait 아닌 상태의 Resumed가 수량이나 asked를 건드리지 않는지
+    지킨다."""
     o = bound(make(), OrderRecord("T-1", {"A": 2}))
     o.on_arm_report(ArmFillPlaced("r1", {"A": 1}))  # 아직 담기를 묻지 않음(asked "")
     assert o._robots["r1"].order.placed == {} and o._robots["r1"].asked == ""
@@ -478,7 +487,8 @@ def test_a_lost_arm_job_only_clears_what_was_asked():
 
 
 def test_a_blocked_workcell_cancels_and_reopens_its_calls():
-    """작업대가 막히면 열린 호출을 거두고 풀리면 대기 주문 수만큼 새 호출을 여는지 지킨다(설계 4.5)."""
+    """작업대가 막히면 열린 호출을 거두고 풀리면 대기 주문 수만큼 새 호출을 여는지 지킨다(설계 4.5).
+    """
     o = make()
     o.on_order_board("RUN", [T1])
     assert o.take_output() == [DispatchCmd(1, "WORK")]
@@ -491,7 +501,8 @@ def test_a_blocked_workcell_cancels_and_reopens_its_calls():
 
 
 def test_a_late_arm_result_is_ignored_silently():
-    """늦은 팔 결과(ArmLate)가 출력도 수량 변화도 내지 않는지 지킨다(1차는 잃은 작업 기록이 없음)."""
+    """늦은 팔 결과(ArmLate)가 출력도 수량 변화도 내지 않는지 지킨다(1차는 잃은 작업 기록이 없음).
+    """
     o = filling()
     o.on_arm_report(ArmLate(9, "fill", {"A": 1}))
     assert o.take_output() == []
@@ -516,7 +527,7 @@ def test_orders_and_arm_run_one_order_to_shipped():
     assert ReportOrderCmd("T-1", "r1", "SHIPPED", {"A": 1}, {}, "") in core.take_output()
 
 
-# ---- Task 5: 서비스 정지(설계 4.8, 팔 관제 합의 ⑦, 회의 정리 8번) ----
+# ---- 서비스 정지(설계 4.8, 팔 관제 합의 ⑦, 회의 정리 8번) ----
 def test_service_paused_follows_the_run_mode():
     """service_paused가 마지막 run_mode가 PAUSE일 때만 True인지 지킨다(STOP은 False)."""
     o = make()
@@ -545,7 +556,8 @@ def test_a_robot_reaching_work_during_a_pause_is_released_unbound():
     o = make()
     o.on_order_board("RUN", [T1])
     o.take_output()
-    o._run_mode = "PAUSE"  # 호출을 거두기 전(같은 tick)에 정지가 와서 열린 호출 1이 남은 순간을 만든다
+    # 호출을 거두기 전(같은 tick)에 정지가 와서 열린 호출 1이 남은 순간을 만든다
+    o._run_mode = "PAUSE"
     o.on_dispatch_result(1, True, "r1")
     assert o.take_output() == [ReleaseCmd("r1")]
     assert o.order_of("r1") == ""
@@ -562,7 +574,8 @@ def test_a_bound_order_finishes_during_a_pause():
 
 
 def test_no_empty_basket_is_fetched_during_a_pause():
-    """정지 중에는 바구니 없는 쉬는 로봇이 빈 바구니를 받으러 가지 않고 RUN이면 간다는 것을 지킨다(설계 4.8)."""
+    """정지 중에는 바구니 없는 쉬는 로봇이 빈 바구니를 받으러 가지 않고 RUN이면 간다는 것을
+    지킨다(설계 4.8)."""
     o, _ = make_clocked()
     o._robots["r1"].basket = "NONE"
     o.on_order_board("PAUSE", [])
@@ -571,3 +584,67 @@ def test_no_empty_basket_is_fetched_during_a_pause():
     o.on_order_board("RUN", [])
     o.step("r1")
     assert o.take_output() == [DispatchCmd(o._robots["r1"].outbound_goal, "OUTBOUND", "r1")]
+
+
+def test_a_zero_count_result_is_canceled_not_partial():
+    """상품 수가 0으로 실려 온 결과({"A": 0})가 빈 바구니를 PARTIAL로 내보내지 않는지 지킨다."""
+    o = bound(make())
+    o.step("r1")
+    o.on_arm_report(ArmFillResult("r1", True, {"A": 0}))
+    o.take_output()
+    o.step("r1")
+    out = o.take_output()
+    assert any(isinstance(c, ReportOrderCmd) and c.status == "CANCELED" for c in out)
+    assert not any(isinstance(c, DispatchCmd) for c in out)
+    assert o.robot_view("r1")["basket"] == "EMPTY"
+
+
+def test_no_fill_is_asked_or_declined_again_while_the_workcell_is_blocked():
+    """작업대가 막힌 동안 담기 요청 · 거절이 틱마다 되풀이되지 않고 풀리면 다시 묻는지 지킨다(설계
+    4.5)."""
+    o = bound(make())
+    o.on_arm_report(ArmStationBlocked("WORK", "arm_left ERROR"))
+    o.take_output()
+    o.step("r1")
+    assert o.take_output() == []
+    o.step("r1")
+    assert o.take_output() == []
+    o.on_arm_report(ArmStationBlocked("WORK", ""))
+    o.take_output()
+    o.step("r1")
+    assert ArmFillCmd("r1", "WORK", "T-1", {"A": 1}) in o.take_output()
+
+
+def test_a_fill_declined_because_of_a_block_is_not_asked_again_until_it_clears():
+    """막히기 직전에 물은 담기가 거절돼도 막힘이 풀릴 때까지 다시 묻지 않는지 지킨다(설계 4.5)."""
+    o = filling()
+    o.on_arm_report(ArmStationBlocked("WORK", "arm_left ERROR"))
+    o.on_arm_report(ArmDeclined("r1"))
+    o.take_output()
+    o.step("r1")
+    assert o.take_output() == []
+    o.on_arm_report(ArmStationBlocked("WORK", ""))
+    o.step("r1")
+    assert o.take_output() == [ArmFillCmd("r1", "WORK", "T-1", {"A": 1})]
+
+
+def test_a_bound_order_ships_all_the_way_during_a_pause():
+    """서비스 정지 중에도 이미 담고 있던 운반 건이 SHIPPED와 놓아 주기까지 가는지 지킨다(설계 4.8).
+    """
+    o = bound(make())
+    o.step("r1")
+    o.on_order_board("PAUSE", [T1])
+    o.on_arm_report(ArmFillResult("r1", True, {"A": 1}))
+    o.take_output()
+    o.step("r1")  # 마무리: 출고대 호출 + TRANSPORTING
+    goal = o._robots["r1"].outbound_goal
+    assert goal is not None
+    o.on_dispatch_result(goal, True, "r1")
+    o.take_output()
+    o.step("r1")  # 교환 요청
+    assert o.take_output() == [ArmSwapCmd("r1", "OUTBOUND", "T-1", True, True)]
+    o.on_arm_report(ArmSwapResult("r1", True, True))
+    out = o.take_output()
+    assert ReportOrderCmd("T-1", "r1", "SHIPPED", {"A": 1}, {}, "") in out
+    assert ReleaseCmd("r1") in out
+    assert o.shipped == 1
