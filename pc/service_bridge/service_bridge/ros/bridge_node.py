@@ -8,7 +8,7 @@ from collections.abc import Callable
 from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.contract import load_contract, to_ros_qos
 from fleet_interfaces.msg import RobotStatusArray, SystemMode
-from fleet_interfaces.srv import Hello, ReportCommand, ReportTrip
+from fleet_interfaces.srv import Hello, ListOpenTrips, ReportCommand, ReportTrip
 from psycopg_pool import ConnectionPool
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
@@ -16,6 +16,7 @@ from rclpy.exceptions import ParameterException
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 
+from service_bridge.core.board_trips import list_board_trips
 from service_bridge.core.commands import apply_command
 from service_bridge.core.hello import apply_hello
 from service_bridge.core.reports import apply_report
@@ -101,6 +102,10 @@ class BridgeNode(Node):
             self.create_service(
                 ReportCommand, self._contract.name("report_command"), self._on_command,
                 callback_group=MutuallyExclusiveCallbackGroup()),
+            # central이 켜질 때 주문판을 다시 세우려고 부른다 (설계 6.3)
+            self.create_service(
+                ListOpenTrips, self._contract.name("list_board_trips"), self._on_list_board_trips,
+                callback_group=MutuallyExclusiveCallbackGroup()),
         ]
         # 5. 운반 건 넘기기 시작: 켜질 때 남은 줄도 다시 보낸다
         self._dispatcher = Dispatcher(self, self._pool, self._contract)
@@ -108,7 +113,7 @@ class BridgeNode(Node):
         self._probe_timer.cancel()
         self.destroy_timer(self._probe_timer)
         self._probe_timer = None
-        self.get_logger().info("DB 연결됨, Hello · ReportTrip · ReportCommand 서버 열림")
+        self.get_logger().info("DB 연결됨, Hello · ReportTrip · ReportCommand · list_board_trips 서버 열림")
 
     @property
     def mode(self) -> str:
@@ -160,6 +165,18 @@ class BridgeNode(Node):
                 f"ReportTrip 처리 중 예외: trip_id={request.trip_id} "
                 f"({request.report_epoch}, {request.report_n})\n{traceback.format_exc()}")
             response.accepted, response.result, response.reason = False, "", "DB_ERROR"
+        return response
+
+    def _on_list_board_trips(self, request, response):
+        # request.epoch는 보지 않는다(central은 0)
+        deadline = time.monotonic() + REQUEST_BUDGET_SEC
+        try:
+            out = list_board_trips(self._pool, deadline)
+            response.accepted, response.reason = out.accepted, out.reason
+            response.trips = [convert.open_trip(t) for t in out.trips]
+        except Exception:
+            self.get_logger().error(f"list_board_trips 처리 중 예외\n{traceback.format_exc()}")
+            response.accepted, response.trips, response.reason = False, [], "DB_ERROR"
         return response
 
     def _on_command(self, request, response):

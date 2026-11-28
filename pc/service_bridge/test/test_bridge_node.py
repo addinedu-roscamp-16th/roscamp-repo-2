@@ -8,7 +8,7 @@ rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("fleet_interfaces")
 
 from fleet_interfaces.msg import SystemMode  # noqa: E402
-from fleet_interfaces.srv import Hello, ReportCommand, ReportTrip  # noqa: E402
+from fleet_interfaces.srv import Hello, ListOpenTrips, ReportCommand, ReportTrip  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
@@ -104,6 +104,25 @@ def test_report_command_round_trip(spin, pool, conn, seeded):
     assert res.accepted is True
     assert conn.execute("select final_result from admin_action where request_id='R-1'"
                         ).fetchone()[0] == "ACCEPTED"
+
+
+def test_list_board_trips_server_answers_after_db(spin, pool, conn, seeded):
+    """DB가 붙은 뒤 /bridge/list_board_trips가 끝나지 않은 건을 접수 순서로 돌려준다 (설계 6.3)."""
+    ids = []
+    for kind in ("mentos", "mygummy"):
+        _, trip = insert_trip(conn, seeded["account_id"], {kind: 1})
+        conn.execute("INSERT INTO trip_dispatch (trip_id) VALUES (%s)", (trip,))
+        ids.append(trip)
+    bridge = BridgeNode(pool, parameter_overrides=_mode("TEST"))
+    peer = rclpy.create_node("bridge_test_peer")
+    spin(bridge, peer)
+    client = peer.create_client(ListOpenTrips, "/bridge/list_board_trips")
+
+    res = _call(client, ListOpenTrips.Request(epoch=0))
+    assert res.accepted is True
+    assert [t.trip_id for t in res.trips] == ids
+    assert [(i.kind, i.count) for i in res.trips[0].items] == [("mentos", 1)]
+    assert res.trips[0].status == "RECEIVED"
 
 
 def test_no_servers_until_db_ready(spin):

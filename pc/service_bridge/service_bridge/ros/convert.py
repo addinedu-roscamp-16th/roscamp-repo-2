@@ -2,9 +2,10 @@
 from datetime import datetime, timezone
 
 from builtin_interfaces.msg import Time
-from fleet_interfaces.msg import OrderItem, RobotStatusArray
+from fleet_interfaces.msg import OpenTrip, OrderItem, RobotStatusArray
 from fleet_interfaces.srv import Hello, ReportCommand, ReportTrip, SubmitTrip
 
+from service_bridge.core.board_trips import BoardTrip
 from service_bridge.core.dispatch import DispatchItem
 from service_bridge.core.types import CommandIn, HelloIn, ReportIn
 
@@ -71,6 +72,19 @@ def submit_request(item: DispatchItem) -> SubmitTrip.Request:
         items=[OrderItem(kind=k, count=n) for k, n in item.items.items()],
         submitted_at=to_time(item.submitted_at),
     )
+
+
+# ---- 끝나지 않은 운반 건 목록 (ListOpenTrips 답) ----
+def open_trip(t: BoardTrip) -> OpenTrip:
+    return OpenTrip(
+        trip_id=t.trip_id, order_id=t.order_id, trip_index=t.trip_index,
+        trip_count=t.trip_count,
+        items=[OrderItem(kind=k, count=n) for k, n in t.items.items()],
+        status=t.status, reason=t.reason, robot_id=t.robot_id,
+        placed=[OrderItem(kind=k, count=n) for k, n in t.placed.items()],
+        missing=[OrderItem(kind=k, count=n) for k, n in t.missing.items()],
+        submitted_at=to_time(t.submitted_at),
+        report_epoch=t.report_epoch, report_n=t.report_n)
 
 
 # ---- 로봇 상태 (웹 화면용). order_id는 웹에서 trip_id라 부른다 ----
