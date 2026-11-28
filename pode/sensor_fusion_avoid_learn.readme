@@ -1,4 +1,0 @@
-python3 -m venv ~/yolo_env
-source ~/yolo_env/bin/activate
-
-가상환경에서 실행했습니다
