@@ -333,7 +333,7 @@ iponic_local                                   # 개인 도메인 + LOCALHOST</c
 <p>central은 가상환경이 필요 없습니다. ROS · install을 source하고 같은 통신 설정(<code>iponic_local</code> 또는 <code>iponic_real</code>)을 한 터미널에서 띄웁니다.</p>
 <div class="cmd"><pre><code>iponic_local
 ros2 run central central</code></pre></div>
-<p>central은 브리지의 <code>/bridge/list_board_trips</code>가 보이고 <code>/system/mode</code>를 한 번 받아야 실행 중이 됩니다. 브리지 없이 central만 볼 때는 브리지 대신 아래 시험 도구를 터미널 1에서 띄웁니다(빈 목록 또는 파일의 목록으로 답하고 <code>/system/mode</code>를 한 번 냄).</p>
+<p>central은 브리지의 <code>/bridge/list_board_trips</code>가 보이고 <code>/system/mode</code>를 한 번 받아야 실행 중이 됩니다. 브리지 없이 central만 볼 때는 브리지 대신 아래 시험 도구를 터미널 1에서 띄웁니다(빈 목록 또는 파일의 목록으로 답하고 <code>/system/mode</code>를 한 번 냄). <strong>진짜 브리지 · fleet이 있는 도메인에서는 띄우지 않습니다.</strong> central이 빈 목록으로 실행 중이 되어 빈 주문판을 낼 수 있고, <code>/system/mode</code>를 TEST로 덮어씁니다.</p>
 <div class="cmd"><pre><code>python -m service_bridge.tools.board_trips_stub [--trips FILE.json]</code></pre></div>
 
 <h3>터미널 3 — fleet</h3>
@@ -380,7 +380,7 @@ ros2 launch iponic_bringup pc.launch.py use_fake:=true fake_central:=false use_s
 <h2 id="s7">7. 끄기 · 다시 켜기</h2>
 <ul>
   <li><strong>끄기:</strong> 각 터미널에서 Ctrl+C 한 번. 브리지는 신호를 받고 웹을 닫은 뒤 노드 · DB 풀을 차례로 닫습니다.</li>
-  <li><strong>central만 다시 켤 때:</strong> central 터미널에서 Ctrl+C 뒤 다시 <code>ros2 run central central</code>. 관리자 화면에는 central이 꺼진 동안 "연결 안 됨"(3초 넘게 <code>/central/state</code>를 못 받음), 다시 켜지면 "연결 중" → "주문판 갱신 중" → "실행 중"이 보입니다. central은 새 <code>boot_id</code>로 브리지에서 끝나지 않은 건 목록을 받아 주문판을 접수 순서대로 다시 세운 뒤에야 주문판을 냅니다. DB <code>alert</code> 표에는 안내 알림 <code>CENTRAL_RESTART</code>(INFO, "central이 다시 켜져 주문판을 다시 세웁니다")가 한 건 남습니다. <strong>관리자가 할 조치는 없습니다.</strong> 이 알림은 지금 관리자 화면 · <code>/api/snapshot</code>에는 보이지 않고(알림을 화면에 보내는 방법은 Q-07에서 정함) DB에서만 확인합니다. 아래 줄의 컨테이너 이름 <code>db-pg-1</code>과 DB 이름 <code>ifp_test</code>는 기본값이며, 다르면 자기 것으로 바꿉니다.
+  <li><strong>central만 다시 켤 때:</strong> central 터미널에서 Ctrl+C 뒤 다시 <code>ros2 run central central</code>. 관리자 화면에는 central이 꺼진 동안 "연결 안 됨"(3초 넘게 <code>/central/state</code>를 못 받음), 다시 켜지면 "연결 중" → "주문판 갱신 중" → "실행 중"이 보입니다(브리지가 이미 돌고 있으면 앞의 둘은 1초쯤 스쳐 지나가거나 "실행 중"만 보일 수 있습니다). central은 새 <code>boot_id</code>로 브리지에서 끝나지 않은 건 목록을 받아 주문판을 접수 순서대로 다시 세운 뒤에야 주문판을 냅니다. DB <code>alert</code> 표에는 안내 알림 <code>CENTRAL_RESTART</code>(INFO, "central이 다시 켜져 주문판을 다시 세웁니다")가 한 건 남습니다. <strong>관리자가 할 조치는 없습니다.</strong> 이 알림은 지금 관리자 화면 · <code>/api/snapshot</code>에는 보이지 않고(알림을 화면에 보내는 방법은 Q-07에서 정함) DB에서만 확인합니다. 아래 줄의 컨테이너 이름 <code>db-pg-1</code>과 DB 이름 <code>ifp_test</code>는 기본값이며, 다르면 자기 것으로 바꿉니다.
 <div class="cmd"><pre><code>docker exec -e PGPASSWORD=ifp_test db-pg-1 psql -U postgres -d ifp_test -Atc "select created_at, level, message from alert where code='CENTRAL_RESTART'"</code></pre></div></li>
   <li><strong>브리지를 다시 켤 때:</strong> Ctrl+C 뒤 같은 명령(<code>mode:=</code> 포함)으로. central은 실행 중이면 그대로 실행 중입니다. 브리지가 꺼져 있는 동안 central이 다시 켜졌다면 <code>CENTRAL_RESTART</code> 알림은 남지 않습니다(브리지가 알아챌 수 없음).</li>
   <li><strong>DB를 다시 켤 때:</strong> 컨테이너를 내리면(<code>docker compose -f design/db/compose.yaml down</code>) 데이터가 사라지므로 다시 띄운 뒤 <code>setup_db</code>를 다시 합니다. 주문판이 DB와 어긋나지 않게 브리지 · central · fleet도 다시 켜는 것을 권합니다.</li>
