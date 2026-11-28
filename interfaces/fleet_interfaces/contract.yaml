@@ -4,9 +4,10 @@
 #   fake 모드 검사(scripts/check_interfaces.py --mode fake)는 건너뛰고 real 모드는 검사한다.
 # SubmitOrder.srv(0.6 파일)는 쓰지 않는다. SubmitTrip으로 대신한다.
 
-version: 1.0
+version: 1.1
 
 # ---- 변경 이력 (IR-02: 바꾼 구역) ----
+# 1.1 (2026-11-28): central 운영 단계 /central/state(CentralState), central 주문판 복구 /bridge/list_board_trips(ListOpenTrips) — 브리지 · central만 씀, fleet 변경 없음
 # 1.0 (2026-11-27): 팔 관제 합의 반영(로봇 ↔ fleet). /{arm}/set_pause(SetPause, arm_left · arm_right, 이름은 임시),
 #   FillBasket 사유 NOT_READY · UNKNOWN_TARGET와 진행 단계 5개, 사유 코드 HEARTBEAT_LOST(ArmState.detail),
 #   ArmState · FillBasket · SetLock · SetPause 뜻 주석
@@ -53,6 +54,7 @@ topics:
   # ---- 브리지 ↔ central ----
   - {key: system_mode, name: "/system/mode", type: fleet_interfaces/msg/SystemMode, qos: LATCHED, not_in_fake: true}
   - {key: close_state, name: "/bridge/close_state", type: fleet_interfaces/msg/CloseState, qos: LATCHED, not_in_fake: true}
+  - {key: central_state, name: "/central/state", type: fleet_interfaces/msg/CentralState, qos: LATCHED, not_in_fake: true}
   # ---- central ↔ fleet ----
   - {key: order_board, name: "/central/orders", type: fleet_interfaces/msg/OrderBoard, qos: LATCHED}
   # ---- 상태판 ----
@@ -92,6 +94,7 @@ services:
   # ---- 브리지 ↔ fleet: 보고 · 문의 (서버는 브리지) ----
   - {key: hello, name: "/bridge/hello", type: fleet_interfaces/srv/Hello, not_in_fake: true}
   - {key: list_open_trips, name: "/bridge/list_open_trips", type: fleet_interfaces/srv/ListOpenTrips, not_in_fake: true}
+  - {key: list_board_trips, name: "/bridge/list_board_trips", type: fleet_interfaces/srv/ListOpenTrips, not_in_fake: true}
   - {key: report_trip, name: "/bridge/report_trip", type: fleet_interfaces/srv/ReportTrip, not_in_fake: true}
   - {key: report_command, name: "/bridge/report_command", type: fleet_interfaces/srv/ReportCommand, not_in_fake: true}
   - {key: report_event, name: "/bridge/report_event", type: fleet_interfaces/srv/ReportEvent, not_in_fake: true}

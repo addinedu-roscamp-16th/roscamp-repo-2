@@ -23,6 +23,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
       "msg/OpenTrip.msg"
       "msg/SystemMode.msg"
       "msg/CloseState.msg"
+      "msg/CentralState.msg"
       "action/MoveTo.action"
       "action/Dock.action"
       "action/FillBasket.action"
