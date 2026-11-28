@@ -10,10 +10,53 @@ pytest.importorskip("fleet_interfaces")
 os.environ.setdefault("ROS_AUTOMATIC_DISCOVERY_RANGE", "LOCALHOST")
 
 from central.central_node import CentralNode  # noqa: E402
-from fleet_interfaces.msg import OrderBoard, OrderItem  # noqa: E402
-from fleet_interfaces.srv import ReportOrder, SubmitTrip  # noqa: E402
+from builtin_interfaces.msg import Time  # noqa: E402
+from fleet_interfaces.msg import CentralState, OpenTrip, OrderBoard, OrderItem, SystemMode  # noqa: E402
+from fleet_interfaces.srv import ListOpenTrips, ReportOrder, SubmitTrip  # noqa: E402
 from rclpy.executors import SingleThreadedExecutor  # noqa: E402
-from rclpy.qos import DurabilityPolicy  # noqa: E402
+from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy  # noqa: E402
+
+LATCHED = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL,
+                     reliability=ReliabilityPolicy.RELIABLE)
+
+
+# ---- 시험용 가짜 브리지: board_trips_stub과 같은 방식(목록 서비스 + /system/mode LATCHED 한 번) ----
+def make_stub(trips=(), name="central_test_stub"):
+    """trips: (trip_id, {kind: count}, submitted_at.sec, status)."""
+    stub = rclpy.create_node(name)
+    stub.create_publisher(SystemMode, "/system/mode", LATCHED).publish(
+        SystemMode(mode=SystemMode.MODE_TEST))
+
+    def on_list(request, response):
+        response.accepted = True
+        response.trips = [
+            OpenTrip(trip_id=tid, status=status, submitted_at=Time(sec=sec),
+                     items=[OrderItem(kind=k, count=c) for k, c in items.items()])
+            for tid, items, sec, status in trips]
+        return response
+
+    stub.create_service(ListOpenTrips, "/bridge/list_board_trips", on_list)
+    return stub
+
+
+def wait_running(ex, node, timeout=8.0):
+    """목록 서버로 central을 RUNNING까지 올린다(기존 시험이 접수 · 보고를 하려면 필요)."""
+    deadline = time.monotonic() + timeout
+    while node._life.state != "RUNNING" and time.monotonic() < deadline:
+        ex.spin_once(timeout_sec=0.1)
+    assert node._life.state == "RUNNING"
+
+
+def start_running(trips=(), peer_name="central_test_peer"):
+    """central + 가짜 브리지 + 시험 상대를 한 실행기에 올려 RUNNING으로 만든다."""
+    node = CentralNode()
+    stub = make_stub(trips)
+    peer = rclpy.create_node(peer_name)
+    ex = SingleThreadedExecutor()
+    for n in (node, stub, peer):
+        ex.add_node(n)
+    wait_running(ex, node)
+    return node, stub, peer, ex
 
 
 def test_the_node_opens_latched_board_and_both_services():
@@ -42,10 +85,12 @@ def test_submit_sums_same_kind_and_report_removes():
     rclpy.init(domain_id=57)
     try:
         node = CentralNode()
+        stub = make_stub()
         peer = rclpy.create_node("central_test_peer")
         ex = SingleThreadedExecutor()
-        ex.add_node(node)
-        ex.add_node(peer)
+        for n in (node, stub, peer):
+            ex.add_node(n)
+        wait_running(ex, node)
         boards = []
         peer.create_subscription(OrderBoard, "/central/orders", boards.append, 10)
         submit = peer.create_client(SubmitTrip, "/central/submit_trip")
@@ -65,8 +110,8 @@ def test_submit_sums_same_kind_and_report_removes():
         while boards[-1].orders and time.monotonic() < deadline:
             ex.spin_once(timeout_sec=0.1)
         assert boards[-1].orders == []
-        node.destroy_node()
-        peer.destroy_node()
+        for n in (node, stub, peer):
+            n.destroy_node()
     finally:
         rclpy.shutdown()
 
@@ -85,10 +130,12 @@ def test_report_with_non_final_status_is_rejected_and_warned():
                 pass
 
         node.get_logger = lambda: _Log()
+        stub = make_stub()
         peer = rclpy.create_node("central_test_peer")
         ex = SingleThreadedExecutor()
-        ex.add_node(node)
-        ex.add_node(peer)
+        for n in (node, stub, peer):
+            ex.add_node(n)
+        wait_running(ex, node)
         report = peer.create_client(ReportOrder, "/central/report_order")
         assert report.wait_for_service(timeout_sec=5)
         bad = ReportOrder.Request(order_id="t9", status="CANCELLED")  # 철자 오류(CANCELED가 맞음)
@@ -96,8 +143,8 @@ def test_report_with_non_final_status_is_rejected_and_warned():
         assert len(warns) == 1
         assert "t9" in warns[0] and "CANCELLED" in warns[0] and "CANCELED" in warns[0]
         assert not any("모르는 order_id" in w for w in warns)
-        node.destroy_node()
-        peer.destroy_node()
+        for n in (node, stub, peer):
+            n.destroy_node()
     finally:
         rclpy.shutdown()
 
@@ -116,10 +163,12 @@ def test_held_report_is_accepted_kept_on_board_and_logged():
                 infos.append(msg)
 
         node.get_logger = lambda: _Log()
+        stub = make_stub()
         peer = rclpy.create_node("central_test_peer")
         ex = SingleThreadedExecutor()
-        ex.add_node(node)
-        ex.add_node(peer)
+        for n in (node, stub, peer):
+            ex.add_node(n)
+        wait_running(ex, node)
         boards = []
         peer.create_subscription(OrderBoard, "/central/orders", boards.append, 10)
         submit = peer.create_client(SubmitTrip, "/central/submit_trip")
@@ -138,8 +187,8 @@ def test_held_report_is_accepted_kept_on_board_and_logged():
         assert [o.order_id for o in boards[-1].orders] == ["t1"]
         assert any("관리자 조치 대기" in m and "t1" in m and "ROBOT_FAULT" in m for m in infos)
         assert warns == []
-        node.destroy_node()
-        peer.destroy_node()
+        for n in (node, stub, peer):
+            n.destroy_node()
     finally:
         rclpy.shutdown()
 
@@ -158,10 +207,12 @@ def test_held_report_for_a_finished_trip_warns_as_already_finished():
                 pass
 
         node.get_logger = lambda: _Log()
+        stub = make_stub()
         peer = rclpy.create_node("central_test_peer")
         ex = SingleThreadedExecutor()
-        ex.add_node(node)
-        ex.add_node(peer)
+        for n in (node, stub, peer):
+            ex.add_node(n)
+        wait_running(ex, node)
         submit = peer.create_client(SubmitTrip, "/central/submit_trip")
         report = peer.create_client(ReportOrder, "/central/report_order")
         assert submit.wait_for_service(timeout_sec=5)
@@ -181,7 +232,93 @@ def test_held_report_for_a_finished_trip_warns_as_already_finished():
             hold_reason=ReportOrder.Request.HOLD_ROBOT_FAULT)
         _call(ex, report, unknown)
         assert "모르는 order_id" in warns[-1]
+        for n in (node, stub, peer):
+            n.destroy_node()
+    finally:
+        rclpy.shutdown()
+
+
+# ---- 단계 ----
+def _spin(ex, seconds):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        ex.spin_once(timeout_sec=0.1)
+
+
+def test_no_board_before_running_and_state_every_second():
+    rclpy.init(domain_id=59)
+    try:
+        node = CentralNode()
+        peer = rclpy.create_node("central_test_peer")
+        ex = SingleThreadedExecutor()
+        ex.add_node(node)
+        ex.add_node(peer)
+        boards, states = [], []
+        peer.create_subscription(OrderBoard, "/central/orders", boards.append, LATCHED)
+        peer.create_subscription(CentralState, "/central/state", states.append, LATCHED)
+        _spin(ex, 3.2)
+        assert boards == []
+        assert len(states) >= 2 and {s.state for s in states} == {"CONNECTING"}
+        assert len(states[0].boot_id) == 32 and int(states[0].boot_id, 16) >= 0
+        assert len({s.boot_id for s in states}) == 1
         node.destroy_node()
         peer.destroy_node()
+    finally:
+        rclpy.shutdown()
+
+
+def test_submit_before_running_is_not_ready():
+    rclpy.init(domain_id=60)
+    try:
+        node = CentralNode()
+        peer = rclpy.create_node("central_test_peer")
+        ex = SingleThreadedExecutor()
+        ex.add_node(node)
+        ex.add_node(peer)
+        submit = peer.create_client(SubmitTrip, "/central/submit_trip")
+        report = peer.create_client(ReportOrder, "/central/report_order")
+        assert submit.wait_for_service(timeout_sec=5)
+        request = SubmitTrip.Request(trip_id="t1", order_id="o1", trip_index=0, trip_count=1)
+        request.items = [OrderItem(kind="A", count=1)]
+        answer = _call(ex, submit, request)
+        assert (answer.accepted, answer.reason) == (False, "NOT_READY")
+        done = ReportOrder.Request(order_id="t1", status=ReportOrder.Request.STATUS_SHIPPED)
+        assert _call(ex, report, done).accepted is False
+        assert node._board.entries() == []
+        node.destroy_node()
+        peer.destroy_node()
+    finally:
+        rclpy.shutdown()
+
+
+def test_runs_after_list_and_publishes_listed_board():
+    rclpy.init(domain_id=61)
+    try:
+        node = CentralNode()
+        stub = make_stub([("t2", {"A": 1, "B": 2}, 20, "RECEIVED"), ("t1", {"C": 3}, 10, "HELD")])
+        peer = rclpy.create_node("central_test_peer")
+        ex = SingleThreadedExecutor()
+        for n in (node, stub, peer):
+            ex.add_node(n)
+        boards, states = [], []
+        peer.create_subscription(OrderBoard, "/central/orders", boards.append, LATCHED)
+        peer.create_subscription(CentralState, "/central/state", states.append, LATCHED)
+        wait_running(ex, node)
+        _spin(ex, 1.5)
+        assert states[-1].state == "RUNNING"
+        assert [s.state for s in states][0] in ("CONNECTING", "SYNCING")
+        assert [o.order_id for o in boards[0].orders] == ["t2", "t1"]
+        assert [(i.kind, i.count) for i in boards[0].orders[0].items] == [("A", 1), ("B", 2)]
+        assert boards[0].orders[0].created_at.sec == 20
+        assert node._board.held() == {"t1"}
+        # 목록에 있던 건을 브리지가 다시 보내면 새로 넣지 않고 접수로 답한다
+        submit = peer.create_client(SubmitTrip, "/central/submit_trip")
+        assert submit.wait_for_service(timeout_sec=5)
+        request = SubmitTrip.Request(trip_id="t1", order_id="o1", trip_index=0, trip_count=1)
+        request.items = [OrderItem(kind="C", count=3)]
+        assert _call(ex, submit, request).accepted is True
+        assert [e.trip_id for e in node._board.entries()] == ["t2", "t1"]
+        for n in (node, stub, peer):
+            n.destroy_node()
     finally:
         rclpy.shutdown()

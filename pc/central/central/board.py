@@ -38,6 +38,19 @@ class Board:
         self._answers[trip_id] = answer
         return answer
 
+    def load(self, entries: list[tuple[str, dict, object, bool]]) -> None:
+        """재시작 때 브리지 목록으로 주문판을 다시 세운다: (trip_id, items, created_at, held).
+
+        받은 순서대로 넣고 각 건의 처음 응답을 접수로 기억한다(브리지가 같은 건을 SubmitTrip으로
+        다시 보내도 새로 넣지 않고 접수로 답함). 품목이 비었거나 이미 아는 trip_id는 건너뛴다."""
+        for trip_id, items, created_at, held in entries:
+            if not trip_id or not items or trip_id in self._answers:
+                continue
+            self._entries.append(BoardEntry(trip_id, dict(items), created_at))
+            self._answers[trip_id] = (True, "")
+            if held:
+                self._held.add(trip_id)
+
     def report(self, order_id: str, status: str) -> bool:
         """끝 상태 · HELD면 True(이미 뺐거나 모르는 건도 같은 결과), 그 밖의 상태면 False.
 
