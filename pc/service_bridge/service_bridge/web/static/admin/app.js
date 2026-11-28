@@ -1,7 +1,7 @@
 // ---- 관리자 현황 화면: 상태 하나를 들고, 메시지마다 state.js를 불러 다시 그림 ----
 import { readParams, openSource } from "../common/source.js";
 import { modeText } from "../common/words.js";
-import { initialState, applyMessage, columns, robotCards, stockLine } from "./state.js";
+import { initialState, applyMessage, columns, robotCards, stockLine, centralBadge } from "./state.js";
 
 const $ = (id) => document.getElementById(id);
 function h(tag, cls, text) {
@@ -32,6 +32,12 @@ function render() {
   mode.hidden = !gotState;
   $("mode-text").textContent = s.mode ? modeText(s.mode) : "";
   mode.className = "mode" + (s.mode === "NORMAL" ? " ok" : " warn");
+
+  const cb = centralBadge(s);
+  const central = $("central");
+  central.hidden = !gotState || cb === null;
+  $("central-text").textContent = cb ? cb.text : "";
+  central.className = "mode central " + (cb ? cb.tone : "warn");
 
   const rb = $("robots");
   rb.replaceChildren();

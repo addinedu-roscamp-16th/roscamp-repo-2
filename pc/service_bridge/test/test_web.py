@@ -201,7 +201,8 @@ def test_snapshot_rest(client, seeded):
     assert r.json()["notice"] is None
     r = client.get("/api/snapshot", params={"view": "admin"})
     assert r.status_code == 200
-    assert r.json()["work_state"] == {"system_mode": "NORMAL"}
+    # 브리지가 /central/state를 아직 못 받음 = LOST (central 재시작 설계 6.4)
+    assert r.json()["work_state"] == {"system_mode": "NORMAL", "central": "LOST"}
     assert [o["order_id"] for o in r.json()["orders"]] == [oid]
 
 
@@ -269,7 +270,7 @@ def test_customer_test_mode_notice(client_test_mode, seeded):
         assert m["data"] == {"kind": "MAINTENANCE", "message": "점검 중"}
     with client_test_mode.websocket_connect("/ws/admin") as ws:
         m = recv(ws)
-        assert m["data"]["work_state"] == {"system_mode": "TEST"}
+        assert m["data"]["work_state"] == {"system_mode": "TEST", "central": "LOST"}
         assert drain(ws, 0.2) == []  # 관리자에게는 customer_notice 없음
 
 
@@ -318,6 +319,25 @@ def test_robots_throttled(client, seeded):
     # 관리자 스냅샷에 마지막 값
     with client.websocket_connect("/ws/admin") as wa:
         assert recv(wa)["data"]["robots"][0]["x"] == 19.0
+
+
+def test_central_change_sends_work_state(client, seeded):
+    box = client.app.state.central
+    acc = seeded["accounts"]["tester"]
+    with client.websocket_connect("/ws/admin") as wa, \
+            client.websocket_connect(f"/ws/customer?account_id={acc}") as wc:
+        recv(wa), recv(wc)
+        # ROS 실행기 스레드처럼 다른 스레드에서 넣는다
+        t = threading.Thread(target=box.put, args=("SYNCING",))
+        t.start()
+        t.join(timeout=2)
+        m = recv_until(wa, "work_state")
+        assert "seq" not in m
+        assert m["data"] == {"system_mode": "NORMAL", "central": "SYNCING"}
+        assert drain(wa, 0.4) == []  # 값이 안 바뀌면 다시 안 보냄
+        assert drain(wc, 0.1) == []  # 고객 화면에는 central을 보이지 않음
+    with client.websocket_connect("/ws/admin") as wa:
+        assert recv(wa)["data"]["work_state"]["central"] == "SYNCING"
 
 
 def test_listener_reconnect_resends_snapshot(client, conn, seeded):

@@ -1,4 +1,4 @@
-# ---- 브리지 노드: /system/mode 발행, DB 준비 뒤 Hello · ReportTrip · ReportCommand 서버 ----
+# ---- 브리지 노드: /system/mode 발행, /central/state 지켜보기, DB 준비 뒤 서버들 ----
 from __future__ import annotations
 
 import time
@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from ament_index_python.packages import get_package_share_directory
 from fleet_core.common.contract import load_contract, to_ros_qos
-from fleet_interfaces.msg import RobotStatusArray, SystemMode
+from fleet_interfaces.msg import CentralState, RobotStatusArray, SystemMode
 from fleet_interfaces.srv import Hello, ListOpenTrips, ReportCommand, ReportTrip
 from psycopg_pool import ConnectionPool
 from rcl_interfaces.msg import ParameterDescriptor
@@ -17,6 +17,7 @@ from rclpy.node import Node
 from rclpy.parameter import Parameter
 
 from service_bridge.core.board_trips import list_board_trips
+from service_bridge.core.central_watch import VIEW_LOST, CentralWatch, record_central_restart
 from service_bridge.core.commands import apply_command
 from service_bridge.core.hello import apply_hello
 from service_bridge.core.reports import apply_report
@@ -27,15 +28,23 @@ MODES = (SystemMode.MODE_NORMAL, SystemMode.MODE_TEST)
 REQUEST_BUDGET_SEC = 2.5   # 요청 마감 = 받은 시각 + 2.5초 (fleet 호출 한도 3초보다 짧게)
 DB_PROBE_PERIOD_SEC = 0.5  # DB 첫 연결 확인 주기
 DB_PROBE_TIMEOUT_SEC = 0.2  # 실행기 스레드를 오래 잡지 않게 짧게
+# 메시지가 끊겨 LOST로 바뀌는 것은 받는 콜백이 없으니 주기적으로 본다 (신선함 한도 3초보다 짧게)
+CENTRAL_CHECK_SEC = 1.0
+CENTRAL_DB_TIMEOUT_SEC = 1.0  # 재시작 기록 한 번: 드문 일이라 넘기기보다 조금 길게 기다린다
 
 
 # ---- 노드 만들기와 켜질 때 순서 ----
 class BridgeNode(Node):
     def __init__(self, pool: ConnectionPool,
-                 on_robots: Callable[[list[dict]], None] | None = None, **kwargs):
+                 on_robots: Callable[[list[dict]], None] | None = None,
+                 on_central: Callable[[str], None] | None = None, **kwargs):
+        """on_central: 보이는 central 상태(CONNECTING · SYNCING · RUNNING · LOST)가 바뀔 때 부름."""
         super().__init__("service_bridge", **kwargs)
         self._pool = pool
         self._on_robots = on_robots
+        self._on_central = on_central
+        self._central = CentralWatch()
+        self._central_view = VIEW_LOST  # 마지막으로 알린 값 (_central_group 안에서만 바꿈)
         self._dispatcher: Dispatcher | None = None
         self._mode = self._read_mode()
         self._contract = load_contract(
@@ -54,6 +63,14 @@ class BridgeNode(Node):
             RobotStatusArray, self._contract.name("robots"), self._on_robots_msg,
             to_ros_qos(self._contract.qos("robots")),
             callback_group=MutuallyExclusiveCallbackGroup())
+
+        # central 상태 구독 (DB와 무관). 구독 · 확인 타이머는 한 그룹: _central_view를 하나씩 바꿈
+        self._central_group = MutuallyExclusiveCallbackGroup()
+        self._central_sub = self.create_subscription(
+            CentralState, self._contract.name("central_state"), self._on_central_msg,
+            to_ros_qos(self._contract.qos("central_state")), callback_group=self._central_group)
+        self._central_timer = self.create_timer(
+            CENTRAL_CHECK_SEC, self._check_central, callback_group=self._central_group)
 
         # 2. DB 첫 연결이 될 때까지 확인. 되면 3 · 4 · 5.
         # 서버가 없는 동안 fleet은 시간 초과 뒤 다시 보내므로 잃는 보고가 없다
@@ -108,7 +125,9 @@ class BridgeNode(Node):
                 callback_group=MutuallyExclusiveCallbackGroup()),
         ]
         # 5. 운반 건 넘기기 시작: 켜질 때 남은 줄도 다시 보낸다
-        self._dispatcher = Dispatcher(self, self._pool, self._contract)
+        self._dispatcher = Dispatcher(
+            self, self._pool, self._contract,
+            can_dispatch=lambda: self._central.can_dispatch(time.monotonic()))
         self._dispatcher.start()
         self._probe_timer.cancel()
         self.destroy_timer(self._probe_timer)
@@ -131,6 +150,45 @@ class BridgeNode(Node):
             self._on_robots(convert.robots(msg))
         except Exception:
             self.get_logger().error(f"on_robots 예외\n{traceback.format_exc()}")
+
+    # ---- central 지켜보기 (설계 6.4) ----
+    def _on_central_msg(self, msg: CentralState) -> None:
+        try:
+            old = self._central.on_state(msg.boot_id, msg.state, time.monotonic())
+            if old is not None:
+                self._central_restarted(old, msg.boot_id)
+            self._check_central()
+        except Exception:
+            self.get_logger().error(f"/central/state 처리 예외\n{traceback.format_exc()}")
+
+    def _central_restarted(self, old: str, new: str) -> None:
+        # DB가 아직 없거나 잠깐 끊겼으면 한 번만 시도하고 넘어간다: 안내 알림이고, 넘기기도 DB가
+        # 있어야 돌므로 풀 기록이 없어 생기는 일은 앞 실패 기록에 따른 쉼이 남는 것뿐이다
+        try:
+            with self._pool.connection(timeout=CENTRAL_DB_TIMEOUT_SEC) as conn:
+                n = record_central_restart(conn, old, new)
+        except Exception as e:
+            self.get_logger().error(
+                f"central 재시작 기록 못 함 old_boot_id={old} new_boot_id={new}: {e!r}")
+            return
+        self.get_logger().info(
+            f"central 재시작 알아챔 old_boot_id={old} new_boot_id={new}, 실패 기록 푼 줄 {n}")
+        if self._dispatcher is not None:
+            self._dispatcher.forget_backoff()
+
+    def _check_central(self) -> None:
+        view = self._central.view(time.monotonic())
+        if view == self._central_view:
+            return
+        self._central_view = view
+        self.get_logger().info(f"central 상태 {view}")
+        if view == "RUNNING" and self._dispatcher is not None:
+            self._dispatcher.wake()
+        if self._on_central is not None:
+            try:
+                self._on_central(view)
+            except Exception:
+                self.get_logger().error(f"on_central 예외\n{traceback.format_exc()}")
 
     # ---- 끌 때 ----
     def close_servers(self) -> None:

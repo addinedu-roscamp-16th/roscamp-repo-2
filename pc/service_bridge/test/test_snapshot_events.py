@@ -77,7 +77,7 @@ def test_snapshots_share_stock_shape(conn, seeded):
     """고객 · 관리자 스냅샷과 WS stock이 같은 모양 (N-05)."""
     acc = seeded["accounts"]["tester"]
     assert customer_snapshot(conn, acc, "NORMAL")["stock"] == stock(conn)
-    assert admin_snapshot(conn, "NORMAL", [])["stock"] == stock(conn)
+    assert admin_snapshot(conn, "NORMAL", [], "RUNNING")["stock"] == stock(conn)
 
 
 def test_customer_snapshot_only_own_orders(conn, seeded):
@@ -114,7 +114,7 @@ def test_admin_snapshot_shape(conn, seeded):
     a = _place(conn, seeded, "tester", "k1", (("mentos", 3), ("choco_bar", 3)))
     _place(conn, seeded, "tester2", "k2")
     robots = [{"robot_id": "pode1"}]
-    snap = admin_snapshot(conn, "NORMAL", robots)
+    snap = admin_snapshot(conn, "NORMAL", robots, "SYNCING")
     assert set(snap) == {"orders", "trips", "robots", "work_state", "stock"}
     assert [o["status"] for o in snap["orders"]] == ["RECEIVED", "RECEIVED"]
     # N-06: 관리자 주문 줄에도 품목 · 접수 시각
@@ -124,7 +124,8 @@ def test_admin_snapshot_shape(conn, seeded):
     assert sorted((i["product_id"], i["qty"]) for i in first["items"]) == sorted(
         [(seeded["products"]["mentos"], 3), (seeded["products"]["choco_bar"], 3)])
     assert snap["orders"][0]["created_at"] <= snap["orders"][1]["created_at"]
-    assert snap["robots"] == robots and snap["work_state"] == {"system_mode": "NORMAL"}
+    assert snap["robots"] == robots
+    assert snap["work_state"] == {"system_mode": "NORMAL", "central": "SYNCING"}
     assert len(snap["trips"]) == 3
     assert all(t["items"] for t in snap["trips"])
     # 사건 data와 같은 모양
@@ -145,8 +146,9 @@ def test_snapshot_excludes_old_finished(conn, seeded):
                      (hours, oid))
     ids = lambda s: [o["order_id"] for o in s["orders"]]  # noqa: E731
     assert ids(customer_snapshot(conn, seeded["accounts"]["tester"], "NORMAL")) == [recent.order_id]
-    assert ids(admin_snapshot(conn, "NORMAL", [])) == [recent.order_id]
-    assert all(t["order_id"] != old.order_id for t in admin_snapshot(conn, "NORMAL", [])["trips"])
+    assert ids(admin_snapshot(conn, "NORMAL", [], "RUNNING")) == [recent.order_id]
+    trips = admin_snapshot(conn, "NORMAL", [], "RUNNING")["trips"]
+    assert all(t["order_id"] != old.order_id for t in trips)
 
 
 def test_route_command_result_admin_only():

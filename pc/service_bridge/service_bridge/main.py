@@ -23,15 +23,22 @@ EXECUTOR_JOIN_SEC = 3.0
 def build(bridge_pool: ConnectionPool, web_pool: ConnectionPool, dsn: str,
           **node_kwargs) -> tuple[BridgeNode, FastAPI]:
     """노드를 먼저 만든다: 모드는 노드 매개변수(-p mode:=)에서만 읽기 때문.
-    노드의 로봇 콜백은 앱이 생긴 뒤에야 불리도록(실행기를 돌리기 전) 앱을 나중에 가리킨다."""
+    노드의 로봇 · central 콜백은 앱이 생긴 뒤에야 불리도록(실행기를 돌리기 전)
+    앱을 나중에 가리킨다."""
     holder: dict[str, FastAPI] = {}
 
     def on_robots(robots: list[dict]) -> None:
         app = holder.get("app")
         if app is not None:
-            app.state.robots.put(robots)
+            app.state.robots.put(list(robots))
 
-    node = BridgeNode(bridge_pool, on_robots=on_robots, **node_kwargs)
+    def on_central(view: str) -> None:
+        # 관리자 work_state.central (바뀌면 앱이 work_state를 다시 보냄)
+        app = holder.get("app")
+        if app is not None:
+            app.state.central.put(view)
+
+    node = BridgeNode(bridge_pool, on_robots=on_robots, on_central=on_central, **node_kwargs)
     app = create_app(web_pool, dsn, node.mode, node.wake_dispatch)
     holder["app"] = app
     return node, app

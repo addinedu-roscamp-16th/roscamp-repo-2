@@ -48,7 +48,7 @@ function adminModel() {
       orders: [{ order_id: orderNo(1), status: "SHIPPED", created_at: at("09:10"), items: [{ product_id: 2, qty: 1 }] }],
       trips: [trip(tripNo(orderNo(1), 1), orderNo(1), "SHIPPED", "pode1", [[2, 1, 1]])],
       robots: [robot("pode1", "IDLE", "NONE", 86, 1.2, 0.8, ""), robot("pode2", "IDLE", "NONE", 92, 2.4, 0.8, "")],
-      work_state: { system_mode: "NORMAL" },
+      work_state: { system_mode: "NORMAL", central: "RUNNING" },
       stock: { items: clone(PRODUCTS) },
     },
     nextNo: 2,

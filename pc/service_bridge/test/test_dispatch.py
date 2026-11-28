@@ -5,7 +5,7 @@ import logging
 import pytest
 
 from service_bridge.core.dispatch import (
-    head_item, record_ack, record_failure, retry_delay)
+    head_item, record_ack, record_failure, record_not_ready, retry_delay)
 from service_bridge.core.intake import place_order
 from service_bridge.core.types import OrderLine, OrderRequest
 
@@ -136,6 +136,17 @@ def test_rest_survives_restart(conn, seeded):
     now = conn.execute("SELECT now()").fetchone()[0]
     assert h.trip_id == t and h.attempts == 5
     assert h.next_attempt_at > now + datetime.timedelta(seconds=20)
+
+
+def test_not_ready_keeps_attempts(conn, seeded):
+    # NOT_READY는 central이 "아직 못 받음"이라고 확정한 답: 시도로 세지 않는다 (설계 6.4 규칙 1)
+    t = _place(conn, seeded, [("mentos", 1)], "k1").trip_ids[0]
+    _fail(conn, t, 2)
+    for _ in range(6):
+        record_not_ready(conn, t)
+    attempts, next_at, unknown, last, acked = _row(conn, t)
+    assert (attempts, next_at, unknown, last, acked) == (2, None, None, "NOT_READY", None)
+    assert _alerts(conn, t) == []
 
 
 def test_retry_delay():

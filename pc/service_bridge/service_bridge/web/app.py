@@ -27,7 +27,7 @@ from service_bridge.web.listener import run_listener
 
 log = logging.getLogger("service_bridge.web")
 
-ROBOTS_PERIOD = 0.2   # robots를 보내는 간격(초). 새 값이 있을 때만 보낸다
+ROBOTS_PERIOD = 0.2   # robots · work_state를 보내는 간격(초). 새 값이 있을 때만 보낸다
 CLOSE_UNKNOWN_ACCOUNT = 4404
 # 화면 파일 폴더 (N-07). 설치본에도 같은 자리에 깔린다(setup.py package_data)
 STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -58,12 +58,12 @@ def current_account(conn: psycopg.Connection, account_id: int | None) -> int:
     return account_id
 
 
-# ---- 로봇 상태 마지막 값 (브리지 → 웹) ----
-class RobotsBox:
+# ---- 브리지가 가진 마지막 값 (로봇 상태 · central 상태, 브리지 → 웹) ----
+class LatestBox:
     """마지막 값만 쥔다. put은 어느 스레드에서 불러도 되고, 값은 이벤트 루프 스레드에서 바뀐다."""
 
-    def __init__(self):
-        self._robots: list[dict] = []
+    def __init__(self, initial):
+        self._value = initial
         self.version = 0
         self._loop: asyncio.AbstractEventLoop | None = None
         self._lock = threading.Lock()
@@ -72,8 +72,8 @@ class RobotsBox:
         with self._lock:
             self._loop = loop
 
-    def put(self, robots: list[dict]) -> None:
-        value = list(robots)
+    def put(self, value) -> None:
+        """value는 바꾸지 않는 값으로 넘긴다(목록이면 새 목록)."""
         with self._lock:
             loop = self._loop
         if loop is None:
@@ -84,12 +84,12 @@ class RobotsBox:
         except RuntimeError:  # 루프가 닫힘
             self._set(value)
 
-    def _set(self, value: list[dict]) -> None:
-        self._robots = value
+    def _set(self, value) -> None:
+        self._value = value
         self.version += 1
 
-    def latest(self) -> list[dict]:
-        return self._robots
+    def latest(self):
+        return self._value
 
 
 # ---- 주문 요청 본문 ----
@@ -109,20 +109,22 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
                wake_dispatch: Callable[[], None]) -> FastAPI:
     """pool: 웹 전용 동기 풀(브리지 풀과 따로). dsn: LISTEN 전용 연결 주소.
     mode: NORMAL · TEST. wake_dispatch: 브리지 넘기기 깨우기(어느 스레드에서 불러도 됨)."""
-    robots = RobotsBox()
+    robots = LatestBox([])
+    # 브리지가 /central/state를 한 번도 못 받은 동안은 LOST (central_watch.VIEW_LOST)
+    central = LatestBox("LOST")
 
     # ---- 첫 메시지 만들기 (DB 읽기는 스레드로) ----
     def _customer_snapshot(account_id: int) -> dict:
         with pool.connection() as conn:
             return snapshot.customer_snapshot(conn, account_id, mode)
 
-    def _admin_snapshot(latest: list[dict]) -> dict:
+    def _admin_snapshot(latest: list[dict], central_view: str) -> dict:
         with pool.connection() as conn:
-            return snapshot.admin_snapshot(conn, mode, latest)
+            return snapshot.admin_snapshot(conn, mode, latest, central_view)
 
     async def build_snapshot(client: Client) -> list[dict]:
         if client.audience == "admin":
-            data = await asyncio.to_thread(_admin_snapshot, robots.latest())
+            data = await asyncio.to_thread(_admin_snapshot, robots.latest(), central.latest())
             return [envelope("snapshot", data, _now())]
         data = await asyncio.to_thread(_customer_snapshot, client.account_id)
         msgs = [envelope("snapshot", data, _now())]
@@ -163,20 +165,28 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
     def on_connect(pid: int) -> None:
         app.state.listener_pid = pid
 
-    # ---- robots: 0.2초마다, 바뀌었을 때만 관리자에게 ----
+    # ---- robots · work_state: 0.2초마다, 바뀌었을 때만 관리자에게 ----
     async def robots_ticker() -> None:
-        sent = robots.version
+        sent, sent_central = robots.version, central.version
         while True:
             await asyncio.sleep(ROBOTS_PERIOD)
-            if robots.version == sent:
-                continue
-            sent = robots.version
-            msg = envelope("robots", {"robots": robots.latest()}, _now())
-            await hub.deliver([Outgoing("admin", None, msg)])
+            out = []
+            if robots.version != sent:
+                sent = robots.version
+                out.append(Outgoing("admin", None, envelope(
+                    "robots", {"robots": robots.latest()}, _now())))
+            if central.version != sent_central:
+                # central 상태가 바뀜: 운영 모드와 함께 work_state를 다시 보낸다 (재시작 설계 6.4)
+                sent_central = central.version
+                out.append(Outgoing("admin", None, envelope(
+                    "work_state", snapshot.work_state(mode, central.latest()), _now())))
+            if out:
+                await hub.deliver(out)
 
     @contextlib.asynccontextmanager
     async def lifespan(_app: FastAPI):
         robots.bind(asyncio.get_running_loop())
+        central.bind(asyncio.get_running_loop())
         stop = asyncio.Event()
         listener = asyncio.create_task(
             run_listener(dsn, on_seq, hub.resend_snapshots, stop, on_connect))
@@ -193,9 +203,11 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
                 pass
             await asyncio.gather(ticker, return_exceptions=True)
             robots.bind(None)
+            central.bind(None)
 
     app = FastAPI(title="iponic order intake", lifespan=lifespan)
     app.state.robots = robots
+    app.state.central = central
     app.state.hub = hub
     app.state.listener_pid = None
 
@@ -259,7 +271,7 @@ def create_app(pool: ConnectionPool, dsn: str, mode: str,
                 acc = current_account(conn, account_id)
             return _customer_snapshot(acc)
         if view == "admin":
-            return _admin_snapshot(robots.latest())
+            return _admin_snapshot(robots.latest(), central.latest())
         raise ApiError(PlaceError(400, "BAD_REQUEST", "view는 customer · admin 중 하나",
                                   {"view": view}))
 

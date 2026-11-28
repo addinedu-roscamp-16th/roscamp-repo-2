@@ -1,6 +1,6 @@
 // ---- admin/state.js 시험 ----
 import { test, eq, ok } from "./harness.js";
-import { initialState, applyMessage, columns, robotCards, stockLine } from "../admin/state.js";
+import { initialState, applyMessage, columns, robotCards, stockLine, centralBadge } from "../admin/state.js";
 import { SCENES } from "../common/demo_scenes.js";
 
 const P = [
@@ -9,7 +9,7 @@ const P = [
 ];
 const trip = (trip_id, order_id, status, robot_id = null) =>
   ({ trip_id, order_id, status, robot_id, items: [{ product_id: 1, qty_ordered: 2, qty_placed: 0, qty_missing: 0 }] });
-const snap = (data) => ({ type: "snapshot", data: { orders: [], trips: [], robots: [], work_state: { system_mode: "NORMAL" }, stock: { items: P }, ...data } });
+const snap = (data) => ({ type: "snapshot", data: { orders: [], trips: [], robots: [], work_state: { system_mode: "NORMAL", central: "RUNNING" }, stock: { items: P }, ...data } });
 const ids = (cards) => cards.map(c => c.tripId);
 
 test("admin: 칸 나누기", () => {
@@ -86,4 +86,38 @@ test("admin: 배터리는 반올림, 숫자가 아니면 —", () => {
     { robot_id: "c", fsm_state: "IDLE", fault: "NONE", trip_id: "" },
   ] }));
   eq(robotCards(s).map(r => r.sub), ["배터리 86%", "배터리 —", "배터리 —"]);
+});
+
+test("admin: central 표시 네 값 (스냅샷 · work_state)", () => {
+  const want = {
+    CONNECTING: { text: "central: 연결 중", tone: "warn" },
+    SYNCING: { text: "central: 주문판 갱신 중", tone: "warn" },
+    RUNNING: { text: "central: 실행 중", tone: "ok" },
+    LOST: { text: "central: 연결 안 됨", tone: "bad" },
+  };
+  for (const [v, w] of Object.entries(want)) {
+    const s = applyMessage(initialState(), snap({ work_state: { system_mode: "NORMAL", central: v } }));
+    eq(centralBadge(s), w);
+  }
+  let s = applyMessage(initialState(), snap({}));
+  eq(s.central, "RUNNING");
+  s = applyMessage(s, { type: "work_state", data: { system_mode: "NORMAL", central: "SYNCING" } });
+  eq(centralBadge(s), want.SYNCING);
+  eq(s.mode, "NORMAL");
+  ok(Object.keys(s.trips).length === 0);
+  s = applyMessage(s, { type: "work_state", data: { system_mode: "NORMAL", central: "LOST" } });
+  eq(centralBadge(s), want.LOST);
+});
+
+test("admin: central 칸이 없으면 표시 없음", () => {
+  eq(centralBadge(initialState()), null);
+  const s = applyMessage(initialState(), snap({ work_state: { system_mode: "NORMAL" } }));
+  eq(centralBadge(s), null);
+});
+
+test("admin: 데모 장면에도 central 값", () => {
+  for (const name of ["many", "maintenance"]) {
+    const m = SCENES[name].init("admin");
+    eq(m.data.work_state.central, "RUNNING");
+  }
 });

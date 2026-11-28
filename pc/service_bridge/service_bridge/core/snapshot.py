@@ -59,7 +59,13 @@ def customer_snapshot(conn: psycopg.Connection, account_id: int, mode: str) -> d
     }
 
 
-def admin_snapshot(conn: psycopg.Connection, mode: str, robots: list[dict]) -> dict:
+# ---- 관리자 작업 상태: 스냅샷 안과 WS work_state가 같은 모양 ----
+def work_state(mode: str, central: str) -> dict:
+    return {"system_mode": mode, "central": central}
+
+
+def admin_snapshot(conn: psycopg.Connection, mode: str, robots: list[dict], central: str) -> dict:
+    """central: 브리지가 본 central 상태 CONNECTING · SYNCING · RUNNING · LOST (재시작 설계 6.4)."""
     params = {"term": list(TERMINAL)}
     orders = _orders(conn, _VISIBLE, params)
     trips = conn.execute(
@@ -70,6 +76,6 @@ def admin_snapshot(conn: psycopg.Connection, mode: str, robots: list[dict]) -> d
                    for oid, st, created, items in orders],
         "trips": [r[0] for r in trips],
         "robots": robots,
-        "work_state": {"system_mode": mode},
+        "work_state": work_state(mode, central),
         "stock": stock(conn),
     }

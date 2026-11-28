@@ -64,7 +64,16 @@ def record_ack(conn: psycopg.Connection, trip_id: str, accepted: bool, reason: s
             "WHERE code = 'DISPATCH_STALLED' AND trip_id = %s AND status = 'OPEN'", (trip_id,))
 
 
-# ---- 실패 (NOT_READY · 시간 초과 · 서비스 없음) ----
+# ---- 아직 못 받음 (NOT_READY): 세지 않음 (central 재시작 설계 6.4 규칙 1) ----
+def record_not_ready(conn: psycopg.Connection, trip_id: str) -> None:
+    """central이 "아직 못 받음"이라고 확정한 답이라 결과 모름이 아니다.
+    attempts · 쉼 · 결과 모름은 그대로 두고 last_result만 적는다."""
+    with conn.transaction():
+        conn.execute("UPDATE trip_dispatch SET last_result = 'NOT_READY' WHERE trip_id = %s",
+                     (trip_id,))
+
+
+# ---- 실패 (시간 초과 · 서비스 없음) ----
 def record_failure(conn: psycopg.Connection, trip_id: str, result: str) -> int:
     """attempts를 하나 올리고 바뀐 값을 돌려준다. FAST_TRIES 이상이면 30초 쉼 + 알림."""
     with conn.transaction():

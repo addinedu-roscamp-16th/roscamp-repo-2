@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 
 from fleet_interfaces.srv import SubmitTrip
@@ -10,7 +11,14 @@ from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 from rclpy.node import Node
 
 from service_bridge.core.dispatch import (
-    FAST_TRIES, RETRY_SEC, head_item, record_ack, record_failure, retry_delay)
+    FAST_TRIES,
+    RETRY_SEC,
+    head_item,
+    record_ack,
+    record_failure,
+    record_not_ready,
+    retry_delay,
+)
 from service_bridge.ros import convert
 
 TICK_SEC = 1.0           # 가드 조건을 못 받은 경우를 위한 확인 주기
@@ -20,7 +28,8 @@ DB_TIMEOUT_SEC = 0.2     # 풀에서 연결을 기다리는 한도 (실행기 �
 # ---- central 응답 분류 (SubmitTrip.srv · 통신 설계 F-04, SB-06) ----
 # central은 접수(accepted=true)와 거절(accepted=false + 까닭, 예 INVALID_REQUEST)을 확정 응답으로
 # 기억하고 같은 trip_id에는 처음 응답을 그대로 준다 -> 둘 다 record_ack.
-# NOT_READY는 기억하지 않는 "아직 못 받음" -> 다시 보낸다(record_failure).
+# NOT_READY는 기억하지 않는 "아직 못 받음" -> 세지 않고 다시 보낸다
+# (record_not_ready, central 재시작 설계 6.4).
 RETRYABLE_REASONS = frozenset({"NOT_READY"})
 
 
@@ -30,8 +39,11 @@ class Dispatcher:
     future의 done 콜백은 그룹 밖 실행기 작업으로 돌기 때문에 가드 조건만 울린다.
     """
 
-    def __init__(self, node: Node, pool: ConnectionPool, contract):
+    def __init__(self, node: Node, pool: ConnectionPool, contract,
+                 can_dispatch: Callable[[], bool] = lambda: True):
+        """can_dispatch: central이 RUNNING이고 신선한지(어느 스레드에서 불려도 되는 함수)."""
         self._node = node
+        self._can_dispatch = can_dispatch
         self._pool = pool
         self._contract = contract
         self._group = MutuallyExclusiveCallbackGroup()
@@ -43,6 +55,7 @@ class Dispatcher:
         self._sent_at = 0.0        # monotonic
         self._due = 0.0            # 이 시각(monotonic) 전에는 새로 보내지 않음
         self._started_at = 0.0     # start() 시각(monotonic)
+        self._forget_due = False   # central 재시작: 다음 _tick에서 _due를 버림 (다른 스레드가 켬)
 
     def start(self) -> None:
         """켜질 때 남은 줄도 이어서 보낸다(첫 확인을 바로 시킴)."""
@@ -58,9 +71,18 @@ class Dispatcher:
         if self._guard is not None:
             self._guard.trigger()
 
+    def forget_backoff(self) -> None:
+        """central 재시작 뒤(DB의 실패 기록을 푼 뒤) 부른다. 앞 central 때문에 잡힌 다시 보낼 시각을
+        다음 확인에서 버린다. 어느 스레드에서 불러도 됨: 깃발만 켜고 _due는 _tick에서 바꾼다."""
+        self._forget_due = True
+        self.wake()
+
     # ---- 한 번 확인 ----
     def _tick(self) -> None:
         try:
+            if self._forget_due:
+                self._forget_due = False
+                self._due = 0.0
             if self._future is not None:
                 if self._future.done():  # 응답이 먼저. 시간 초과 판정보다 앞
                     self._handle_reply()
@@ -74,6 +96,10 @@ class Dispatcher:
             self._node.get_logger().warning(f"넘기기 확인 실패: {e!r}", throttle_duration_sec=5.0)
 
     def _send_head(self) -> None:
+        # central이 RUNNING이 아니거나 상태가 끊김: 보내지도 세지도 않는다(DB에 아무것도 안 씀).
+        # _due는 그대로 두고, RUNNING이 되면 BridgeNode가 wake()로 깨운다
+        if not self._can_dispatch():
+            return
         with self._pool.connection(timeout=DB_TIMEOUT_SEC) as conn:
             item = head_item(conn)
         if item is None:
@@ -100,8 +126,11 @@ class Dispatcher:
         try:
             resp = future.result()
             if not resp.accepted and resp.reason in RETRYABLE_REASONS:
+                # 실패로 세지 않음: 30초 쉼 · DISPATCH_STALLED에 빠지지 않고 1초 ±20% 뒤 다시
+                with self._pool.connection(timeout=DB_TIMEOUT_SEC) as conn:
+                    record_not_ready(conn, trip_id)
                 self._future = None
-                self._fail(trip_id, resp.reason)
+                self._due = time.monotonic() + retry_delay(0)
                 return
             with self._pool.connection(timeout=DB_TIMEOUT_SEC) as conn:
                 record_ack(conn, trip_id, resp.accepted, resp.reason)

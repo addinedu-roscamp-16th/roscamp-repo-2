@@ -2,7 +2,7 @@
 import { test, eq, ok } from "./harness.js";
 import {
   PROGRESS_STEPS, progressIndex, adminColumn, adminStatusText,
-  robotWord, productName, rejectMessage, modeText,
+  robotWord, productName, rejectMessage, modeText, centralText,
 } from "../common/words.js";
 
 test("words: 진행 칸", () => { eq(progressIndex("준비 중"), 2); eq(progressIndex("일부 출고"), null); });
@@ -18,6 +18,11 @@ test("words: 정상 로봇과 모르는 상태", () => {
   eq(robotWord({fsm_state: "XYZ", fault: "NONE"}), {text: "XYZ", tone: "busy"});
 });
 test("words: 작동 방식 말", () => { eq(modeText("NORMAL"), "실행 중"); eq(modeText("TEST"), "시험 모드"); });
+test("words: central 상태 말 (네 값, 모르는 값은 원래 값)", () => {
+  eq(["CONNECTING", "SYNCING", "RUNNING", "LOST"].map(centralText),
+     ["central: 연결 중", "central: 주문판 갱신 중", "central: 실행 중", "central: 연결 안 됨"]);
+  eq(centralText("NEW"), "central: NEW");
+});
 test("words: 이름 없는 상품", () => eq(productName({product_id: 3}), "상품 3"));
 test("words: 재고 초과 문구", () => {
   const r = rejectMessage(422, {code: "OUT_OF_STOCK", detail: {items: [{product_id: 1, qty: 5, stock_qty: 2}]}}, {1: "미니멘토스 레인보우"});

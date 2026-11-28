@@ -24,6 +24,9 @@ body { background: var(--bg); color: var(--text); min-height: 100vh; }
 .conn.ok .dot, .mode.ok .dot { background: var(--green); }
 .mode.ok { color: var(--green); }
 .mode.warn { color: var(--yellow); }
+.mode.bad { color: var(--red); }
+.mode.bad .dot { background: var(--red); }
+.central { font-weight: 400; font-size: 13px; }
 .btn-pause { height: 40px; padding: 0 18px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--text); }
 .btn-stop { height: 46px; padding: 0 28px; border-radius: 8px; border: 2px solid #ef4444; background: var(--stop); color: #fff; font-weight: 700; font-size: 16px; }
 .top button:disabled { opacity: .45; cursor: not-allowed; }

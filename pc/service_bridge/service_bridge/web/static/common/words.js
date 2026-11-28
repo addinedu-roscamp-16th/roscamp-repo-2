@@ -42,6 +42,18 @@ export function modeText(mode) {
   return Object.hasOwn(MODE_TEXT, mode) ? MODE_TEXT[mode] : mode;
 }
 
+// 브리지가 본 central 상태 (work_state.central, central 재시작 설계 6.4). LOST = 3초 넘게 못 받음
+export const CENTRAL_TEXT = {
+  CONNECTING: { text: "연결 중", tone: "warn" },
+  SYNCING: { text: "주문판 갱신 중", tone: "warn" },
+  RUNNING: { text: "실행 중", tone: "ok" },
+  LOST: { text: "연결 안 됨", tone: "bad" },
+};
+
+export function centralText(central) {
+  return "central: " + (Object.hasOwn(CENTRAL_TEXT, central) ? CENTRAL_TEXT[central].text : central);
+}
+
 // ---- 로봇 상태 (fsm_state 값은 RobotState.msg의 STATE_* 와 같다) ----
 export const FSM_TEXT = {
   IDLE: { text: "대기", tone: "ok" },

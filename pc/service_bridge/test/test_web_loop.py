@@ -108,6 +108,12 @@ def test_order_to_shipped_over_ws(pool, web_pool, conn, seeded):
         p = seeded["products"]
         with TestClient(loop.app) as client:
             _wait_listener(loop.app)
+            # build가 노드의 central 상태를 앱 work_state로 잇는다 (central 재시작 설계 6.4)
+            deadline = time.monotonic() + LOOP_WAIT
+            while client.get("/api/snapshot", params={"view": "admin"}).json()[
+                    "work_state"]["central"] != "RUNNING":
+                assert time.monotonic() < deadline, "central RUNNING이 관리자 스냅샷에 오지 않음"
+                time.sleep(0.1)
             with client.websocket_connect(f"/ws/customer?account_id={acc}") as ws:
                 assert recv(ws)["type"] == "snapshot"
                 # 4개 → 운반 건 하나 (설계 5.3)

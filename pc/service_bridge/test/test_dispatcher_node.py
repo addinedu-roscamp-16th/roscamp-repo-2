@@ -1,13 +1,15 @@
-"""넘기기 노드: 접수 순서 · 하나씩 · 앞 건 막힘 · wake · 시간 초과 · /fleet/robots (설계 6.2, 6.3)."""
+"""넘기기 노드: 접수 순서 · 하나씩 · 앞 건 막힘 · wake · 시간 초과 · /fleet/robots (설계 6.2, 6.3),
+/central/state 지켜보기 (central 재시작 설계 6.4)."""
 import threading
 import time
+import uuid
 
 import pytest
 
 rclpy = pytest.importorskip("rclpy")
 pytest.importorskip("fleet_interfaces")
 
-from fleet_interfaces.msg import RobotStatus, RobotStatusArray  # noqa: E402
+from fleet_interfaces.msg import CentralState, RobotStatus, RobotStatusArray  # noqa: E402
 from fleet_interfaces.srv import SubmitTrip  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
@@ -50,17 +52,39 @@ def spin(ros):
 
 
 class FakeCentral:
-    """가짜 SubmitTrip 서버. answers: 받은 순번(0부터) -> (accepted, reason) 만드는 함수."""
+    """가짜 central: /central/state 발행(진짜처럼 바뀔 때 + 주기적으로) + 가짜 SubmitTrip 서버.
 
-    def __init__(self, answer=lambda i, req: (True, ""), delay=0.0):
-        self.node = rclpy.create_node("fake_central")
-        self.node.create_service(SubmitTrip, "/central/submit_trip", self._on)
+    answer: 받은 순번(0부터) -> (accepted, reason). serve=False면 SubmitTrip 서버 없음.
+    state=None이면 /central/state를 내지 않는다."""
+
+    def __init__(self, answer=lambda i, req: (True, ""), delay=0.0, serve=True,
+                 state="RUNNING"):
+        self.node = rclpy.create_node(f"fake_central_{uuid.uuid4().hex[:8]}")
+        if serve:
+            self.node.create_service(SubmitTrip, "/central/submit_trip", self._on)
+        qos = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
+                         durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self._state_pub = self.node.create_publisher(CentralState, "/central/state", qos)
+        self.boot_id = uuid.uuid4().hex
+        self.state = state
+        self.node.create_timer(0.5, self._publish_state)
+        self._publish_state()
         self.received = []
         self.active = 0
         self.max_active = 0
         self._answer = answer
         self._delay = delay
         self._lock = threading.Lock()
+
+    def set_state(self, state, boot_id=None):
+        if boot_id is not None:
+            self.boot_id = boot_id
+        self.state = state
+        self._publish_state()
+
+    def _publish_state(self):
+        if self.state is not None:
+            self._state_pub.publish(CentralState(boot_id=self.boot_id, state=self.state))
 
     def _on(self, req, res):
         with self._lock:
@@ -111,14 +135,17 @@ def test_sends_in_order_one_at_a_time(spin, pool, conn, seeded):
 
 
 def test_head_blocks_followers(spin, pool, conn, seeded):
+    # central은 RUNNING인데 SubmitTrip 서버가 없음: NO_SERVICE 5번 뒤 30초 쉼, 뒤 건은 기다림
     a = _place(conn, seeded, [("choco_bar", 1)], "k1")
-    _place(conn, seeded, [("choco_bar", 1)], "k2")
-    central = FakeCentral(answer=lambda i, req: (False, "NOT_READY"))
+    b = _place(conn, seeded, [("choco_bar", 1)], "k2")
+    central = FakeCentral(serve=False)
     bridge = _bridge(pool)
     spin(central.node, bridge)
-    assert _until(lambda: len(central.received) >= 5, 12)
+    q = "select attempts, last_result from trip_dispatch where trip_id = %s"
+    assert _until(lambda: conn.execute(q, (a.trip_ids[0],)).fetchone()[0] >= 5, 12)
     time.sleep(1.5)  # 5번째 뒤에는 30초 쉼
-    assert central.received == [a.trip_ids[0]] * 5
+    assert conn.execute(q, (a.trip_ids[0],)).fetchone() == (5, "NO_SERVICE")
+    assert conn.execute(q, (b.trip_ids[0],)).fetchone() == (0, None)
     rows = conn.execute(
         "select trip_id, status from alert where code = 'DISPATCH_STALLED'").fetchall()
     assert rows == [(a.trip_ids[0], "OPEN")]
@@ -162,8 +189,9 @@ def test_timeout_records_failure(spin, pool, conn, seeded):
 
 def test_no_service_records_failure(spin, pool, conn, seeded):
     res = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    central = FakeCentral(serve=False)
     bridge = _bridge(pool)
-    spin(bridge)
+    spin(central.node, bridge)
     assert _until(lambda: conn.execute(
         "select last_result from trip_dispatch where trip_id = %s",
         (res.trip_ids[0],)).fetchone() == ("NO_SERVICE",), 4)
@@ -201,10 +229,111 @@ def test_reply_while_waking_sends_once(spin, pool, conn, seeded):
 def test_no_service_not_counted_right_after_start(spin, pool, conn, seeded):
     # 켜진 직후는 디스커버리 전이라 central이 없어 보여도 시도로 세지 않는다(재시작마다 +1 막기)
     res = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    central = FakeCentral(serve=False)
     bridge = _bridge(pool)
-    spin(bridge)
+    spin(central.node, bridge)
     q = "select attempts, last_result from trip_dispatch where trip_id = %s"
     time.sleep(0.8)
     assert conn.execute(q, (res.trip_ids[0],)).fetchone() == (0, None)
     # 첫 1초가 지나면 없는 서비스를 실패로 센다
     assert _until(lambda: conn.execute(q, (res.trip_ids[0],)).fetchone() == (1, "NO_SERVICE"), 3)
+
+
+# ---- /central/state 지켜보기 (central 재시작 설계 6.4) ----
+Q_ROW = "select attempts, last_result from trip_dispatch where trip_id = %s"
+
+
+def test_no_submit_until_central_running(spin, pool, conn, seeded):
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    central = FakeCentral(state="SYNCING")
+    views = []
+    bridge = _bridge(pool, on_central=views.append)
+    spin(central.node, bridge)
+    assert _until(lambda: views == ["SYNCING"], 5)
+    time.sleep(2.0)  # 넘기기 확인이 여러 번 도는 동안
+    assert central.received == []
+    assert conn.execute(Q_ROW, (res.trip_ids[0],)).fetchone() == (0, None)
+    central.set_state("RUNNING")
+    t0 = time.monotonic()
+    assert _until(lambda: central.received == list(res.trip_ids), 1.0)
+    assert time.monotonic() - t0 < 1.0
+    assert views == ["SYNCING", "RUNNING"]
+
+
+def test_no_submit_without_central_state(spin, pool, conn, seeded):
+    # /central/state를 한 번도 못 받음 = LOST: SubmitTrip 서버가 보여도 보내지 않고 세지 않는다
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    central = FakeCentral(state=None)
+    bridge = _bridge(pool)
+    spin(central.node, bridge)
+    time.sleep(2.5)
+    assert central.received == []
+    assert conn.execute(Q_ROW, (res.trip_ids[0],)).fetchone() == (0, None)
+
+
+def test_state_goes_lost_when_messages_stop(spin, pool, conn, seeded):
+    central = FakeCentral()
+    views = []
+    bridge = _bridge(pool, on_central=views.append)
+    spin(central.node, bridge)
+    assert _until(lambda: views == ["RUNNING"], 5)
+    central.state = None  # 발행을 멈춤
+    assert _until(lambda: views == ["RUNNING", "LOST"], 6)
+
+
+def test_not_ready_reply_does_not_stall(spin, pool, conn, seeded):
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    central = FakeCentral(answer=lambda i, req: (False, "NOT_READY"))
+    bridge = _bridge(pool)
+    spin(central.node, bridge)
+    assert _until(lambda: len(central.received) >= 6, 12)
+    assert conn.execute(Q_ROW, (res.trip_ids[0],)).fetchone() == (0, "NOT_READY")
+    assert conn.execute(
+        "select count(*) from alert where code = 'DISPATCH_STALLED'").fetchone()[0] == 0
+
+
+def _restart_alerts(conn):
+    return conn.execute(
+        "select level, detail from alert where code = 'CENTRAL_RESTART'").fetchall()
+
+
+def test_boot_id_change_writes_one_alert(spin, pool, conn, seeded):
+    central = FakeCentral()
+    old = central.boot_id
+    views = []
+    bridge = _bridge(pool, on_central=views.append)
+    spin(central.node, bridge)
+    assert _until(lambda: views == ["RUNNING"], 5)
+    time.sleep(1.0)  # 같은 boot_id가 여러 번 와도 알림 없음(처음 본 값은 기억만)
+    assert _restart_alerts(conn) == []
+    new = uuid.uuid4().hex
+    central.set_state("CONNECTING", boot_id=new)
+    assert _until(lambda: _restart_alerts(conn), 3)
+    # LATCHED는 깊이 1이라 너무 빨리 바꾸면 가운데 값을 건너뛴다
+    # (진짜 central은 단계마다 시간이 걸림)
+    time.sleep(0.3)
+    central.set_state("SYNCING")
+    time.sleep(0.3)
+    central.set_state("RUNNING")
+    time.sleep(1.5)
+    assert _restart_alerts(conn) == [("INFO", {"old_boot_id": old, "new_boot_id": new})]
+    assert _until(lambda: views == ["RUNNING", "CONNECTING", "SYNCING", "RUNNING"], 3), views
+
+
+def test_restart_ends_rest_right_away(spin, pool, conn, seeded):
+    # 옛 central 때 5번 실패해 30초 쉬던 건도, 새 central이 RUNNING이 되면 곧 보낸다 (규칙 2)
+    res = _place(conn, seeded, [("choco_bar", 1)], "k1")
+    t = res.trip_ids[0]
+    dead = FakeCentral(serve=False)
+    bridge = _bridge(pool)
+    spin(dead.node, bridge)
+    assert _until(lambda: conn.execute(Q_ROW, (t,)).fetchone()[0] >= 5, 12)
+    dead.state = None
+    central = FakeCentral(state="RUNNING")  # 새 boot_id
+    spin(central.node)
+    assert _until(lambda: central.received == [t], 4)
+    assert _until(lambda: conn.execute(
+        "select attempts from trip_dispatch where trip_id = %s and central_acked_at is not null",
+        (t,)).fetchone() == (1,), 3)
+    assert conn.execute(
+        "select status from alert where code = 'DISPATCH_STALLED'").fetchall() == [("RESOLVED",)]

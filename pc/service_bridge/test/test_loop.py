@@ -12,7 +12,8 @@ pytest.importorskip("fleet_interfaces")
 pytest.importorskip("central")
 
 from central.central_node import CentralNode  # noqa: E402
-from fleet_interfaces.msg import OrderBoard  # noqa: E402
+from fleet_core.common.contract import to_ros_qos  # noqa: E402
+from fleet_interfaces.msg import CentralState, OrderBoard  # noqa: E402
 from rclpy.executors import MultiThreadedExecutor  # noqa: E402
 from rclpy.parameter import Parameter  # noqa: E402
 from service_bridge.ros.bridge_node import BridgeNode  # noqa: E402
@@ -41,10 +42,20 @@ def test_full_loop(pool, conn, seeded):
         boards = []
         contract = load_default_contract()
         peer.create_subscription(OrderBoard, contract.name("order_board"), boards.append, 10)
+        states = []
+        peer.create_subscription(CentralState, contract.name("central_state"),
+                                 lambda m: states.append(m.state),
+                                 to_ros_qos(contract.qos("central_state")))
         for n in nodes:
             ex.add_node(n)
         thread = threading.Thread(target=ex.spin, daemon=True)
         thread.start()
+
+        # central은 RUNNING 전에는 SubmitTrip에 NOT_READY로 답한다 (central 재시작 설계 6.1)
+        deadline = time.monotonic() + 10
+        while not (states and states[-1] == "RUNNING") and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert states and states[-1] == "RUNNING", states
 
         order_id, trip_id = insert_trip(conn, seeded["account_id"], {"mentos": 1, "mygummy": 1})
         accepted, reason = submit(peer, contract, order_id, trip_id, {"mentos": 1, "mygummy": 1})

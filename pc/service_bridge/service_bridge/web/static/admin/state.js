@@ -1,9 +1,9 @@
 // ---- 관리자 화면 상태 계산 (순수 함수: 받은 상태를 고치지 않음) ----
-import { adminStatusText, adminColumn, robotWord, productName } from "../common/words.js";
+import { adminStatusText, adminColumn, robotWord, productName, centralText, CENTRAL_TEXT } from "../common/words.js";
 
 // ---- 처음 상태 ----
 export function initialState() {
-  return { orders: {}, trips: {}, robots: [], mode: null, products: [] };
+  return { orders: {}, trips: {}, robots: [], mode: null, central: null, products: [] };
 }
 
 const byId = (list, key) => Object.fromEntries((list || []).map(x => [x[key], x]));
@@ -16,8 +16,11 @@ export function applyMessage(s, msg) {
       return {
         orders: byId(d.orders, "order_id"), trips: byId(d.trips, "trip_id"),
         robots: d.robots || [], mode: d.work_state ? d.work_state.system_mode : null,
+        central: (d.work_state && d.work_state.central) || null,
         products: (d.stock && d.stock.items) || [],
       };
+    case "work_state":  // central 상태가 바뀔 때 브리지가 다시 보냄
+      return { ...s, mode: d.system_mode || s.mode, central: d.central || null };
     case "order_changed": {
       const old = s.orders[d.order_id] || { order_id: d.order_id };
       return { ...s, orders: { ...s.orders, [d.order_id]: { ...old, status: d.status } } };
@@ -31,6 +34,13 @@ export function applyMessage(s, msg) {
     default:
       return s;
   }
+}
+
+// ---- central 표시 (모드 표시 옆). 값이 없으면 null = 숨김 ----
+export function centralBadge(s) {
+  if (!s.central) return null;
+  const tone = Object.hasOwn(CENTRAL_TEXT, s.central) ? CENTRAL_TEXT[s.central].tone : "warn";
+  return { text: centralText(s.central), tone };
 }
 
 // ---- 품목 글: "이름 ×수량" ----
