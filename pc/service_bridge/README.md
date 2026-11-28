@@ -15,6 +15,8 @@ central 쪽 `SubmitTrip` 처리는 `pc/central`에 있습니다.
 
 환경 준비(가상환경, `source` 순서, 도메인)와 명령은 [`docs/개발_규칙.md`](../../docs/개발_규칙.md)의 "주문 처리(브리지) 개발 환경"을 따릅니다. 여기에는 옮겨 적지 않습니다. 이 패키지의 실행은 `ros2 run` 대신 가상환경을 켠 터미널에서 `python -m`으로 합니다(`ros2 run`으로는 psycopg를 못 찾음, 까닭은 같은 절).
 
+브리지 · central을 띄우는 터미널마다 먼저 `tools/net/net_ds.sh`를 `source`합니다(실물 망은 `iponic_real`, 혼자 시험은 `iponic_local`). 브리지는 `python -m`으로 띄우므로 가상환경을 켠 뒤 같은 터미널에서 합니다. 운영 구성에서 브리지를 컨테이너에 넣을 때는 host 망을 씁니다([디스커버리 서버 안내](../../docs/설계/디스커버리_서버_안내.md) 4절 9항).
+
 | 하는 일 | 명령 |
 |---|---|
 | 브리지(웹 포함) | `python -m service_bridge.main --ros-args -p mode:=NORMAL` (`TEST`면 주문 503 `MAINTENANCE`) |

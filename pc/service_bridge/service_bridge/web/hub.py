@@ -92,6 +92,7 @@ class Hub:
                 pass
 
     async def _pump(self, client: Client, initial: list[dict]) -> None:
+        # TODO(IR-51): since_seq로 놓친 사건 다시 보내기는 아직 안 함. 지금은 연결마다 스냅숏만 보냄
         for m in initial:
             await client.ws.send_json(m)
         while True:

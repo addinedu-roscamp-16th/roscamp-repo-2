@@ -75,6 +75,7 @@ class CentralNode(Node):
 
     # ---- 구독 · 발행 ----
     def _on_system_mode(self, msg: SystemMode) -> None:
+        # TODO(Q-24): 모드가 다르면 SubmitTrip 거절은 아직 안 함 (IR-73). 지금은 로그만
         if msg.mode != self._mode:
             self._mode = msg.mode
             self.get_logger().info(f"system mode {msg.mode}")
