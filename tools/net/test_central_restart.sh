@@ -19,7 +19,7 @@ PGIDS=()                                # 띄운 프로세스 그룹. EXIT에서
 
 # ---- 환경: ROS -> install -> venv 순서 ----
 source /opt/ros/jazzy/setup.bash
-source /home/ane/iponic_ws/install/setup.bash
+source "${IPONIC_WS:-$HOME/iponic_ws}/install/setup.bash"
 source "$HOME/venv/iponic/bin/activate"
 
 # 실물 망 · 이전 설정이 섞이지 않게 비운다
@@ -58,7 +58,7 @@ wait_state() { # 기대값 최대횟수 -> 0이면 도달 (1초 간격)
 }
 
 # ---- DB ----
-db_scalar() { docker exec -e PGPASSWORD=ifp_test db-pg-1 psql -U postgres -d iponic_restart_test -Atc "$1" 2>/dev/null; }
+db_scalar() { timeout 10 docker exec -e PGPASSWORD=ifp_test db-pg-1 psql -U postgres -d iponic_restart_test -Atc "$1" 2>/dev/null; }
 wait_db() { # SQL(숫자 1 이상이면 통과) 최대횟수
   local n=$2 v
   while [ "$n" -gt 0 ]; do v=$(db_scalar "$1"); [ "${v:-0}" -ge 1 ] 2>/dev/null && return 0; n=$((n-1)); sleep 1; done
@@ -121,6 +121,9 @@ s3() {
   place_order       # 건 1: central 확정
   wait_db "select count(*) from trip_dispatch where central_acked_at is not null" 30 || { fail S3 "건 1 확정 안 됨"; return; }
   local boot1; boot1=$(central_boot)
+  [ -n "$boot1" ] || { fail S3 "처음 boot_id를 못 읽음"; return; }
+  local n0; n0=$(db_scalar "select count(*) from alert where code='CENTRAL_RESTART'")
+  [ "$n0" = 0 ] || { fail S3 "끄기 전에 이미 CENTRAL_RESTART가 ${n0}건"; return; }
   stop_group "$CENTRAL"; sleep 5
   place_order       # 건 2: central이 없어 미확정
   sleep 2
@@ -134,10 +137,16 @@ s3() {
   [ "$(echo "$db" | wc -w)" = 2 ] || { fail S3 "DB trip이 2건이 아님($db)"; return; }
   [ "$board" = "$db" ] || { fail S3 "주문판 순서 [$board] != DB 순서 [$db]"; return; }
   wait_db "select count(*) from alert where code='CENTRAL_RESTART'" 15 || { fail S3 "CENTRAL_RESTART 알림 없음"; return; }
+  sleep 5   # 더 쓰이는 알림이 없는지 보려고 기다린 뒤 다시 읽는다
   local n; n=$(db_scalar "select count(*) from alert where code='CENTRAL_RESTART'")
-  [ "$n" = 1 ] || { fail S3 "CENTRAL_RESTART가 $n건"; return; }
+  [ "$n" = 1 ] || { fail S3 "CENTRAL_RESTART가 재시작 뒤 $n건(1건이어야 함)"; return; }
+  # 건 2(미확정)가 새 central에 확정될 때까지 기다린 뒤 멈춤 알림과 시도 수를 본다
+  wait_db "select count(*) from trip_dispatch d join trip t using(trip_id) where d.central_acked_at is not null and t.created_at = (select max(created_at) from trip)" 40 \
+    || { fail S3 "건 2가 새 central에 확정되지 않음"; return; }
   n=$(db_scalar "select count(*) from alert where code='DISPATCH_STALLED' and status='OPEN'")
   [ "$n" = 0 ] || { fail S3 "열린 DISPATCH_STALLED가 $n건"; return; }
+  n=$(db_scalar "select max(d.attempts) from trip_dispatch d join trip t using(trip_id) where t.created_at = (select max(created_at) from trip)")
+  [ "${n:-99}" -lt 5 ] || { fail S3 "건 2 attempts=$n (5 미만이어야 함)"; return; }
   pass S3
 }
 
