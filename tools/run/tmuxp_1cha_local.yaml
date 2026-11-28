@@ -1,0 +1,35 @@
+# 1차 연동 혼자 시험(한 PC, fake_fleet)을 tmux 세션 하나로 띄운다.
+#   cd "$IPONIC_REPO" && tmuxp load -d tools/run/tmuxp_1cha_local.yaml   (-d: 띄우고 붙지 않음, 원격에서)
+#   tmux attach -t iponic-local                                         (붙기, 떼기는 Ctrl+b d)
+#   tools/run/stop_1cha.sh iponic-local                                 (끄기: Ctrl+C를 보낸 뒤 세션 닫음)
+# 필요: IPONIC_WS · IPONIC_MY_DOMAIN export, DB 컨테이너. 시험 DB 만들기(setup_db)는 데이터를 지우므로 자동으로 하지 않는다.
+# 설명: docs/1차_연동_실행_안내.html "원격 PC에서 tmux로 띄우기"
+session_name: iponic-local
+start_directory: ../..   # 저장소 뿌리 (tmuxp는 설정 파일 위치를 기준으로 봄)
+windows:
+  - window_name: bridge
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh bridge local
+          - docker compose -f design/db/compose.yaml up -d
+          - python -m service_bridge.main --ros-args -p mode:=NORMAL
+  - window_name: central
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh ros local
+          - ros2 run central central
+  - window_name: fleet
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh bridge local
+          - python -m service_bridge.tools.fake_fleet
+  - window_name: check
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh super local
+          - 'echo "확인 예: ros2 topic echo --once --no-daemon /central/state"'
+  - window_name: order
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh bridge local
+          - 'echo "주문 예: python -m service_bridge.tools.order --account <id> --items <product_id>:1   (id는 setup_db 출력)"'

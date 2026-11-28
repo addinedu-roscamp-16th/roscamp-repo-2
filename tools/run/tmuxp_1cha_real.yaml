@@ -1,0 +1,31 @@
+# 1차 연동 실물 망(도메인 6, 디스커버리 서버)에서 브리지 · central을 tmux 세션 하나로 띄운다.
+#   cd "$IPONIC_REPO" && tmuxp load -d tools/run/tmuxp_1cha_real.yaml
+#   tmux attach -t iponic-real
+#   tools/run/stop_1cha.sh iponic-real
+# fleet(관제)은 관제 담당이 자기 PC에서 띄운다(docs/관제_통합_시험_실행_안내.html). fake_fleet · board_trips_stub은 이 망에서 띄우지 않는다.
+# 필요: IPONIC_WS export, DB 컨테이너, 디스커버리 서버(0번)가 켜져 있을 것.
+# 설명: docs/1차_연동_실행_안내.html "원격 PC에서 tmux로 띄우기"
+session_name: iponic-real
+start_directory: ../..   # 저장소 뿌리 (tmuxp는 설정 파일 위치를 기준으로 봄)
+windows:
+  - window_name: bridge
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh bridge real
+          - docker compose -f design/db/compose.yaml up -d
+          - python -m service_bridge.main --ros-args -p mode:=NORMAL
+  - window_name: central
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh ros real
+          - ros2 run central central
+  - window_name: check
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh super real
+          - 'echo "확인 예: ros2 topic echo --once --no-daemon /central/state"'
+  - window_name: order
+    panes:
+      - shell_command:
+          - source tools/run/pane_env.sh bridge real
+          - 'echo "주문은 고객 화면 http://<이 PC>:8000/customer/?account=<id> 또는 python -m service_bridge.tools.order"'
