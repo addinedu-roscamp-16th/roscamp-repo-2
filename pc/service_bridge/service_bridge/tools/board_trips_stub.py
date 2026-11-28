@@ -1,5 +1,7 @@
 # ---- central 시험용 가짜 브리지: /bridge/list_board_trips에 답하고 /system/mode(TEST)를 한 번 발행 ----
 #     python -m service_bridge.tools.board_trips_stub [--trips FILE.json]
+# 주의: 진짜 브리지 · fleet과 같은 도메인에서 띄우지 말 것. central이 이 빈 목록으로 RUNNING이 되어
+#       빈 주문판을 낼 수 있고, /system/mode를 TEST로 덮어쓴다. 브리지 없이 central만 볼 때만 쓴다.
 # FILE.json: [{"trip_id": "...", "items": {"mentos": 1}, "status": "RECEIVED",
 #              "submitted_at": "2026-11-28T09:00:00+00:00"}]. 없으면 빈 목록으로 답한다.
 from __future__ import annotations

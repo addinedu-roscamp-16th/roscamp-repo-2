@@ -22,7 +22,7 @@ central 쪽 `SubmitTrip` 처리는 `pc/central`에 있습니다.
 | 하는 일 | 명령 |
 |---|---|
 | 브리지(웹 포함) | `python -m service_bridge.main --ros-args -p mode:=NORMAL` (`TEST`면 주문 503 `MAINTENANCE`) |
-| central | `ros2 run central central` (브리지와 함께, 또는 `board_trips_stub`과 함께. 목록 서비스와 `/system/mode`가 보여야 실행 중이 됨) |
+| central | `ros2 run central central` (브리지와 함께, 또는 `board_trips_stub`과 함께. 목록 서비스와 `/system/mode`가 보여야 실행 중이 됨. 주의: `board_trips_stub`은 진짜 브리지 · fleet과 같은 도메인에서 띄우지 말 것) |
 | 시험 DB 만들기 (이름이 `_test`로 끝날 때만) | `python -m service_bridge.tools.setup_db` |
 | 주문 보내기 | `python -m service_bridge.tools.order --account 1 --items 3:2,5:1 [--key <UUID>] [--url http://localhost:8000]` (202면 0으로 끝남) |
 | WS 보기 | `python -m service_bridge.tools.ws_watch --account 1` 또는 `--admin` (한 줄에 메시지 하나, JSON) |
